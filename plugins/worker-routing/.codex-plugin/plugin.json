@@ -1,0 +1,20 @@
+{
+  "name": "worker-routing",
+  "version": "0.1.0+codex.20260914175530",
+  "description": "Instruction-only routing for bounded work delegated to Codex native workers.",
+  "author": {
+    "name": "Faye"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Worker Routing",
+    "shortDescription": "Route bounded work to native workers.",
+    "longDescription": "Choose when to keep work in the main agent or hand a coherent responsibility to a Codex native worker, then continue, correct, and accept it with evidence.",
+    "developerName": "Faye",
+    "category": "Productivity",
+    "capabilities": [
+      "Instruction-only task routing"
+    ],
+    "defaultPrompt": "Route this task between the main agent and native workers."
+  }
+}

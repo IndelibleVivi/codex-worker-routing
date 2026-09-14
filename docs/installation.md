@@ -1,0 +1,55 @@
+# 安装、切换与恢复
+
+调度 plugin 与主会话上下文集成是两个独立安装面。只需要调度时安装 plugin 即可。
+
+## Plugin
+
+使用 Codex 内置 plugin-creator 将 `plugins/worker-routing` 注册到使用者自己的
+personal marketplace。保留一个 canonical source 和一个 discovery 入口；先核对
+同名目录归属，不能覆盖其他插件。
+
+更新源码后，用 plugin-creator 的 `read_marketplace_name.py` 验证 marketplace，
+再运行 `update_plugin_cachebuster.py <plugin-path>` 与正常 `codex plugin add`。
+不要热改 installed cache。安装后用新的主 session 验收 discovery。
+
+## 主 session 自动加载
+
+1. 在 Git 目录外准备 `main-session.md`，放入只属于主协调者的私人说明。保留原文
+   与恢复副本，此时先保留旧 AGENTS。文件必须是非空 UTF-8，最多 65536 bytes。
+2. 在本仓库根目录预览，然后安装：
+
+   ```bash
+   python3 integrations/main-session/install.py \
+     --instructions "$HOME/.codex/private-instructions/main-session.md"
+
+   python3 integrations/main-session/install.py \
+     --instructions "$HOME/.codex/private-instructions/main-session.md" --apply
+   ```
+
+   默认目标为当前 `CODEX_HOME`，未指定时为 `~/.codex`。安装器复制脚本到
+   `worker-routing/main_session.py`，合并一个 SessionStart handler，并将原有
+   hooks.json / 已存在的脚本备份到 `worker-routing/backups/`。它不修改 AGENTS、
+   model/provider config、其他 hook 或原生 hook trust。
+3. 在 Codex `/hooks` 中 review 并信任 **Loading main-session instructions** 的
+   exact definition。它仅在 root 的 `startup|resume|clear|compact` SessionStart
+   上读取指定文件。`additionalContextLimit: 0` 配合脚本明确的 byte 上限，保证
+   正文完整送达，避免默认阈值把长文本换成外部文件引用。
+4. 先确认新的 root 请求自动收到完整私人说明，再将对应内容从共享 AGENTS 移出。
+   共享 AGENTS 保留工程规则和 worker 边界。不要提前撤掉原有主会话输入。
+5. 从新主 session 创建 `fork_turns="none"` 的 child，核对实际请求或等价可信证据。
+   已加载旧私人 AGENTS 的主 session 不能因为磁盘更新就视为已清空。
+
+hook 在缺失、空白、非 UTF-8 或超限文件上报告错误并返回 `continue: false`。
+宿主对中止的具体处理仍需按版本验证。停用 hooks、撤销 trust 或移走文件后，
+不应继续声称主会话自动加载正常。原生接口依据：[Codex Hooks](https://learn.chatgpt.com/docs/hooks)。
+日常使用正常 review，不使用测试专用的 hook-trust bypass。
+
+## 恢复与卸载
+
+- 关闭/卸载 routing plugin 只改变后续调度；既有 child 仍需收拢。
+- 将私人说明恢复到共享 AGENTS 会恢复旧的暴露边界。先停止派工，恢复原文并确认
+  主会话正常加载，再移除本集成的 SessionStart handler。
+- 不用旧备份覆盖整个 hooks.json。只撤销命令指向 `worker-routing/main_session.py`
+  的 handler，保留安装之后其他来源的改动。
+- 私人文件与备份由使用者保管。安装器不删除它们；重复安装同一路径不重复添加
+  handler。改动 definition 后按原生流程重新 review。
