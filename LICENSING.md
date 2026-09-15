@@ -43,6 +43,9 @@ Commons legal code controls.
   links to the standard Creative Commons legal code.
 - External projects and documentation linked from this repository remain under
   their own terms; linking does not incorporate or relicense them.
+- `integrations/acpx/package-lock.json` records third-party dependency metadata.
+  Those packages remain under their own licenses and are not relicensed by the
+  repository's project-original grants.
 - No patent or trademark permission is granted beyond the express terms of the
   applicable license.
 - Repository visibility does not expand either license grant.

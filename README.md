@@ -5,16 +5,18 @@
 把一块完整工程责任交给原生 Codex worker，主 agent 保留目标、整合与交付责任。
 适合已接入多个模型、希望分配执行工作，同时保留主会话个人上下文的使用者。
 
-这是初版实现。调度由一个 instruction-only plugin 提供；可选的主会话集成使用
-原生 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、
-provider proxy 或固定 planner/tester/reviewer 流水线。
+这是初版实现。调度由一个 instruction-only plugin 提供；可选 ACP integration
+通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
+`SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
+proxy 或固定 planner/tester/reviewer 流水线。
 
 ## 架构
 
 ```mermaid
 flowchart LR
   subgraph Source["Public canonical source / 公开真源"]
-    Policy["Worker Routing plugin<br/>delegation policy"]
+    Policy["Worker Routing plugin<br/>native delegation policy"]
+    ACPSource["Optional ACP integration<br/>acp-worker + cwr-acp"]
     Adapter["Optional SessionStart integration<br/>installer + adapter"]
   end
 
@@ -22,28 +24,40 @@ flowchart LR
     Cache["Installed plugin cache<br/>derived copy"]
     Hook["Trusted SessionStart hook<br/>root-only injection"]
     Main["Main coordinating agent<br/>goal · integration · delivery"]
-    Worker["Native worker<br/>bounded responsibility"]
+    Native["Native Codex worker<br/>bounded responsibility"]
+    ACPBridge["cwr-acp + registered adapter<br/>persistent ACP session"]
+    External["External ACP worker<br/>bounded responsibility"]
   end
 
   Private["Private main-session instructions<br/>outside Git"]
+  RouteConfig["Private route config<br/>provider/model preference"]
   Shared["Shared engineering/project rules<br/>共享工程规则"]
   User["User / 用户"]
 
-  Policy -->|normal install| Cache
+  Policy -->|plugin install| Cache
+  ACPSource -->|plugin install| Cache
+  ACPSource -->|npm ci| ACPBridge
   Cache -->|routing instructions| Main
   Adapter -->|install handler| Hook
   Private -->|local read| Hook
   Hook -->|private context<br/>root only| Main
+  RouteConfig -->|named route| ACPBridge
   Shared --> Main
-  Shared --> Worker
-  Main -->|work order<br/>fork_turns=none| Worker
-  Worker -->|result + evidence| Main
+  Shared --> Native
+  Shared --> External
+  Main -->|native work order<br/>fork_turns=none| Native
+  Native -->|result + evidence| Main
+  Main -->|ACP work order| ACPBridge
+  ACPBridge -->|ACP session| External
+  External -->|result + evidence| ACPBridge
+  ACPBridge -->|receipt + excerpt| Main
   Main -->|integrated delivery| User
 ```
 
-图中区分了 public source、derived installed copy 与 Git 外的私人说明。它描述的是
-输入装配和责任流：`fork_turns="none"` 不携带主对话历史，但不会移除宿主自动共享的
-工程规则，也不构成文件访问 sandbox。
+图中区分了 public source、derived installed copy、Git 外私人说明与可选 ACP
+执行通道。它描述输入装配和责任流：`fork_turns="none"` 不携带主对话历史，但不会
+移除宿主自动共享的工程规则，也不构成文件访问 sandbox。native、ACP、provider 与
+model 的临时优先级由 operator 在 Git 外配置，仓库本身不替使用者决定。
 
 ## 日常使用
 
@@ -63,7 +77,8 @@ agent 执行。微小、接近完成或交接成本过高的工作也直接完�
 执行消耗，同时控制端到端耗时和 coordinator 返工。使用 operator 已指定、已授权且
 适合责任、较少消耗主订阅 quota 的路线；没有已知收益就不为分工本身派工。外部
 worker API 支出单独计算，不悄悄回退到更高成本路线。模型与 provider 名留在
-operator 配置里，插件不做排行榜、价格查询或评测矩阵。
+operator 配置里，插件不做排行榜、价格查询或评测矩阵。可选 ACP route 不做自动
+fallback：只有当前任务权限与 operator policy 才能决定失败后是否换路线。
 
 ## 行为场景
 
@@ -104,8 +119,19 @@ codex plugin add worker-routing@personal --json
 codex plugin list --marketplace personal --json
 ```
 
-需要分离私人说明时，再按[安装与恢复](docs/installation.md)接入启动 hook。
-该集成独立于 plugin；关闭派工 plugin 不会关闭主会话私人说明。
+需要外部 ACP worker 时，再安装可选 integration：
+
+```bash
+cd integrations/acpx
+npm ci --ignore-scripts
+npm run check
+npm run test:acpx
+```
+
+route config、worker home、adapter 与账号状态留在 Git 外；具体命令和边界见
+[ACP integration](docs/acp-integration.md)。需要分离私人说明时，再按
+[安装与恢复](docs/installation.md)接入启动 hook。该集成独立于 plugin；关闭派工
+plugin 不会关闭主会话私人说明。
 
 ## 验证
 
@@ -114,6 +140,11 @@ Python 集成仅使用标准库：
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 tests/native_context_probe.py --codex-bin "$(command -v codex)"
+
+cd integrations/acpx
+npm ci --ignore-scripts
+npm run check
+npm run test:acpx
 ```
 
 第二条是 opt-in 原生进程检查，要求 binary 提供当前 multi-agent 工具。它使用临时
@@ -121,11 +152,14 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 首次工作、同一 child 续做及完成后 interrupt。它不调用真实模型，也不能代替实际
 供应商与工程执行验收。Codex 自身可能仍尝试获取公共插件元数据，进程不保证完全离线。
 
-初始兼容性依据为 Codex `0.154.0-alpha.6.2`，调用时仍以真实 schema 为准。
-较旧的 CLI 或其他宿主未必提供相同字段。更多限制见[输入边界](docs/context.md)。
+初始 native 兼容性依据为 Codex `0.154.0-alpha.6.2`；ACP integration 固定验证
+`acpx@0.15.1`，要求 Node.js 22.13 或更高。调用时仍以真实 schema 与 adapter
+能力为准。较旧的 CLI 或其他宿主未必提供相同字段。更多限制见
+[输入边界](docs/context.md)与[ACP integration](docs/acp-integration.md)。
 
-本仓库是独立 canonical source。`plugins/worker-routing` 下的 runtime 五份说明
-（`SKILL.md` 与四份 references）以英文为 canonical text，并保留 `全权接住`、
+本仓库是独立 canonical source。`plugins/worker-routing` 下的 native runtime 五份
+说明（`SKILL.md` 与四份 references）以英文为 canonical text；`acp-worker` 是可选的
+外部 route 入口。native 说明保留 `全权接住`、
 `从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例；README、
 [行为场景](docs/behavior-scenarios.md)、安装与输入边界文档保持中文。私人说明、
 账号配置、请求与 continuity 不属于仓库。见[来源说明](PROVENANCE.md)。

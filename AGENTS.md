@@ -5,6 +5,8 @@ plugin and its optional main-session context integration.
 
 - Edit `plugins/worker-routing/` for delegation policy and role instructions.
 - Edit `integrations/main-session/` for the native SessionStart adapter.
+- Edit `integrations/acpx/` for the optional ACP transport. Keep route names,
+  provider/model priorities, account state, worker homes, and route config outside Git.
 - Keep provider IDs and personal preferences in operator-owned configuration.
 - Never place personal instructions, chats, memory, tokens, real request captures,
   machine paths, or private continuity in this repository, including fixtures.
@@ -20,6 +22,9 @@ plugin and its optional main-session context integration.
   OSI open source or change these grants without the owner's explicit choice.
 - Check `python3 -m unittest discover -s tests -p 'test_*.py'` after Python changes.
   Run the opt-in native context probe for changes to hook delivery or spawning.
+- After ACP changes, run `npm ci --ignore-scripts`, `npm run check`, and
+  `npm run test:acpx` from `integrations/acpx/`. Track `package-lock.json`, never
+  `node_modules/`, private route state, adapter profiles, or receipts.
 - Update README and installation docs for changed behavior, dependencies, paths,
   privacy boundaries, commands, and acceptance claims.
 - Commit only explicit reviewed component paths. Source, local installation,

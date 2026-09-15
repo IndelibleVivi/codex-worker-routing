@@ -8,16 +8,18 @@ already connected more than one model and want to distribute execution work whil
 keeping their main-session personal context intact.
 
 This is an early-stage implementation. Routing is provided by an instruction-only
-plugin; the optional main-session integration uses a native `SessionStart` hook to load
-local private instructions automatically. There is no additional MCP server, job
-database, provider proxy, or fixed planner/tester/reviewer pipeline.
+plugin; the optional ACP integration connects a registered external coding agent through
+`acpx/runtime`; and the optional main-session integration uses a native `SessionStart`
+hook to load local private instructions automatically. There is no additional MCP
+server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   subgraph Source["Public canonical source / 公开真源"]
-    Policy["Worker Routing plugin<br/>delegation policy"]
+    Policy["Worker Routing plugin<br/>native delegation policy"]
+    ACPSource["Optional ACP integration<br/>acp-worker + cwr-acp"]
     Adapter["Optional SessionStart integration<br/>installer + adapter"]
   end
 
@@ -25,29 +27,42 @@ flowchart LR
     Cache["Installed plugin cache<br/>derived copy"]
     Hook["Trusted SessionStart hook<br/>root-only injection"]
     Main["Main coordinating agent<br/>goal · integration · delivery"]
-    Worker["Native worker<br/>bounded responsibility"]
+    Native["Native Codex worker<br/>bounded responsibility"]
+    ACPBridge["cwr-acp + registered adapter<br/>persistent ACP session"]
+    External["External ACP worker<br/>bounded responsibility"]
   end
 
   Private["Private main-session instructions<br/>outside Git"]
+  RouteConfig["Private route config<br/>provider/model preference"]
   Shared["Shared engineering/project rules<br/>共享工程规则"]
   User["User / 用户"]
 
-  Policy -->|normal install| Cache
+  Policy -->|plugin install| Cache
+  ACPSource -->|plugin install| Cache
+  ACPSource -->|npm ci| ACPBridge
   Cache -->|routing instructions| Main
   Adapter -->|install handler| Hook
   Private -->|local read| Hook
   Hook -->|private context<br/>root only| Main
+  RouteConfig -->|named route| ACPBridge
   Shared --> Main
-  Shared --> Worker
-  Main -->|work order<br/>fork_turns=none| Worker
-  Worker -->|result + evidence| Main
+  Shared --> Native
+  Shared --> External
+  Main -->|native work order<br/>fork_turns=none| Native
+  Native -->|result + evidence| Main
+  Main -->|ACP work order| ACPBridge
+  ACPBridge -->|ACP session| External
+  External -->|result + evidence| ACPBridge
+  ACPBridge -->|receipt + excerpt| Main
   Main -->|integrated delivery| User
 ```
 
-The diagram separates public source, the derived installed copy, and private
-instructions outside Git. It shows input assembly and responsibility flow:
-`fork_turns="none"` omits the main conversation history, but it does not remove
-engineering rules attached by the host or create a file-access sandbox.
+The diagram separates public source, the derived installed copy, private instructions
+outside Git, and the optional ACP execution channel. It shows input assembly and
+responsibility flow: `fork_turns="none"` omits the main conversation history, but it does
+not remove engineering rules attached by the host or create a file-access sandbox.
+Temporary native, ACP, provider, and model priorities belong in operator configuration
+outside Git; the repository does not choose them for the user.
 
 ## Everyday Use
 
@@ -75,7 +90,9 @@ the responsibility and consumes less of the main subscription quota; do not dele
 for the sake of dividing work when no known benefit exists. External worker API spend is
 accounted separately, with no silent fallback to a higher-cost route. Model and provider
 names stay in operator configuration; the plugin keeps no leaderboards, price lookups,
-or evaluation matrices.
+or evaluation matrices. An optional ACP route performs no automatic fallback: only the
+current task authority and operator policy may decide whether to switch routes after a
+failure.
 
 ## Behavior Scenarios
 
@@ -120,7 +137,18 @@ codex plugin add worker-routing@personal --json
 codex plugin list --marketplace personal --json
 ```
 
-When private instructions need to be separated, follow
+To use an external ACP worker, install the optional integration:
+
+```bash
+cd integrations/acpx
+npm ci --ignore-scripts
+npm run check
+npm run test:acpx
+```
+
+Keep route configuration, worker homes, adapters, and account state outside Git; see the
+[ACP integration guide](docs/acp-integration.md) for commands and boundaries. When
+private instructions need to be separated, follow
 [installation and recovery](docs/installation.md) to connect the startup hook. That
 integration is independent of the plugin; turning off the routing plugin does not turn
 off main-session private instructions.
@@ -132,6 +160,11 @@ The Python integration tests use only the standard library:
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 tests/native_context_probe.py --codex-bin "$(command -v codex)"
+
+cd integrations/acpx
+npm ci --ignore-scripts
+npm run check
+npm run test:acpx
 ```
 
 The second command is an opt-in native process check and requires a binary that provides
@@ -142,13 +175,16 @@ call a real model and cannot replace acceptance with an actual provider and actu
 engineering execution. Codex itself may still try to fetch public plugin metadata, so
 the process is not guaranteed to be fully offline.
 
-The initial compatibility basis is Codex `0.154.0-alpha.6.2`; the real schema still
-governs at call time. Older CLIs or other hosts may not provide the same fields. See
-[input boundaries](docs/context.md) for more limitations.
+The initial native compatibility basis is Codex `0.154.0-alpha.6.2`. The ACP
+integration is pinned and verified against `acpx@0.15.1` and requires Node.js 22.13 or
+newer. The real schema and adapter capabilities still govern at call time. Older CLIs or
+other hosts may not provide the same fields. See [input boundaries](docs/context.md) and
+the [ACP integration guide](docs/acp-integration.md) for more limitations.
 
-This repository is the independent canonical source. The five runtime documents under
-`plugins/worker-routing` (`SKILL.md` and four references) are canonical in English and
-keep the trigger examples `全权接住`, `从头做到位`, `solo`, `亲自做`, and `别派小弟`.
+This repository is the independent canonical source. The five native runtime documents
+under `plugins/worker-routing` (`SKILL.md` and four references) are canonical in English;
+`acp-worker` is the optional external-route entry. The native documents keep the trigger
+examples `全权接住`, `从头做到位`, `solo`, `亲自做`, and `别派小弟`.
 The Chinese `README.md`, [behavior scenarios](docs/behavior-scenarios.md), and the
 installation and input-boundary documents remain in Chinese; this page is the English
 companion for public readers.
@@ -157,10 +193,12 @@ companion for public readers.
 project. Its initial routing policy was extracted by component scope from an internal
 engineering workshop, and the independent repository is now the canonical source; the
 workshop's Git history, adjacent projects, personal instructions, and working records
-were not migrated. The repository contains hand-written routing and worker instructions,
-the native SessionStart adapter, the installer, synthetic tests, and user documentation.
-The Responses test events are local protocol fixtures with no real accounts, private
-requests, or model outputs, and no part of the Codex runtime implementation was copied.
+were not migrated. The repository contains hand-written routing and worker instructions, the native
+SessionStart adapter, the installer, synthetic tests, user documentation, and an optional
+integration built against the public `acpx/runtime` API. Responses and ACP test events
+are local protocol fixtures with no real accounts, private requests, or model outputs;
+no Codex runtime or external adapter implementation was copied. `acpx` and its transitive
+dependencies retain their own third-party licenses.
 The interface references OpenAI's [Hooks](https://learn.chatgpt.com/docs/hooks) and
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) documentation
 and independent observation of the local binary. This project is not an OpenAI official

@@ -5,8 +5,9 @@
 相邻项目、个人说明和工作记录没有迁入。
 
 仓库包含手写调度/worker 说明、原生 SessionStart 适配脚本、安装器、合成测试和
-使用文档。Responses 测试事件是本机协议 fixture，没有真实账号、私人请求或模型
-输出，没有复制 Codex runtime 实现。
+使用文档，以及基于公开 `acpx/runtime` API 的可选 ACP 接入。Responses 与 ACP
+测试事件是本机协议 fixture，没有真实账号、私人请求或模型输出，没有复制 Codex
+runtime 或外部 adapter 实现。`acpx` 及其传递依赖保持各自的第三方许可。
 
 接口参考 OpenAI 的 [Hooks](https://learn.chatgpt.com/docs/hooks) 和
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档，

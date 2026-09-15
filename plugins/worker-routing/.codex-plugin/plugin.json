@@ -1,20 +1,21 @@
 {
   "name": "worker-routing",
-  "version": "0.1.0+codex.20260915051645",
-  "description": "Instruction-only routing for bounded work delegated to Codex native workers.",
+  "version": "0.1.0+codex.20260915090326",
+  "description": "Instruction-only routing for bounded work delegated to native Codex or explicitly configured ACP workers.",
   "author": {
     "name": "Faye"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Worker Routing",
-    "shortDescription": "Route bounded work to native workers.",
-    "longDescription": "Choose when to keep work in the main agent or hand a coherent responsibility to a Codex native worker, then continue, correct, and accept it with evidence.",
+    "shortDescription": "Route bounded work to native or ACP workers.",
+    "longDescription": "Choose when to keep work in the main agent or hand a coherent responsibility to a native Codex worker or an explicitly configured external ACP route, then continue, correct, and accept it with evidence.",
     "developerName": "Faye",
     "category": "Productivity",
     "capabilities": [
-      "Instruction-only task routing"
+      "Instruction-only task routing",
+      "Optional external ACP worker routing"
     ],
-    "defaultPrompt": "Route this task between the main agent and native workers."
+    "defaultPrompt": "Route this task between the main agent and configured workers."
   }
 }

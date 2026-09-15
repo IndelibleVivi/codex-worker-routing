@@ -1,0 +1,17 @@
+{
+  "schema": "cwr.acp.config/1",
+  "stateDir": "/Users/operator/.local/state/cwr-acp",
+  "routes": {
+    "kimi-worker": {
+      "enabled": false,
+      "argv": ["/absolute/path/to/kimi", "acp"],
+      "workerHome": "/Users/operator/.local/share/cwr-acp/kimi-worker-home",
+      "workspaces": ["/Users/operator/Projects/example-worktree"],
+      "passEnv": [],
+      "contextRevision": "clean-engineering-profile-v1",
+      "maxPermissions": "read",
+      "sessionOptions": {},
+      "timeoutMs": 900000
+    }
+  }
+}
