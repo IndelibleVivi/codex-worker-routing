@@ -1,31 +1,62 @@
-# 工单与返修
+# Work orders and rework
 
-工单应是 worker 能独立开始工作的最小充分上下文。沿用当前 repo、plan 或 task record 的结构；不要为了本 skill 新建表格、tracker 或固定报告制式。
+A work order should be the smallest sufficient context a worker needs to start
+independently. Follow the structure of the current repository, plan, or task record; do
+not create a table, tracker, or fixed report format for this skill.
 
-## 初次交接
+## First handoff
 
-让 worker 明确以下事实即可：
+Making the worker clear on the following facts is enough:
 
-- 要交付的 observable outcome，以及必须保持的行为；
-- 已确认事实、未证实假设、canonical cwd/入口/符号/测试；
-- 它拥有的完整责任、允许改动范围、dirty state 与共享写面；
-- 能区分失败与成功的验证，以及返回时要给出的实际证据；
-- 所有权限边界和 stop conditions。
+- the observable outcome to deliver, and the behavior that must stay unchanged;
+- confirmed facts, unverified assumptions, and the canonical cwd, entry points, symbols, and tests;
+- the complete responsibility it owns, its allowed change scope, the dirty state, and the shared write surface;
+- the verification that can distinguish failure from success, and the actual evidence to return;
+- all permission boundaries and stop conditions.
 
-工单必须直接写明 worker-role 语义：这是临时执行责任；worker 不调用 Oracle、不再派生 agent、不改路由或模型配置；保护他人未提交改动；默认不 commit、push、merge、deploy、publish、执行账号/生产操作或维护私人 continuity，除非主协调 agent 在现有授权内对某项动作给出明确增量。只提供 reference 链接而没有确保 worker 能读取，不算角色语义已经到达。
+The work order must state the worker-role semantics directly: this is a temporary
+execution responsibility; the worker does not call Oracle and does not spawn derived
+agents; it does not change routing or model configuration; it protects other people's
+uncommitted changes; and by default it does not commit, push, merge, deploy, publish,
+perform account or production operations, or maintain private continuity, unless the
+main coordinating agent gives an explicit increment for one action within existing
+authority. Providing only a reference link without ensuring the worker can read it does
+not count as delivering the role semantics.
 
-入口可以只是经过核实的线索，worker 可自行完成范围内调查和普通实现决定。产品语义未定时，只交出明确的只读调查，不能让 worker 默默替用户决定规则。
+An entry point may be just a verified clue; the worker can complete in-scope investigation
+and ordinary implementation decisions by itself. While product semantics are open, hand
+over a clearly read-only investigation only, and do not let the worker silently decide the
+rules for the user.
 
-不要把完整私人 AGENTS、聊天、记忆、账号数据或无关日志复制进工单。短工单和 `fork_turns='none'` 都不证明宿主没有自动附加 instructions、tools、skills 或其他上下文。第三方 provider 的传输范围必须另有真实授权与宿主证据。
+Do not copy a full private AGENTS file, chats, memory, account data, or unrelated logs
+into a work order. A short work order and `fork_turns='none'` both fail to prove that the
+host attached no instructions, tools, skills, or other context. A third-party provider's
+transfer scope needs its own real authorization and host evidence.
 
-## 返回与接受
+## Return and acceptance
 
-worker 用简短事实说明完成、部分完成或阻塞，指出相关文件/符号、实际检查及结果、检查与最后相关修改的先后关系，以及未验证项和需要协调判断的问题。共享 workspace 可直接读取 diff 时不要复制整段补丁；大日志留在原位置，只给关键错误和可访问指针。
+The worker states in short facts whether the work is complete, partial, or blocked, and
+points to the relevant files or symbols, the checks actually run and their results, the
+order of those checks against the last relevant modification, what remains unverified,
+and the questions that need coordination. When the shared workspace lets the coordinator
+read the diff directly, do not copy the whole patch; keep large logs where they are and
+give the key error and an accessible pointer.
 
-返回是证据索引，不是自动验收。主协调 agent 检查最终状态及证据能否拒绝相关错误。
+A return is an evidence index, not automatic acceptance. The main coordinating agent
+checks the final state and whether the evidence can reject the relevant failure.
 
-## 同一 worker 续做
+## Continuing the same worker
 
-只读转实施、新约束、缺证据和局部返修都应向原 worker 给增量。说明保留哪些已验收结果、实际失败输入/表现、修正标准、权限是否变化，以及要补的检查；没有变化的部分不要从头探索。
+A read-only-to-implementation transition, a new constraint, missing evidence, and local
+rework should all send an increment to the original worker. State which accepted results
+are preserved, the actual failing input or behavior, the correction standard, whether
+permissions changed, and the checks to add; do not re-explore the unchanged parts from
+scratch.
 
-只有原 child 无法恢复、持续因上下文混乱而误判，或执行能力确实不匹配时才换 worker。先确认旧 writer 已停止，再把最小可恢复摘要和现有产物交给新执行者。
+After context loss or compaction, recover the responsibility, the child identifier, and
+the existing evidence from the task record and native state before deciding whether to
+create anything new; missing memory does not mean the earlier worker is gone, and you do
+not add a new tracker. Switch workers only when the original child cannot recover, keeps
+misjudging because of tangled context, or genuinely lacks the execution capability.
+Confirm the old writer has stopped, then hand the smallest recoverable summary and the
+existing artifacts to the new executor.

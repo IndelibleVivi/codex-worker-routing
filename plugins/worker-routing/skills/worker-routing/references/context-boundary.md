@@ -1,12 +1,22 @@
-# 主会话与 worker 输入
+# Main session and worker input
 
-新工单使用 `fork_turns="none"`，仍需核对自动共享 AGENTS 与其他宿主注入。
-已加载私人 AGENTS 的旧主会话不能因为磁盘更新就视为已清空。
+A new work order uses `fork_turns="none"`, and it still has to be checked against the
+automatically shared AGENTS and other host injection. An old main session that already
+loaded private AGENTS is not cleared just because the file changed on disk.
 
-使用独立主会话 SessionStart 集成时，私人说明在 root 首次模型请求前自动注入，
-shared AGENTS 只保留工程规则。该集成独立于 plugin；普通派工不自行安装、修改、
-移除或绕过其 hook trust。
+When the separate main-session SessionStart integration is in use, private instructions
+are injected before the root's first model request, and the shared AGENTS keeps only
+engineering rules. That integration is independent of the plugin; ordinary delegation
+does not install, modify, remove, or bypass its hook trust on its own.
 
-主 agent 不把私人说明、聊天或 recall 复制进工单；worker 不主动读取私人说明、
-关系记忆和私人 continuity。行为约定不是文件访问 sandbox。输入证据支持排除
-结论，角色自述、安装状态和模型菜单不能代替它。
+The main agent does not copy private instructions, chats, or recall into a work order;
+the worker does not proactively read private instructions, relational memory, or private
+continuity. A behavioral agreement is not a file-access sandbox. Input evidence supports
+an exclusion conclusion; a role self-description, an installation state, and a model menu
+cannot replace it.
+
+Reuse valid route and input-boundary evidence while the relevant host, configuration, and
+injection conditions are unchanged, and refresh only the affected part when a condition
+changes or evidence contradicts the earlier conclusion. Routine delegation does not run
+native probes, search model catalogs, run health checks, or request private transfers to
+re-establish a boundary that is already evidenced.

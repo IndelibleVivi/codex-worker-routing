@@ -1,24 +1,42 @@
-# 当前宿主的 native collaboration tools
+# The current host's native collaboration tools
 
-本页记录打包时宿主的当前 schema，只在实际使用这些工具时读取。它不是跨宿主或未来版本保证；调用前以当前可见 schema 和返回状态为准。工具缺失时保持 solo 或使用宿主明确提供的等价能力，不要伪造 adapter、MCP、hook 或 job system。
+This page records the host's schema at packaging time and is read only when these tools
+are actually used. It is not a cross-host or future-version guarantee; before calling,
+follow the schema and return states currently visible. When a tool is missing, stay solo
+or use the equivalent capability the host explicitly provides; do not fabricate an
+adapter, MCP, hook, or job system.
 
-## 启动与路由
+## Spawning and routing
 
-`collaboration.spawn_agent` 当前支持 `task_name`、`agent_type`、`model`、`reasoning_effort`、`fork_turns`。新独立工单默认显式设 `fork_turns: "none"`，并在 message 中写全最小充分工单与 worker-role 语义。不要声称该值隔离 global/project instructions、skills、tools 或 provider 请求里自动附加的私密 instructions。
+`collaboration.spawn_agent` currently supports `task_name`, `agent_type`, `model`,
+`reasoning_effort`, and `fork_turns`. A new independent work order explicitly sets
+`fork_turns: "none"` by default and writes the full smallest-sufficient work order and the
+worker-role semantics in the message. Do not claim that this value isolates global or
+project instructions, skills, tools, or private instructions attached automatically in
+the provider request.
 
-只在宿主实时库存和当前授权支持时选择 `agent_type`、`model` 或 `reasoning_effort`；不把具体模型名固化进本 skill。任务名应能区分责任，但不要为每个机械步骤新开 child。
+Choose `agent_type`, `model`, or `reasoning_effort` only when the host's live inventory
+and the current authorization support it; do not freeze specific model names into this
+skill. A task name should distinguish the responsibility, but do not open a new child for
+every mechanical step.
 
-Codex app 的 `create_thread` 创建用户可见的新 task，不用于当前任务的内部委派。
+The Codex app's `create_thread` creates a new user-visible task and is not used for
+internal delegation inside the current task.
 
-## 等待与增量
+## Waiting and increments
 
-- `list_agents` 查看 child 的实际状态；不要从旧记录猜测它仍在运行。
-- `wait_agent` 等待 mailbox 更新。健康运行中的 timeout、静默或 active yield 不是失败，也不是 interrupt 条件；等待不等于取消。
-- 对仍活跃的 worker，用 `send_message` 发送影响当前工作的约束或证据增量。
-- 对 idle worker 的续做或返修，用 `followup_task` 触发下一 turn，保留同一 child 的上下文与责任。
+- `list_agents` shows the child's actual state; do not guess from an old record that it is still running.
+- `wait_agent` waits for a mailbox update. Prefer the host's blocking wait and completion messages: a timeout, silence, or active yield in a healthy run is not a failure and not an interrupt condition; waiting is not cancellation. Query the worker only to recover it, to resolve an ambiguous state, or when intervention is needed, and do not short-poll a healthy worker.
+- For a worker that is still active, use `send_message` to send a constraint or evidence increment that affects the current work.
+- For continuation or rework of an idle worker, use `followup_task` to trigger the next turn, keeping the same child's context and responsibility.
 
-## 当前宿主的收拢规则
+## This host's wrap-up rules
 
-在这个宿主版本里，child 到达 `FINAL_ANSWER`、`task_complete`、`idle` 或 `errored` 后，先调用 `interrupt_agent` 收拢其状态；之后如需续做或返修，可对同一 child 调用 `followup_task`。不要因为健康等待的 timeout、静默或耗时而 interrupt 正在工作的 child。
+In this host version, once a child reaches `FINAL_ANSWER`, `task_complete`, `idle`, or
+`errored`, call `interrupt_agent` first to wrap up its state; afterwards, for continuation
+or rework, call `followup_task` on the same child. Do not interrupt a working child
+because a healthy wait timed out, went silent, or simply took time.
 
-工具返回含糊时先用 `list_agents` 核实已有 child，避免复制同一责任。接管或换 worker 前也要确认旧 worker 已停止写入。
+When a tool return is ambiguous, use `list_agents` to verify the existing child first, so
+you do not duplicate the same responsibility. Before taking over or switching workers,
+also confirm the old worker has stopped writing.

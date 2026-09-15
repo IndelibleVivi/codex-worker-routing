@@ -1,6 +1,6 @@
 {
   "name": "worker-routing",
-  "version": "0.1.0+codex.20260914175530",
+  "version": "0.1.0+codex.20260915051645",
   "description": "Instruction-only routing for bounded work delegated to Codex native workers.",
   "author": {
     "name": "Faye"

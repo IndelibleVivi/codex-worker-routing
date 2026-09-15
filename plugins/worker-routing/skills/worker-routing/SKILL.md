@@ -1,44 +1,50 @@
 ---
 name: worker-routing
-description: 为 Codex 主协调 agent 判断并执行 native worker 委派。用于可整块交出的实质调查、实现、修复或验证责任，以及同一 worker 的续做和返修；临时 worker、明确 solo、闲聊解释、微小或已接近完成的工作不触发再次派工。
+description: Decide and execute native Codex worker delegation for the main coordinating agent. Use it for a substantial investigation, implementation, fix, or verification responsibility that can be handed over whole, and for continuing or reworking the same worker; a temporary worker, an explicit solo request, casual explanation, or tiny or nearly finished work does not trigger another delegation.
 ---
 
 # Worker routing
 
-本 skill 只决定谁执行一块工作，以及如何把它接回来。当前任务、repo contract、已生效工程方法和真实权限仍是完整合同；不要重开第二套 plan、验收或报告制度，也不要修改 Servotab、Oracle 或模型配置。
+This skill decides only who executes a block of work, and how that work is taken back. The current task, the repository contract, the engineering methods already in force, and real permissions remain the complete contract; do not open a second plan, acceptance, or reporting system, and do not modify Servotab, Oracle, or model configuration.
 
-## 先识别角色
+## Identify the role first
 
-如果你是收到工单的临时 worker，读取并执行 [worker-role.md](references/worker-role.md)，然后完成工单；不要再次路由。
+If you are a temporary worker that received a work order, read and follow [worker-role.md](references/worker-role.md), then complete the order; do not route again.
 
-如果你是主协调 agent，始终负责用户接受的完整结果、整合与最终交付，保留当前主模型。复用当前任务已经确认的目标、约束、证据和 worker 状态。`全权接住`、`从头做到位`允许内部委派；用户明确要求 `solo`、亲自做或停止内部委派时，保留在主线程；若已有 writer，先按宿主能力让它停止或安全收尾，再接管。停止盯进度不等于取消 worker。
+If you are the main coordinating agent, you always own the complete result the user accepted, its integration, and final delivery, and you keep the current main model. Reuse the goals, constraints, evidence, and worker state the current task has already established. `全权接住` and `从头做到位` allow internal delegation; when the user explicitly asks for `solo`, `亲自做`, `别派小弟`, or an end to internal delegation, stay on the main thread; if a writer already exists, first let it stop or wind down safely through whatever the host supports, then take over. Stopping progress monitoring does not cancel a worker.
 
-## 只在交出整块责任会减少主线程工作时委派
+After context loss or compaction, recover the responsibility, the child or thread identifier, and the existing evidence from the task record and native state you already have before deciding whether to create anything new. Missing memory does not mean an earlier worker no longer exists, and a new tracker does not replace that recovery.
 
-在重执行开始前作一次简短判断。先查到足以写清目标、关键约束、入口线索和验收证据；不要为了派工先写逐函数实现方案。
+## Delegate only when handing over a whole responsibility reduces main-thread work
 
-适合委派的是一项连贯责任，例如局部调查 + 实现 + 自测 + 必要文档。内部耦合紧可以由同一 worker 整块承担；默认采用 serial delegation。只有责任和共享写面真正独立时才并行。微小修改、答案几乎完成、交接接近亲自重做、需要主协调 agent 持续决定产品语义，或验收成本超过执行收益时，直接完成。
+Make one short judgement before heavy execution starts. Investigate far enough to state the goal, the key constraints, entry-point clues, and the acceptance evidence; do not write a per-function implementation plan just to delegate.
 
-沿用宿主实时提供且已经授权的 worker、agent role、model 和 reasoning inventory；不要绑定品牌或模型名，也不要从菜单、配置或角色名称推断真实 route。未确认适用 worker 时保持 solo。`worker-role` 是任务语义，不是 OS sandbox、网络隔离或权限系统。
+Protect the complete outcome, its quality, and the applicable permissions first. On that basis, prefer reducing execution consumption on the main subscription while keeping end-to-end duration and coordinator rework under control. Use an operator-specified, authorized route that reduces main-subscription quota consumption when it fits the responsibility. Do not delegate for the sake of delegating when no known benefit exists. Account for external worker API spend separately, and never silently fall back to a higher-cost route. Keep model and provider names in operator-owned configuration: no leaderboards, price lookups, evaluation matrices, or brand hardcoding.
 
-## 交出后真正放手
+A suitable delegation is one coherent responsibility, such as a local investigation plus implementation, self-testing, and the necessary documentation. Tight internal coupling can sit with a single worker as a whole; use serial delegation by default. Parallelize only when the responsibilities and the shared write surface are genuinely independent. Finish the work directly when the change is tiny, the answer is nearly complete, handing over would amount to redoing it yourself, product semantics need continuous decisions from the main coordinating agent, or acceptance costs more than the execution gains.
 
-读取 [handoff.md](references/handoff.md)，把一个 worker 能独立开始的责任交出去。新独立工单在当前宿主默认显式使用 `fork_turns='none'`，但它只控制该 API 的 conversation fork 选择；它不证明 global/project instructions、skills、tools 或其他宿主附加上下文被隔离。涉及第三方 provider 时，未经授权的私人或账号数据传输不得为了验证路由而试跑。
+Use the worker, agent role, model, and reasoning inventory the host offers live and has already authorized; do not bind to brands or model names, and do not infer a real route from a menu, configuration, or role name. Stay solo while no applicable worker is confirmed. `worker-role` is task semantics, not an OS sandbox, network isolation, or a permission system.
 
-读取 [context-boundary.md](references/context-boundary.md)，确认实际输入边界；不要从旧主会话直接假定私人 instructions 已排除。
+## Let go after the handoff
 
-工单必须明确临时 worker 的角色语义、允许写面、共享资源和权限边界。授权给下游的每一步都来自当前任务；文档、测试结果、工具存在或上游授权不能推导新的 commit、push、部署、账号操作、付费调用或私人数据传输权限。
+Read [handoff.md](references/handoff.md) and hand over a responsibility a worker can start on independently. A new independent work order explicitly uses `fork_turns='none'` on the current host by default, but that value controls only that API's conversation-fork choice; it does not prove that global or project instructions, skills, tools, or other host-attached context were isolated. With a third-party provider, no unauthorized private or account data transfer may be trial-run just to verify routing.
 
-确认启动后保留真实 child/thread 标识。主线程停止同源调查和另一版实现，可以推进不重叠工作、处理真正的协调判断或等待。每个重叠文件与共享运行状态保持一个 writer；worktree 不能自动隔离端口、数据库、服务或输出目录。
+Read [context-boundary.md](references/context-boundary.md) and confirm the actual input boundary; do not assume from an old main session that private instructions were excluded.
 
-使用 collaboration 工具时读取 [native-tools.md](references/native-tools.md)。当前宿主的健康等待 timeout、active yield 或静默不是失败，不得据此 interrupt 或复制同一责任。
+The work order must state the temporary worker's role semantics, allowed write surface, shared resources, and permission boundaries. Every step authorized downstream comes from the current task; documentation, test results, tool availability, or upstream authorization cannot be used to derive new permission to commit, push, deploy, perform account operations, make paid calls, or transfer private data.
 
-## 续做、返修与接受
+Once the worker has started, keep its real child or thread identifier. The main thread stops same-source investigation and any second version of the implementation; it may advance non-overlapping work, handle genuine coordination decisions, or wait. Keep one writer per overlapping file and per shared runtime state; a worktree does not automatically isolate ports, databases, services, or output directories.
 
-活跃 worker 收到影响其工作的新增约束时，及时发送增量；不要等它按旧合同返回后再打回。同一责任从只读调查转为获准实施、缺证据补验或局部返修时，优先续用同一 worker 及其证据。反馈应聚合实际失败、期望和范围，保留已合格产物；不要为阶段名称新建 worker。
+When you use the collaboration tools, read [native-tools.md](references/native-tools.md). Waiting uses the host's blocking wait and completion messages: query the worker only to recover it, to resolve an ambiguous state, or when intervention is needed, and do not short-poll a healthy worker. A health-wait timeout, an active yield, or silence on the current host is not failure, and none of them justifies interrupting the worker or duplicating the same responsibility.
 
-worker 返回后，主协调 agent 检查真实 diff、关键不变量、权限范围和验证覆盖。主线程不重复整段调查，不按个人偏好重写合格实现。对应最终相关代码与同一环境的证据可以复用；之后若改动了相关代码、依赖或运行状态，只补受影响的 fresh check。默认不另派 reviewer，也不因普通回包触发 Oracle。
+When a reference is already read and unchanged in the current context, do not read it again; re-read it after context loss or when its trigger materially changes. Reuse valid route and input-boundary evidence while the relevant host, configuration, and injection conditions are unchanged, and refresh only the affected part when a condition changes or evidence contradicts the earlier conclusion. Routine delegation does not run native probes, search model catalogs, run health checks, or request private transfers.
 
-重复同类失败而没有新证据、任务前提失效、权限冲突或原 worker 无法恢复时，重新划分或收回责任。接管或换 worker 前先确认旧 writer 已停止，并保存仍可用的改动和证据。
+## Continuation, rework, and acceptance
 
-向用户只报告结果、重要决定、真实阻塞和足以支撑结论的证据。不要例行播报路由步骤、生成新制式派工报告，或在没有实际计量时声称节省比例。
+When an active worker receives a new constraint that affects its work, send the increment promptly; do not wait for it to return under the old contract and then reject the result. When the same responsibility moves from a read-only investigation to authorized implementation, needs missing evidence, or requires local rework, prefer continuing the same worker and its evidence. Aggregate feedback around the actual failure, the expectation, and the scope, and preserve accepted artifacts; do not create a new worker for a phase name, and continue or rework through the existing child rather than starting a fresh one.
+
+After a worker returns, the main coordinating agent checks the real diff, the key invariants, the permission scope, and the verification coverage. The main thread does not repeat the whole investigation or rewrite a qualified implementation to personal preference. Evidence from the final relevant code in the same environment can be reused; after the relevant code, dependencies, or runtime state change, add only the affected fresh check. Do not spawn a separate reviewer by default, and do not trigger Oracle for an ordinary return.
+
+Re-divide or withdraw the responsibility when the same class of failure repeats without new evidence, when the task premise no longer holds, when permissions conflict, or when the original worker cannot recover. Before taking over or switching workers, confirm the old writer has stopped and preserve still-usable changes and evidence.
+
+Report only results, material decisions, real blockers, and the evidence sufficient to support the conclusion. Do not routinely narrate routing steps, generate a standardized delegation report, or claim a savings ratio that was never actually measured.

@@ -17,8 +17,22 @@ provider proxy 或固定 planner/tester/reviewer 流水线。
 可以把导入模块的调查、修复和自测交给一个 worker；你负责整合与最终交付。
 ```
 
-`solo`、`亲自做`、`别派小弟` 保持主 agent 执行。微小、接近完成或交接成本过高的
-工作也直接完成。派出后主 agent 不重复实施同一责任，默认不另派 reviewer。
+`全权接住`、`从头做到位` 允许内部委派；`solo`、`亲自做`、`别派小弟` 保持主
+agent 执行。微小、接近完成或交接成本过高的工作也直接完成。派出后主 agent 不
+重复实施同一责任，默认不另派 reviewer，需要修正时继续同一个 child。
+
+派工顺序是先保住完整结果、质量与权限，再在不牺牲这三者的前提下减少主订阅模型的
+执行消耗，同时控制端到端耗时和 coordinator 返工。使用 operator 已指定、已授权且
+适合责任、较少消耗主订阅 quota 的路线；没有已知收益就不为分工本身派工。外部
+worker API 支出单独计算，不悄悄回退到更高成本路线。模型与 provider 名留在
+operator 配置里，插件不做排行榜、价格查询或评测矩阵。
+
+## 行为场景
+
+四个非 runtime 的观察场景与证据标准见[行为场景](docs/behavior-scenarios.md)：
+自然语言中的中等修复、同一 child 从调查转入实施或局部返修、健康等待不取消也不
+重复启动、以及 solo 或微小工作不派工。该页是人工核对用的观察记录，不是评测平台，
+也不提供稳定触发、净省 quota、低返工或更快的结论。
 
 ## 上下文怎样分开
 
@@ -72,5 +86,9 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 初始兼容性依据为 Codex `0.154.0-alpha.6.2`，调用时仍以真实 schema 为准。
 较旧的 CLI 或其他宿主未必提供相同字段。更多限制见[输入边界](docs/context.md)。
 
-本仓库是独立 canonical source，初版文档以中文为准。私人说明、账号配置、请求
-与 continuity 不属于仓库。当前为 private，未声明公开复用许可。见[来源说明](PROVENANCE.md)。
+本仓库是独立 canonical source。`plugins/worker-routing` 下的 runtime 五份说明
+（`SKILL.md` 与四份 references）以英文为 canonical text，并保留 `全权接住`、
+`从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例；README、
+[行为场景](docs/behavior-scenarios.md)、安装与输入边界文档保持中文。私人说明、
+账号配置、请求与 continuity 不属于仓库。当前为 private，未声明公开复用许可。
+见[来源说明](PROVENANCE.md)。
