@@ -12,4 +12,6 @@
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档，
 并用本机 binary 独立观察。本项目不是 OpenAI 官方产品或其维护的 fork。
 
-当前未声明公开复用许可；仓库可见性与许可授权是不同事项。
+软件与功能材料采用 `SUL-1.0`，文档采用 `CC BY-NC-SA 4.0`；具体文件范围、
+外部链接与许可边界见 [LICENSING.md](LICENSING.md)。这是 source-available 项目，
+不是 OSI open source；仓库可见性不扩大许可授权。

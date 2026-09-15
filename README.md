@@ -1,11 +1,49 @@
 # Codex Worker Routing
 
+[English](README.en.md) | 中文
+
 把一块完整工程责任交给原生 Codex worker，主 agent 保留目标、整合与交付责任。
 适合已接入多个模型、希望分配执行工作，同时保留主会话个人上下文的使用者。
 
 这是初版实现。调度由一个 instruction-only plugin 提供；可选的主会话集成使用
 原生 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、
 provider proxy 或固定 planner/tester/reviewer 流水线。
+
+## 架构
+
+```mermaid
+flowchart LR
+  subgraph Source["Public canonical source / 公开真源"]
+    Policy["Worker Routing plugin<br/>delegation policy"]
+    Adapter["Optional SessionStart integration<br/>installer + adapter"]
+  end
+
+  subgraph Local["Local Codex runtime / 本机运行时"]
+    Cache["Installed plugin cache<br/>derived copy"]
+    Hook["Trusted SessionStart hook<br/>root-only injection"]
+    Main["Main coordinating agent<br/>goal · integration · delivery"]
+    Worker["Native worker<br/>bounded responsibility"]
+  end
+
+  Private["Private main-session instructions<br/>outside Git"]
+  Shared["Shared engineering/project rules<br/>共享工程规则"]
+  User["User / 用户"]
+
+  Policy -->|normal install| Cache
+  Cache -->|routing instructions| Main
+  Adapter -->|install handler| Hook
+  Private -->|local read| Hook
+  Hook -->|private context<br/>root only| Main
+  Shared --> Main
+  Shared --> Worker
+  Main -->|work order<br/>fork_turns=none| Worker
+  Worker -->|result + evidence| Main
+  Main -->|integrated delivery| User
+```
+
+图中区分了 public source、derived installed copy 与 Git 外的私人说明。它描述的是
+输入装配和责任流：`fork_turns="none"` 不携带主对话历史，但不会移除宿主自动共享的
+工程规则，也不构成文件访问 sandbox。
 
 ## 日常使用
 
@@ -90,5 +128,12 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 （`SKILL.md` 与四份 references）以英文为 canonical text，并保留 `全权接住`、
 `从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例；README、
 [行为场景](docs/behavior-scenarios.md)、安装与输入边界文档保持中文。私人说明、
-账号配置、请求与 continuity 不属于仓库。当前为 private，未声明公开复用许可。
-见[来源说明](PROVENANCE.md)。
+账号配置、请求与 continuity 不属于仓库。见[来源说明](PROVENANCE.md)。
+
+## 许可
+
+软件与功能材料采用 [`SUL-1.0`](LICENSE)：允许个人、非商业和企业内部使用；
+对外分发或提供必须免费且非商业。文档采用
+[`CC BY-NC-SA 4.0`](LICENSE-DOCUMENTATION.md)：允许署名后的非商业分享与改编，
+公开改编须保持相同许可。本项目是 source-available，**不是 OSI open source**。
+具体文件范围以 [`LICENSING.md`](LICENSING.md) 为准。
