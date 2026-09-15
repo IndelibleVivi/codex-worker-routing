@@ -118,9 +118,13 @@ CLAUDE_CONFIG_DIR/TMPDIR，只额外传入 passEnv 明示的变量。宿主 shel
 HOME 分离不限制绝对路径访问、Keychain 或原 CLI 自己的原生工具。
 项目 AGENTS、agent 内置配置与本地工具也必须按真实 profile 验收。
 
-read 模式使用 acpx 的 approve-reads + 非交互 deny。full 批准全部 ACP 请求，可包括网络和
-命令执行。它们只约束实际交给 acpx 决策的请求；不宣称 OS sandbox、进程级网络隔离，
-也不声称每个 adapter 的所有原生工具都会走同一权限机制。
+`--permissions` 选择的是 cwr-acp 对 ACP permission request 的应答策略，不是文件系统边界：
+`read` 使用 approve-reads + 非交互 deny，`full` 使用 approve-all（可含执行/网络请求）。
+两者都只约束真正到达 adapter 权限流程的请求。adapter 可能暴露不产生 ACP permission request
+的操作，实际使用中已观察到 `read` 下的外部 worker 直接改写文件而未被拒绝；所以 `read` 的
+“不得改动文件”只是工单授权措辞，不是强制。要获得确定性的文件系统只读行为，必须在本机
+独立配置 host/OS sandbox 或使用一次性的只读环境；cwr-acp 不提供该边界，也不宣称进程级
+网络隔离，也不声称每个 adapter 的所有原生工具都会走同一权限机制。
 
 续做核对 route fingerprint、cwd、保存的 acpxRecordId/acpSessionId、argv 和 persistent handle。
 指纹包含可执行入口 hash、参数、profile revision、workspace/权限配置与明确的 model 选择。
@@ -156,18 +160,29 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 
 ## 验收门
 
-本交付：60 项本地测试通过。其范围是接入层逻辑、真实文件系统检查、私有环境子进程测试，
-以及合成 ACP server 的直接 stdio 自检；其中 runtime 行为使用合约替身。
-实际 acpx 包联调的 3 项在加载依赖时均被 `ACPX_NOT_INSTALLED` 阻塞，协议流程未执行。
+本交付在 canonical macOS 主机上复核通过：`npm ci --ignore-scripts` 从 registry 正常完成
+（27 个包，0 vulnerabilities）；`python3 -m unittest discover -s tests -p 'test_*.py'`
+25 项全过，含 `test_socket_managed_output_fails_closed`；`npm run test:acpx` 的 3 项真实
+acpx 联调全过，覆盖重启、同会话续做、私有环境隔离与 ACP 权限握手，夹具仍是无模型、
+无账号、无网络的合成进程；并发 workspace 回归以隔离方式重复 5 次，5 次均通过。
+`npm run check` 的范围是接入层逻辑、真实文件系统检查、私有环境子进程测试，以及合成 ACP
+server 的直接 stdio 自检（runtime 行为使用合约替身）；新增 work-order 权限措辞测试后为
+67 项全过。这些测试只覆盖生成的措辞与 option 映射，
+不构成文件系统强制行为的证据。
 
-本机应补：安装并锁定依赖 → `npm run test:acpx` 通过 → 一个干净、已授权的真实 CLI
-完成只读调查、原 session 实施与返修 → 验证真实输入没有主会话私人 marker → 检查实际
-provider/model 与权限边界 → 检查 native 原路径仍能正常使用。
-没有本机 native binary，现有 Python/native probe 也未在本交付环境重新运行。
-新增文件与原生代码零重写只提供源码边界证据，不能冒充实机回归。
+本机 dogfood 使用一个已登记外部 route 完成了当前仓库的 review 修复，并在同一 ACP session
+续做证据校正与权限措辞返修；各轮 cleanup 均 confirmed，私有主会话 marker 检索为 0。
+其中一次 `read` continuation 仍直接改写了文档，这项反例正是上文不能把 permission-response
+policy 当成文件系统边界的实证。opt-in Python/native probe 未在本交付中重跑；原生源码未改，
+现有 Python regression 通过，但这些事实不冒充新的 native-process 验收。
 
-不要在这些门通过前将该 route 设置为日常委派自动候选。明确选用一个已验收外部 route
-即可；常规 DSF/native 工作继续走现有通道。
+CI：仓库新增 `.github/workflows/ci.yml`，Ubuntu 上跑 Python 原生测试，Ubuntu 与 macOS 上跑
+`npm ci --ignore-scripts`、ACP 检查与真实合成 acpx 联调，无 secrets、无 live provider 调用。
+本地结果不证明任一 GitHub run 已绿；以目标 commit 或 PR 的当前 checks 为准。
+
+纳入日常委派前，operator 仍需按 exact adapter/profile 验证输入、provider/model 与权限边界；
+需要强制只读时必须另配 host/OS sandbox 或一次性只读环境。一个 route 的验收不能外推到
+其他 adapter，也不改变原生通道。
 
 ## 上游依据
 

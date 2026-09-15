@@ -44,10 +44,17 @@ node ENTRY close --config CONFIG --session UUID
 
 `run` creates an independent responsibility. Keep its returned integration UUID.
 `continue` resumes that exact conversation; it cannot silently create a fresh one.
-Read-only ACP permission handling is the default. `--permissions full` requires
-both a route permitting full mode and current task authorization. Full mode
-approves all ACP permission requests, including execution/network requests; it
-must not be described as a file-edit-only grant or an OS sandbox.
+`--permissions` selects this integration's ACP permission-response policy, not a
+filesystem boundary. The default `read` answers requests with approve-reads plus
+non-interactive denial; `full` uses approve-all, which answers ACP permission
+requests including execution and network requests. Both cover only requests that
+actually reach the adapter's permission flow: an adapter can expose operations that
+never raise one, so never claim `read` prevents writes or describe the policy as an
+OS sandbox. Deterministic filesystem read-only behavior needs a host/OS sandbox or
+a disposable read-only environment configured independently of this integration;
+cwr-acp does not provide that boundary. `full` additionally requires a route that
+permits full mode and current task authorization, and its authority still comes
+from the work order and the current task.
 
 Only the small work order is intentionally handed over. Registered environments,
 agent homes and shared repository rules still require real input-boundary review.

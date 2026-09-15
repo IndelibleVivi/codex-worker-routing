@@ -59,7 +59,13 @@ export function fakeAcpx(behavior={}) {
           const onAbort=()=>{cancelled=true;finish()};
           input.signal?.addEventListener('abort',onAbort,{once:true});
           // Result does not depend on consuming the event stream.
-          const job=(async()=>{await started;await sleep(behavior.delay??2);finish()})();
+          const turnNumber=(calls.filter(call=>call[0]==='start').length);
+          const job=(async()=>{
+            await started;
+            if(behavior.firstTurnGate && turnNumber===1) await behavior.firstTurnGate;
+            else await sleep(behavior.delay??2);
+            finish();
+          })();
           job.catch(d.reject);
           d.promise.finally(()=>input.signal?.removeEventListener('abort',onAbort));
           return {

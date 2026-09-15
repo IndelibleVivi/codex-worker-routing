@@ -13,6 +13,7 @@ License 1.0](LICENSE), SPDX identifier `SUL-1.0`:
 - `integrations/**`
 - `plugins/**`
 - `tests/**`
+- `.github/**`
 - `.gitignore`
 
 That license permits personal, noncommercial, and internal business use. It

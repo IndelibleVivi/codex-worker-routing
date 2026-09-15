@@ -33,13 +33,26 @@ export async function canonicalFuture(value) {
   }
 }
 const FORBIDDEN_ENV = /^(?:HOME|PATH|TMPDIR|TMP|TEMP|NODE_.*|NODE|NPM_.*|npm_.*|LD_.*|DYLD_.*|XDG_.*|CODEX_.*|CLAUDE_CONFIG_DIR|CWR_.*|PYTHON.*|BASH_ENV|ENV|ZDOTDIR|SHELLOPTS|IFS)$/;
-export async function loadConfig(file) {
+async function loadConfigDocument(file) {
   const configPath = await fs.realpath(path.dirname(path.resolve(file))).then(d => path.join(d, path.basename(file)));
   const raw = await readJSON(configPath, { privateFile: true, maxBytes: 128 * 1024 });
   exact(raw, ['schema', 'stateDir', 'routes'], 'config');
   if (raw.schema !== 'cwr.acp.config/1') throw new Fault('BAD_CONFIG', 'Unsupported config schema.');
   exact(raw.routes, Object.keys(raw.routes ?? {}), 'routes');
   const stateDir = await canonicalFuture(absolute(raw.stateDir, 'stateDir'));
+  return { configPath, raw, stateDir };
+}
+
+// Recovery/control commands need only the trusted state root. They must remain
+// usable when an unrelated route is disabled, malformed, or points at a
+// workspace that disappeared after a crash.
+export async function loadControlConfig(file) {
+  const { configPath, stateDir } = await loadConfigDocument(file);
+  return { configPath, stateDir };
+}
+
+export async function loadConfig(file) {
+  const { configPath, raw, stateDir } = await loadConfigDocument(file);
   const mainHome = await fs.realpath(os.homedir());
   const routes = {};
   for (const [name, r] of Object.entries(raw.routes)) {

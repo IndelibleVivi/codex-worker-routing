@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
-import { loadConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment } from './config.mjs';
+import { loadConfig, loadControlConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
 
 const HELP = `cwr-acp (optional channel; does not replace native subagents)
@@ -56,16 +56,19 @@ export async function loadAcpx() {
 }
 export async function localStatus(config, binding) {
   const p = paths(config.stateDir, binding.id);
+  let lockPresent = false;
+  try { await privateDir(p.lock, { create: false }); lockPresent = true; }
+  catch (e) { if (e.code !== 'STATE_MISSING') throw e; }
   let owner = null;
-  try { owner = await readJSON(path.join(p.lock, 'owner.json'), { privateFile: true }); }
-  catch (e) { if (e.code !== 'ENOENT') throw e; }
-  let active = 'idle';
-  if (owner) {
-    active = 'unreconciled';
-    if (Number.isSafeInteger(owner.pid) && owner.pid > 0) {
-      try { process.kill(owner.pid, 0); active = 'owner_process_present'; }
-      catch { /* PID is a hint only. Never auto-reclaim. */ }
-    }
+  if (lockPresent) {
+    try { owner = await readJSON(path.join(p.lock, 'owner.json'), { privateFile: true }); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+  }
+  // An ownerless lock is still unreconciled: a new operation will reject it.
+  let active = lockPresent ? 'unreconciled' : 'idle';
+  if (owner && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+    try { process.kill(owner.pid, 0); active = 'owner_process_present'; }
+    catch { /* PID is a hint only. Never auto-reclaim. */ }
   }
   return { schema:'cwr.acp.status/1', session_id:binding.id, active,
     closed:binding.closed === true, last_runtime_status:binding.lastStatus ?? null,
@@ -94,7 +97,8 @@ export async function main(args, deps = {}) {
   const output = deps.output ?? (r => process.stdout.write(`${JSON.stringify(r)}\n`));
   if (opt.command === 'help') { (deps.help ?? (s => process.stdout.write(s)))(HELP); return 0; }
   if (process.platform === 'win32') throw new Fault('UNSUPPORTED_PLATFORM','v0.1 supports macOS and Linux; Windows needs separate filesystem/process validation.');
-  const config = await loadConfig(opt.config);
+  const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';
+  const config = controlOnly ? await loadControlConfig(opt.config) : await loadConfig(opt.config);
   let binding;
   if (opt.command !== 'run') binding = await loadBinding(config.stateDir, opt.session);
   if (opt.command === 'status') { output(await localStatus(config,binding)); return 0; }

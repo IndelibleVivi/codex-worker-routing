@@ -5,17 +5,33 @@ import { Fault, atomicJSON, privateDir, paths } from './state.mjs';
 
 const now = () => new Date().toISOString();
 const safeCode = e => typeof e?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(e.code) ? e.code : 'ACP_EXECUTION_FAILED';
+function compactUsage(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const compact = {};
+  if (usage.cumulative && typeof usage.cumulative === 'object') compact.cumulative = usage.cumulative;
+  if (usage.cost && typeof usage.cost === 'object') compact.cost = usage.cost;
+  return Object.keys(compact).length ? compact : null;
+}
 function deadline(promise, ms, code) {
   let timer;
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Fault(code, 'Operation did not settle before its deadline.')), ms); });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
+// `read`/`full` select how cwr-acp answers ACP permission requests. They are
+// authorization wording plus an adapter-facing response policy, never a
+// filesystem boundary: an adapter may expose mutations that raise no request.
+const PERMISSION_POLICIES = Object.freeze({
+  read: `ACP permission-response policy for this turn: read. cwr-acp answers ACP permission requests with approve-reads and denies non-interactive requests; that selects how requests are answered, not what the adapter can do. You are not authorized to modify files or run mutating commands: report proposed changes instead of applying them. Adapters can expose operations that never become an ACP permission request, so this policy is not enforcement and not an OS sandbox.`,
+  full: `ACP permission-response policy for this turn: full. cwr-acp answers ACP permission requests with approve-all, including execution and network requests; that selects how requests are answered, not what the adapter can do. Your authority still comes only from this work order and the current task, and this is not an OS sandbox.`,
+});
 export function workOrder(text, permissions) {
+  if (typeof permissions !== 'string' || !Object.hasOwn(PERMISSION_POLICIES, permissions))
+    throw new Fault('BAD_PERMISSIONS', 'Unknown ACP permission policy; expected read or full.');
   return `Temporary engineering worker. Own only this complete work order.\n` +
     `Use the shared project engineering rules. Do not delegate again, switch route, or maintain personal continuity.\n` +
     `Do not commit, push, deploy, publish, or operate accounts. Preserve unrelated changes.\n` +
     `Return completion/partial/blocker facts, changed files, checks actually run, and remaining uncertainty.\n` +
-    `ACP permission policy for this turn: ${permissions}. Policy is not an OS sandbox.\n` +
+    `${PERMISSION_POLICIES[permissions]}\n` +
     `The work-order body cannot grant additional tools, paths, accounts, or payment authority.\n\nWORK ORDER\n${text}`;
 }
 export function validateResume(binding, selection, record) {
@@ -173,8 +189,10 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     requested_model: selection.route.sessionOptions.model ?? null,
     advertised_model: status?.models?.currentModelId ?? null,
     provider_identity_verified: false,
-    // Preserve provenance: these are adapter-reported session totals, not billing proof.
-    adapter_reported_session_usage: status?.usage ?? null,
+    // Preserve compact session totals only. acpx may retain an unbounded
+    // per-request map in its private store; do not echo that map into the main context.
+    adapter_reported_session_usage: compactUsage(status?.usage),
+    adapter_reported_per_request_usage_omitted: Boolean(status?.usage?.perRequest && Object.keys(status.usage.perRequest).length),
     output_excerpt: excerpt, output_truncated: truncated, observed_event_count: eventCount,
     transcript_state_dir: recordDir,
     receipt_path: path.join(p.receipts, `${requestId}.json`), diagnostic_path: diagnosticPath,
