@@ -28,15 +28,18 @@ internal delegation inside the current task.
 - `list_agents` shows the child's actual state; do not guess from an old record that it is still running.
 - `wait_agent` waits for a mailbox update. Prefer the host's blocking wait and completion messages: a timeout, silence, or active yield in a healthy run is not a failure and not an interrupt condition; waiting is not cancellation. Query the worker only to recover it, to resolve an ambiguous state, or when intervention is needed, and do not short-poll a healthy worker.
 - For a worker that is still active, use `send_message` to send a constraint or evidence increment that affects the current work.
-- For continuation or rework of an idle worker, use `followup_task` to trigger the next turn, keeping the same child's context and responsibility.
+- For continuation or rework of a worker that is not currently running a turn, use `followup_task` directly to trigger the next turn with the same child, context, and responsibility.
 
-## This host's wrap-up rules
+## Completion and diagnosis
 
-In this host version, once a child reaches `FINAL_ANSWER`, `task_complete`, `idle`, or
-`errored`, call `interrupt_agent` first to wrap up its state; afterwards, for continuation
-or rework, call `followup_task` on the same child. Do not interrupt a working child
-because a healthy wait timed out, went silent, or simply took time.
+Do not use `interrupt_agent` as a routine completion ceremony. Use it when an active turn
+must stop, or when the live host explicitly requires it for cleanup. Continue a completed
+or idle worker with `followup_task`; for an ambiguous or errored state, check `list_agents`
+before deciding whether the same child can continue. Before taking over or switching
+workers, confirm that the old writer has stopped.
 
-When a tool return is ambiguous, use `list_agents` to verify the existing child first, so
-you do not duplicate the same responsibility. Before taking over or switching workers,
-also confirm the old worker has stopped writing.
+The normal UI may hide spawn metadata. That is presentation, not evidence that no child
+exists. For diagnosis, use the live `list_agents` or thread trace. When the current Codex
+config schema exposes it, `hide_spawn_agent_metadata = false` under
+`[features.multi_agent_v2]` can temporarily make spawn metadata visible; normal delegation
+does not depend on keeping that diagnostic setting enabled.
