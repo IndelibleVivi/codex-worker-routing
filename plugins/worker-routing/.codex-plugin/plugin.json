@@ -1,6 +1,6 @@
 {
   "name": "worker-routing",
-  "version": "0.1.0+codex.20260915101401",
+  "version": "0.1.0+codex.20260915120000",
   "description": "Instruction-only routing for bounded work delegated to native Codex or explicitly configured ACP workers.",
   "author": {
     "name": "Faye"
