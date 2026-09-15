@@ -31,9 +31,12 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
    hooks.json / 已存在的脚本备份到 `worker-routing/backups/`。它不修改 AGENTS、
    model/provider config、其他 hook 或原生 hook trust。
 
-   安装器保留 `$CODEX_HOME` 的 lexical absolute path，不跟随其最终组件，并在读取或
-   写入任何 managed output 之前先做 non-following `lstat` 检查：`$CODEX_HOME`
-   只能是 absent 或真实目录（此时后续照常 clean install）；`hooks.json` 与
+   安装器先把 `$CODEX_HOME` 规范为 lexical absolute path，再 canonicalize 其
+   parent/ancestor，只让 final component 保持不跟随：ancestor symlink 因此沿用
+   旧版的 canonical command path，alias 调用不会重复添加 handler；`$CODEX_HOME`
+   自身是 symlink（含 dangling）时则由下面的检查拒绝。随后在读取或写入任何
+   managed output 之前先做 non-following `lstat` 检查：`$CODEX_HOME` 只能是
+   absent 或真实目录（此时后续照常 clean install）；`hooks.json` 与
    `worker-routing/main_session.py` 只能是 absent 或 single-link regular file；
    `worker-routing/` 与 `worker-routing/backups/` 只能是 absent 或真实目录。
    symlink（含 dangling）、hardlink、FIFO、socket/device 与类型错位都会在零

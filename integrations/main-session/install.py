@@ -95,10 +95,12 @@ def install(instructions, codex_home, apply=False):
     if not data.strip() or len(data) > 65536:
         raise ValueError("instructions must contain 1–65536 UTF-8 bytes")
     data.decode("utf-8")
-    # Keep CODEX_HOME lexical. expanduser and abspath do not follow links, so a symlinked
-    # or special-file home is rejected below rather than resolved out from under the
-    # preflight that the rest of this managed topology depends on.
-    codex_home = Path(os.path.abspath(codex_home.expanduser()))
+    # Normalize to a lexical absolute path, then canonicalize only the parent chain. An
+    # ancestor symlink therefore keeps the canonical command path that older resolved
+    # installs recorded, while a symlinked or dangling CODEX_HOME itself stays unfollowed
+    # and is rejected by the preflight below.
+    lexical_home = Path(os.path.abspath(codex_home.expanduser()))
+    codex_home = lexical_home.parent.resolve() / lexical_home.name
     routing_dir = codex_home / "worker-routing"
     runtime = routing_dir / "main_session.py"
     hooks_path = codex_home / "hooks.json"

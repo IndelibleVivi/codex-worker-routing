@@ -46,6 +46,12 @@ def assert_inside_temp(test, home):
                     f"{target} is outside the test temp root {test.root}")
 
 
+def canonical_home(home):
+    """The path the installer reports: lexical absolute, ancestors canonicalized."""
+    path = Path(os.path.abspath(home))
+    return path.parent.resolve() / path.name
+
+
 hook = module("main_session")
 installer = module("install")
 
@@ -125,7 +131,7 @@ class ManagedOutputTopologyTests(unittest.TestCase):
         """Both modes must reject the topology before reading or writing it."""
         assert_inside_temp(self, home)
         before = snapshot(self.root)
-        expected = Path(os.path.abspath(home))
+        expected = canonical_home(home)
         if relative:
             expected = expected / relative
         for apply in (False, True):
@@ -173,11 +179,33 @@ class ManagedOutputTopologyTests(unittest.TestCase):
             result = self.run_installer(home, *extra)
             self.assertNotEqual(result.returncode, 0)
             output = result.stdout + result.stderr
-            self.assertIn(str(Path(os.path.abspath(home))), output)
+            self.assertIn(str(canonical_home(home)), output)
             self.assertIn("FIFO", output)
             for leak in self.leaks:
                 self.assertNotIn(leak, output)
         self.assert_zero_mutation(before)
+
+    def test_ancestor_symlink_alias_reuses_one_managed_definition(self):
+        real_home = self.root / "real" / "codex"
+        real_home.mkdir(parents=True)
+        alias = self.root / "alias"
+        os.symlink(self.root / "real", alias)
+        assert_inside_temp(self, alias / "codex")
+        first = installer.install(self.note, real_home, True)
+        plan = installer.install(self.note, alias / "codex")
+        self.assertFalse(plan["changed"])
+        self.assertEqual(plan["hooks_file"], first["hooks_file"])
+        applied = installer.install(self.note, alias / "codex", True)
+        self.assertFalse(applied["changed"])
+        self.assertEqual(applied["hooks_file"], first["hooks_file"])
+        self.assertEqual(applied["hook"], first["hook"])
+        command = applied["hook"]["hooks"][0]["command"]
+        self.assertNotIn(str(alias), command)
+        self.assertIn(str(real_home.resolve()), command)
+        hooks = json.loads((real_home / "hooks.json").read_text())
+        self.assertEqual(hooks["hooks"]["SessionStart"], [first["hook"]])
+        backups = real_home / "worker-routing" / "backups"
+        self.assertEqual(len(list(backups.iterdir())), 1)
 
     def test_symlinked_hooks_json_fails_closed(self):
         home = self.codex_home()
@@ -308,7 +336,7 @@ class ManagedOutputTopologyTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(runtime.stat().st_mode), 0o600)
         backup = Path(result["backup"])
         self.assertEqual(backup.parent,
-                         Path(os.path.abspath(home)) / "worker-routing" / "backups")
+                         canonical_home(home) / "worker-routing" / "backups")
         self.assertEqual(list(backup.iterdir()), [])
         self.assertFalse(installer.install(self.note, home, True)["changed"])
 
