@@ -30,6 +30,15 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
    `worker-routing/main_session.py`，合并一个 SessionStart handler，并将原有
    hooks.json / 已存在的脚本备份到 `worker-routing/backups/`。它不修改 AGENTS、
    model/provider config、其他 hook 或原生 hook trust。
+
+   安装器保留 `$CODEX_HOME` 的 lexical absolute path，不跟随其最终组件，并在读取或
+   写入任何 managed output 之前先做 non-following `lstat` 检查：`$CODEX_HOME`
+   只能是 absent 或真实目录（此时后续照常 clean install）；`hooks.json` 与
+   `worker-routing/main_session.py` 只能是 absent 或 single-link regular file；
+   `worker-routing/` 与 `worker-routing/backups/` 只能是 absent 或真实目录。
+   symlink（含 dangling）、hardlink、FIFO、socket/device 与类型错位都会在零
+   mutation 下失败，dry-run 与 `--apply` 同样处理；错误只报告具体 managed path
+   与类型。runtime 与 hooks.json 都通过同目录 staging + 原子替换发布。
 3. 在 Codex `/hooks` 中 review 并信任 **Loading main-session instructions** 的
    exact definition。它仅在 root 的 `startup|resume|clear|compact` SessionStart
    上读取指定文件。`additionalContextLimit: 0` 配合脚本明确的 byte 上限，保证
