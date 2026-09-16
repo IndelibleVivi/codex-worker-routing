@@ -81,9 +81,13 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
 - 入口必须是真实文件且扩展名为 `.exe`、`.com`、`.cmd`、`.bat`；`.ps1`、`.sh` 与无扩展名
   脚本被拒绝。`.cmd`/`.bat` 交由 acpx 自身的 `%COMSPEC%` shim 策略启动，cwr-acp 不引入
   `shell:true` 回退，也不接受字符串形式的命令。
-- 只支持本地卷：`stateDir`、`workerHome`、`workspaces` 与 `argv[0]` 拒绝 UNC
-  （`\\server\share`）、设备路径（`\\?\`、`\\.\`）和网络共享形式。映射到网络位置的盘符
-  在本层无法识别，需要操作者自行保证。
+- 只支持本地卷：`stateDir`、`workerHome`、`workspaces`、选中的 `cwd`、resolved `argv[0]`
+  与 config 文件路径先在词法层拒绝 UNC（`\\server\share`）、设备路径（`\\?\`、`\\.\`）
+  和网络共享形式，再对 canonicalize/`realpath` 的最终目标重复同一次拒绝。config 文件路径
+  先按 cwd 解析成绝对路径（相对路径行为不变），再在 `realpath` 之前完成这层拒绝，因此显式的
+  UNC/设备 config 根不会被 `realpath` 触碰；它只 canonicalize 所在目录，文件名本身仍交给
+  symlink 检查。因此一个本地形状的输入如果在解析后落到这些根（例如 symlink/junction 指向
+  UNC），也会在真正使用前被拒绝。映射到网络位置的盘符在本层无法识别，需要操作者自行保证。
 - worker 环境把 `HOME`/`USERPROFILE`/`TEMP`/`TMP`/`APPDATA`/`LOCALAPPDATA` 重定向到独立
   worker home，并从操作者环境保留 `COMSPEC`、`PATHEXT`、`SystemRoot`/`windir`（缺失时用标准
   值），因为启动子进程与 acpx 解析命令需要它们；这些变量来自环境而非 route 配置，不含凭据。
@@ -205,23 +209,29 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 acpx 联调全过，覆盖重启、同会话续做、私有环境隔离与 ACP 权限握手，夹具仍是无模型、
 无账号、无网络的合成进程；并发 workspace 回归以隔离方式重复 5 次，5 次均通过。
 `npm run check` 的范围是接入层逻辑、真实文件系统检查、私有环境子进程测试，以及合成 ACP
-server 的直接 stdio 自检（runtime 行为使用合约替身）；加入 Windows 平台回归后为 81 项，
-本机（macOS）78 项通过、3 项仅 Windows 的用例跳过。新增用例覆盖：受管祖先遍历不重复盘符/
-UNC 前缀、private mode 检查按平台能力生效、目录 fsync 只在 Node 暴露时执行、passEnv 大小写
-不敏感拒绝与 `USERPROFILE` 覆盖防护、Windows temp/profile/launcher 环境装配、入口扩展名与
-UNC/设备路径拒绝，以及 package.json 的平台与测试文件列表（避免 `npm ci` 的 EBADPLATFORM 与
-cmd.exe 下未展开的 glob）。work-order 权限措辞测试仍只覆盖生成的措辞与 option 映射，
-不构成文件系统强制行为的证据。
-真实联调套件现共 5 项，其中 2 项仅 Windows：一项要求实际 acpx spawn 出的合成 adapter 子进程
+server 的直接 stdio 自检（runtime 行为使用合约替身）；加入 Windows 平台回归与 canonical
+根复检回归后为 85 项，本机（macOS）81 项通过、4 项仅 Windows 的用例跳过。新增用例覆盖：受管
+祖先遍历不重复盘符/UNC 前缀、private mode 检查按平台能力生效、目录 fsync 只在 Node 暴露时
+执行、passEnv 大小写不敏感拒绝与 `USERPROFILE` 覆盖防护、Windows temp/profile/launcher 环境
+装配、入口扩展名与 UNC/设备路径拒绝、config 文件路径/`stateDir`/`workerHome`/`workspaces`/
+`cwd`/resolved `argv[0]` 在 canonicalize 后落到 UNC/设备根时的复检拒绝（只注入 canonicalizer，
+不需要真实 Windows share）、config 文件路径按 cwd 解析后的词法本地检查（相对路径仍从 cwd
+解析，行为不变），以及 package.json 的平台与测试文件列表（避免 `npm ci` 的 EBADPLATFORM 与
+cmd.exe 下未展开的 glob）。work-order 权限措辞测试仍只覆盖生成的措辞与 option 映射，不构成
+文件系统强制行为的证据。
+真实联调套件现共 6 项，其中 2 项仅 Windows：一项要求实际 acpx spawn 出的合成 adapter 子进程
 报告被重定位的 `USERPROFILE`/`TEMP`/`TMP`/`APPDATA`/`LOCALAPPDATA`（用路径包含判断，不用
 字符串前缀）与非空 launcher 变量；一项用带空格的路径生成合成 `.cmd` wrapper，验证 `.cmd` 入口
-确实走 acpx 的 `%COMSPEC%` batch-shim 分支完成一次 `run`，不使用通用 shell 回退。macOS 上这
-2 项计为 skip，本机 3 项真实联调通过。
+确实走 acpx 的 `%COMSPEC%` batch-shim 分支完成一次 `run`，不使用通用 shell 回退。第三项不依赖
+平台：等待 `FIXTURE_WAIT` 的合成 turn 只有在 audit 文件证明 prompt 已到达被 spawn 的 adapter
+之后才被 `cancel`，随后断言 receipt 为 `cancelled`、cleanup 为 `confirmed`，且 `status` 回到
+`idle`（无固定 sleep 竞态）。macOS 上 2 项 Windows 用例计为 skip，本机 4 项真实联调通过。
 
-Windows 专属用例（盘符根 `create:false`、junction 祖先拒绝、UNC stateDir 拒绝、adapter 环境
-断言、`.cmd` batch-shim 的一次完整 `run`）只在 `windows-latest` 上执行并断言，不以其他平台的
-skip 作为证据；junction 用例没有内建 skip 分支，无法创建 junction 的环境直接失败而不是跳过。
-POSIX 上的 mode 断言同样不会被当作 Windows ACL 隐私的证据。
+Windows 专属用例（盘符根 `create:false`、junction 祖先拒绝、UNC stateDir 拒绝、显式 UNC/设备
+config 文件路径在 `realpath` 之前被拒绝、adapter 环境断言、`.cmd` batch-shim 的一次完整 `run`）
+只在 `windows-latest` 上执行并断言，不以其他平台的 skip 作为证据；junction 用例没有内建 skip
+分支，无法创建 junction 的环境直接失败而不是跳过。POSIX 上的 mode 断言同样不会被当作
+Windows ACL 隐私的证据。
 
 本机 dogfood 使用一个已登记外部 route 完成了当前仓库的 review 修复，并在同一 ACP session
 续做证据校正与权限措辞返修；各轮 cleanup 均 confirmed，私有主会话 marker 检索为 0。
@@ -231,7 +241,9 @@ policy 当成文件系统边界的实证。opt-in Python/native probe 未在本�
 
 CI：仓库新增 `.github/workflows/ci.yml`，Ubuntu 上跑 Python 原生测试，Ubuntu 与 macOS 上跑
 `npm ci --ignore-scripts`、ACP 检查与真实合成 acpx 联调；加入 Windows 后同一套 ACP 步骤也在
-`windows-latest` 上运行。无 secrets、无 live provider 调用。本次交付在 macOS 主机上编写与
+`windows-latest` 上运行，并由 Windows PowerShell 5.1 实际执行 native picker 指南采用的
+`UTF8Encoding($false)` 写法，断言输出没有 UTF-8 BOM 且仍可解析为 JSON。无 secrets、无 live
+provider 调用。本次交付在 macOS 主机上编写与
 自测，未在本机 Windows 主机运行；Windows 结论以目标 commit 或 PR 的 `windows-latest` checks
 为准，本地结果不证明任一 GitHub run 已绿。真实 Windows adapter/model 验收仍需 operator 按
 exact route 单独完成。

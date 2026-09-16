@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { loadConfig,selectRoute,buildEnvironment,canonicalFuture,prepareHome,executableProblem,assertLocalManagedPath,assertSupportedPlatform } from '../src/config.mjs';
+import { loadConfig,loadControlConfig,selectRoute,buildEnvironment,canonicalFuture,prepareHome,executableProblem,assertLocalManagedPath,assertSupportedPlatform } from '../src/config.mjs';
 import { regular,atomicJSON,privateDir,lock,sessionId,ancestorPaths,assertPrivateMode,sameFileIdentity,syncDirectory,exposesPosixModes } from '../src/state.mjs';
 import { fixture } from './helpers.mjs';
 async function f(t){const v=await fixture();t.after(v.cleanup);return v}
@@ -120,6 +120,38 @@ test('managed roots reject Windows network, UNC and device paths before any use'
  assert.equal(assertLocalManagedPath('/tmp/state','stateDir','linux'),'/tmp/state');
  assert.equal(assertLocalManagedPath('//not-checked-on-posix','stateDir','linux'),'//not-checked-on-posix');
 });
+// The lexical check above sees only the raw input. A local-looking path can still
+// canonicalize through a symlink, junction or drive mapping to an explicit
+// UNC/device root, so every managed path must be re-checked after resolution.
+// Injecting only the canonicalizer exercises that re-check end to end without a
+// real Windows share.
+const UNC_ROOT='\\\\synthetic-server\\share\\state',DEVICE_ROOT='\\\\?\\C:\\state';
+const toRoot=target=>async()=>target;
+const onlyFor=(name,target)=>async p=>path.basename(p)===name?target:canonicalFuture(p);
+test('loaders re-check the canonical target of every trusted managed root',async t=>{
+ const v=await f(t);
+ await assert.rejects(loadConfig(v.configFile,'win32',{realpath:toRoot(UNC_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+ await assert.rejects(loadControlConfig(v.configFile,'win32',{realpath:toRoot(DEVICE_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+ await assert.rejects(loadConfig(v.configFile,'win32',{canonicalize:toRoot(UNC_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+ await assert.rejects(loadConfig(v.configFile,'win32',{canonicalize:onlyFor('worker-home',DEVICE_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+ await assert.rejects(loadConfig(v.configFile,'win32',{realpath:onlyFor('workspace',UNC_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+});
+// A relative config path is not an error: it resolves from cwd, exactly as
+// before. Only an explicit UNC/device root is rejected lexically.
+test('a relative config path still resolves from the current working directory',async t=>{
+ const v=await f(t);
+ const relative=path.relative(process.cwd(),v.configFile);
+ if(path.isAbsolute(relative))return; // different volume; no relative path exists
+ const config=await loadConfig(relative);
+ assert.equal(config.configPath,v.configFile);assert.ok(config.routes.worker);
+});
+test('selectRoute re-checks the canonical cwd and resolved ACP executable',async t=>{
+ const v=await f(t);
+ await assert.rejects(selectRoute(v.config,'worker',v.cwd,'read',{},'win32',{realpath:toRoot(DEVICE_ROOT)}),{code:'UNSUPPORTED_PATH_ROOT'});
+ // The cwd resolves locally; only the executable entry resolves to a device root.
+ const executableOnly=async p=>String(p)===v.cwd?fs.realpath(p):DEVICE_ROOT;
+ await assert.rejects(selectRoute(v.config,'worker',v.cwd,'read',{},'win32',{realpath:executableOnly}),{code:'UNSUPPORTED_PATH_ROOT'});
+});
 test('supported platforms are an explicit allowlist, not an implicit POSIX assumption',()=>{
  for(const p of ['darwin','linux','win32'])assert.equal(assertSupportedPlatform(p),p);
  for(const p of ['freebsd','aix','sunos',''])assert.throws(()=>assertSupportedPlatform(p),{code:'UNSUPPORTED_PLATFORM'});
@@ -151,4 +183,10 @@ windowsOnly('windows: UNC managed roots are rejected during config load',async t
  const v=await f(t);v.raw.stateDir='\\\\synthetic-server\\share\\state';
  await fs.writeFile(v.configFile,JSON.stringify(v.raw));
  await assert.rejects(loadConfig(v.configFile),{code:'UNSUPPORTED_PATH_ROOT'});
+});
+windowsOnly('windows: an explicit UNC/device config path is rejected before any realpath probe',async()=>{
+ // realpath throws a distinct sentinel, so a regression that resolves first fails here.
+ const untouched=async()=>{throw Object.assign(new Error('realpath must not run'),{code:'REALPATH_TOUCHED'})};
+ for(const bad of ['\\\\server\\share\\routes.json','\\\\?\\C:\\routes.json','\\\\.\\PhysicalDrive0\\routes.json'])
+  await assert.rejects(loadConfig(bad,'win32',{realpath:untouched}),{code:'UNSUPPORTED_PATH_ROOT'});
 });

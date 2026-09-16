@@ -85,14 +85,33 @@ catalog from the installed Codex version and append the custom entry to its `mod
 array:
 
 ```bash
-codex debug models --bundled > ~/.codex/model-catalog.json
+# macOS / Linux: honor CODEX_HOME, falling back to ~/.codex
+codex_home="${CODEX_HOME:-$HOME/.codex}"
+# noclobber applies only to this subshell and refuses to overwrite a custom catalog
+( set -C; codex debug models --bundled > "$codex_home/model-catalog.custom.json" )
 ```
 
 Windows PowerShell:
 
 ```powershell
-codex debug models --bundled | Out-File -Encoding utf8 "$HOME\.codex\model-catalog.json"
+# Windows PowerShell 5.1 and PowerShell 7 compatible: write UTF-8 without a BOM.
+# Windows PowerShell 5.1 `utf8` writes a BOM while PowerShell 6+ `utf8` does not,
+# and a BOM breaks JSON parsing, so choose the encoding explicitly via .NET.
+$codexHome = Join-Path $HOME '.codex'
+if ($env:CODEX_HOME) { $codexHome = $env:CODEX_HOME }
+$catalog = Join-Path $codexHome 'model-catalog.custom.json'
+if (Test-Path -LiteralPath $catalog) { throw "Refusing to overwrite existing $catalog" }
+$json = codex debug models --bundled | Out-String
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($catalog, $json, $utf8)
 ```
+
+Both examples export to the distinct filename `model-catalog.custom.json`, so the
+example cannot silently replace an existing `model-catalog.json`; when the file is
+already present the command fails instead of overwriting it. Both examples also
+honor `CODEX_HOME` (`$env:CODEX_HOME` on Windows) and fall back to the default
+location under `$HOME`; the later `model_catalog_json` value points at the path you
+selected here.
 
 For a one-model setup, this conservative example intentionally advertises no image,
 reasoning, parallel-tool, or native `apply_patch` support:
@@ -133,13 +152,16 @@ Point the user config at it with a root key placed before all `[tables]`:
 
 ```toml
 # macOS / Linux example
-model_catalog_json = "/home/alice/.codex/model-catalog.json"
+model_catalog_json = "/home/alice/.codex/model-catalog.custom.json"
 ```
 
 ```toml
 # Windows example; forward slashes avoid TOML backslash escaping
-model_catalog_json = "C:/Users/Alice/.codex/model-catalog.json"
+model_catalog_json = "C:/Users/Alice/.codex/model-catalog.custom.json"
 ```
+
+That path must match the export you ran: if `CODEX_HOME` / `$env:CODEX_HOME` is set,
+use the `model-catalog.custom.json` under it instead of someone else's profile path.
 
 The catalog describes actual runtime compatibility. Add reasoning levels, image
 input, parallel tools, web search, or `apply_patch_tool_type` only when both the
@@ -164,7 +186,12 @@ codex debug models > /tmp/codex-models.json
 Windows PowerShell:
 
 ```powershell
-codex debug models | Out-File -Encoding utf8 "$env:TEMP\codex-models.json"
+# Again explicit UTF-8 without a BOM: 5.1 `utf8` would prepend one and break
+# JSON parsing
+$diagnostic = Join-Path $env:TEMP 'codex-models.json'
+$json = codex debug models | Out-String
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($diagnostic, $json, $utf8)
 ```
 
 Confirm that the output has the real model id as `slug`, `visibility` is `list`,

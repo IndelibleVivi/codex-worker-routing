@@ -8,7 +8,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { loadAcpx } from '../src/cli.mjs';
-import { fixture } from './helpers.mjs';
+import { fixture, sleep } from './helpers.mjs';
 const execute=promisify(execFile);
 const cli=path.resolve('src/cli.mjs'),agent=path.resolve('test/fixture-acp-agent.mjs');
 async function setup(t,overrides={}){await loadAcpx();const f=await fixture({argv:[process.execPath,agent],timeoutMs:5000,...overrides});t.after(f.cleanup);return f}
@@ -19,6 +19,24 @@ async function command(f,verb,extra=[]){
  const args=[cli,verb,'--config',f.configFile,...extra];
  try{const r=await execute(process.execPath,args,{timeout:25000,maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});return {code:0,...r,receipt:JSON.parse(r.stdout)}}
  catch(e){return {code:e.code,stdout:e.stdout,stderr:e.stderr,receipt:e.stdout?.trim()?JSON.parse(e.stdout):null}}
+}
+// A blocking `run` must be started without awaiting it so a second control
+// command can race it. Progress is detected by a real condition, never a fixed
+// sleep.
+function start(f,verb,extra=[]){
+ const args=[cli,verb,'--config',f.configFile,...extra];
+ const child=execFile(process.execPath,args,{timeout:25000,maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
+ const done=new Promise(resolve=>{
+  let stdout='',stderr='';
+  child.stdout.on('data',d=>{stdout+=d});child.stderr.on('data',d=>{stderr+=d});
+  const settle=code=>resolve({code,stdout,stderr,receipt:stdout.trim()?JSON.parse(stdout):null});
+  child.on('error',e=>settle(e.code??'ERROR'));child.on('close',code=>settle(code));
+ });
+ return {child,done};
+}
+async function until(check,message,timeout=15000){
+ const end=Date.now()+timeout;
+ for(;;){const v=await check();if(v)return v;if(Date.now()>=end)throw new Error(message);await sleep(25)}
 }
 const initial=f=>['--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 
@@ -40,6 +58,33 @@ test('REAL ACP permission handshake: read policy denies edit; explicit full cont
  const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);assert.equal(JSON.parse(a.receipt.output_excerpt).allowed,false);
  await assert.rejects(fs.stat(path.join(f.cwd,'fixture-result.txt')),{code:'ENOENT'});
  const b=await command(f,'continue',['--session',a.receipt.session_id,'--file',f.orderFile,'--permissions','full']);assert.equal(b.code,0,b.stderr);assert.equal(JSON.parse(b.receipt.output_excerpt).allowed,true);assert.equal(b.receipt.acp_session_id,a.receipt.acp_session_id);
+});
+// Real run -> cancel -> cancelled receipt -> confirmed cleanup and an idle lock.
+// The synthetic fixture parks on FIXTURE_WAIT; cancellation is issued only after
+// the audit file proves the prompt reached the spawned adapter, so there is no
+// fixed sleep race. Account-free and network-free, like the rest of this suite.
+test('REAL acpx: cancelling a waiting turn yields a cancelled receipt and an idle lock',async t=>{
+ const f=await setup(t,{timeoutMs:15000});
+ await fs.writeFile(f.orderFile,'FIXTURE_WAIT');
+ const run=start(f,'run',initial(f));
+ const bindings=path.join(f.config.stateDir,'bindings');
+ const id=await until(async()=>{
+  const entries=await fs.readdir(bindings).catch(()=>[]);
+  for(const entry of entries){
+   if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(entry))continue;
+   try{const owner=JSON.parse(await fs.readFile(path.join(bindings,entry,'active.lock','owner.json'),'utf8'));if(typeof owner.nonce==='string')return entry}catch{/* lock not written yet */}
+  }
+  return null;
+ },'the run never published a session lock');
+ const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
+ await until(async()=>{const log=await fs.readFile(audit,'utf8').catch(()=>'');return log.includes('session/prompt')},'the adapter never received the prompt');
+ const cancel=await command(f,'cancel',['--session',id]);
+ assert.equal(cancel.code,0,cancel.stderr);assert.equal(cancel.receipt.cancel_requested,true);assert.equal(cancel.receipt.stopped,false);
+ const a=await run.done;
+ assert.equal(a.code,130,a.stderr);
+ assert.equal(a.receipt.session_id,id);assert.equal(a.receipt.runtime_status,'cancelled');assert.equal(a.receipt.cleanup,'confirmed');
+ const s=await command(f,'status',['--session',id]);
+ assert.equal(s.code,0,s.stderr);assert.equal(s.receipt.active,'idle');assert.equal(s.receipt.closed,false);
 });
 // Runs only on windows-latest. The unit contract double cannot prove that the
 // real spawn path and acpx's Windows command resolution see the relocated

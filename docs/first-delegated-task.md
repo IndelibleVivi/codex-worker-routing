@@ -59,14 +59,24 @@ default_subagent_reasoning_effort = "medium"
 Worker Routing 是 instruction-only plugin。它不创建 model、不保存 key，也不替 Codex
 实现 subagent runtime；它给主 agent 一套责任划分、工单、续做和验收规则。
 
-安装后用原生命令核对登记状态：
+先在 Codex 中打开本仓库，让内置 plugin-creator 把插件注册到使用者自己的 personal
+marketplace。这一步与 README 的安装步骤相同，没有第二种安装机制：
+
+```text
+请把本仓库 plugins/worker-routing 安装到我的 personal marketplace，
+保持当前主模型和 provider 配置。更新时使用 cachebuster 与正常 reinstall。
+```
+
+`personal` 是这个例子使用的、已经在本机注册好的 marketplace 名称；先完成这一步，下面的
+原生命令才有可添加的对象。注册完成后再核对登记状态：
 
 ```bash
 codex plugin add worker-routing@personal --json
 codex plugin list --marketplace personal --json
 ```
 
-新开一个 session，再给它一块有明确结束条件的中等责任：
+看到登记成功后新开一个 session，确认当前 session 真的加载了插件，再给它一块有明确结束
+条件的中等责任：
 
 ```text
 修复 CSV 导入时空行导致的失败，并补一个能复现问题的检查。

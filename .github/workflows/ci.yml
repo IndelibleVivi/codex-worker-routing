@@ -34,6 +34,19 @@ jobs:
           node-version: '22.13.0'
           cache: npm
           cache-dependency-path: integrations/acpx/package-lock.json
+      - name: Verify the Windows PowerShell 5.1 UTF-8 no-BOM pattern
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $catalog = Join-Path $env:RUNNER_TEMP 'model-catalog.test.json'
+          $json = '{"models":[]}' | Out-String
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($catalog, $json, $utf8)
+          $bytes = [System.IO.File]::ReadAllBytes($catalog)
+          if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            throw 'The catalog unexpectedly contains a UTF-8 BOM.'
+          }
+          Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run test:acpx

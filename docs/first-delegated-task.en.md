@@ -62,14 +62,27 @@ Worker Routing is an instruction-only plugin. It does not create models, store k
 or implement the Codex subagent runtime. It gives the coordinator rules for
 responsibility boundaries, work orders, continuation, rework, and acceptance.
 
-After installation, inspect the native registration state:
+First open this repository in Codex and have the built-in plugin-creator register
+the plugin in your own personal marketplace. This is the same step as the README
+installation; there is no second installation mechanism:
+
+```text
+Install this repository's plugins/worker-routing plugin into my personal
+marketplace, and keep my current main model and provider configuration.
+For updates, use the cachebuster and a normal reinstall.
+```
+
+`personal` is the name of the locally registered marketplace this example uses;
+complete this step first so the native commands below have something to add. Once
+registration succeeds, inspect the native registration state:
 
 ```bash
 codex plugin add worker-routing@personal --json
 codex plugin list --marketplace personal --json
 ```
 
-Open a new session and give it a medium-sized responsibility with a concrete finish:
+Then open a new session to confirm the current session actually loaded the plugin,
+and give it a medium-sized responsibility with a concrete finish:
 
 ```text
 Fix the CSV import failure caused by blank rows and add a check that reproduces it.

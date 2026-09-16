@@ -84,14 +84,31 @@ wire_api = "responses"
 bundled catalog，再向它的 `models` 数组追加自定义条目：
 
 ```bash
-codex debug models --bundled > ~/.codex/model-catalog.json
+# macOS / Linux：尊重 CODEX_HOME，缺失时回退到 ~/.codex
+codex_home="${CODEX_HOME:-$HOME/.codex}"
+# noclobber 只在子 shell 内生效，已有自定义 catalog 时拒绝覆盖
+( set -C; codex debug models --bundled > "$codex_home/model-catalog.custom.json" )
 ```
 
 Windows PowerShell：
 
 ```powershell
-codex debug models --bundled | Out-File -Encoding utf8 "$HOME\.codex\model-catalog.json"
+# Windows PowerShell 5.1 与 PowerShell 7 通用：显式写出 UTF-8 无 BOM。
+# Windows PowerShell 5.1 的 `utf8` 会写 BOM，PowerShell 6+ 的 `utf8` 无 BOM；
+# catalog 是 JSON，BOM 会让解析失败，所以用 .NET UTF8Encoding($false)。
+$codexHome = Join-Path $HOME '.codex'
+if ($env:CODEX_HOME) { $codexHome = $env:CODEX_HOME }
+$catalog = Join-Path $codexHome 'model-catalog.custom.json'
+if (Test-Path -LiteralPath $catalog) { throw "Refusing to overwrite existing $catalog" }
+$json = codex debug models --bundled | Out-String
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($catalog, $json, $utf8)
 ```
+
+两个示例都导出到 `model-catalog.custom.json` 这个独立文件名，不会静默替换已有的
+`model-catalog.json`；如果文件已存在，命令会直接失败而不是覆盖。两个示例也都尊重
+`CODEX_HOME`（Windows 为 `$env:CODEX_HOME`），缺失时回退到 `$HOME` 下的默认位置；之后的
+`model_catalog_json` 就指向这一步选定的那个路径。
 
 若只需要一个自定义 model，可以从下面这份保守的最小例子开始。它故意不宣称 image、
 reasoning、parallel tools 或 native `apply_patch` 能力：
@@ -132,13 +149,16 @@ reasoning、parallel tools 或 native `apply_patch` 能力：
 
 ```toml
 # macOS / Linux example
-model_catalog_json = "/home/alice/.codex/model-catalog.json"
+model_catalog_json = "/home/alice/.codex/model-catalog.custom.json"
 ```
 
 ```toml
 # Windows example；正斜杠可避免 TOML 反斜杠转义
-model_catalog_json = "C:/Users/Alice/.codex/model-catalog.json"
+model_catalog_json = "C:/Users/Alice/.codex/model-catalog.custom.json"
 ```
+
+上面的路径要与导出时的选择一致：若设置了 `CODEX_HOME` / `$env:CODEX_HOME`，就换成它下面
+的那个 `model-catalog.custom.json`，不要把路径硬编码到别人的 profile。
 
 catalog 描述的是 Codex 应怎样对待这个 model，不是宣传文案。只有 upstream 和所用
 proxy 确实支持时，才加入 reasoning levels、image input、parallel tool calls、web
@@ -161,7 +181,11 @@ codex debug models > /tmp/codex-models.json
 Windows PowerShell：
 
 ```powershell
-codex debug models | Out-File -Encoding utf8 "$env:TEMP\codex-models.json"
+# 同样显式 UTF-8 无 BOM，避免 5.1 的 `utf8` BOM 破坏 JSON 解析
+$diagnostic = Join-Path $env:TEMP 'codex-models.json'
+$json = codex debug models | Out-String
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($diagnostic, $json, $utf8)
 ```
 
 在输出里确认：

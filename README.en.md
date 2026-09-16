@@ -140,8 +140,9 @@ model, or use a trial run to request permission for private data transfer.
 Open this repository in Codex and have the built-in plugin-creator install the plugin:
 
 ```text
-请把本仓库 plugins/worker-routing 安装到我的 personal marketplace，
-保持当前主模型和 provider 配置。更新时使用 cachebuster 与正常 reinstall。
+Install this repository's plugins/worker-routing plugin into my personal
+marketplace, and keep my current main model and provider configuration.
+For updates, use the cachebuster and a normal reinstall.
 ```
 
 After the personal marketplace registration is complete, the native commands are:

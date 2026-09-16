@@ -47,30 +47,47 @@ export async function canonicalFuture(value) {
     }
   }
 }
+// A lexical check is not enough: a local-looking path can still canonicalize
+// through a symlink, junction or drive mapping into an explicit UNC/device root.
+// Re-apply the root check to the final target before it is trusted. The
+// canonicalizer is injectable so the post-canonical check is testable without a
+// real Windows share.
+export async function canonicalManagedPath(value, name, platform = process.platform, canonical = canonicalFuture) {
+  return assertLocalManagedPath(await canonical(value), name, platform);
+}
 // Case-insensitive because Windows environment names are. Windows profile and
 // loader controls join the POSIX ones so passEnv cannot re-point the worker home,
 // the temp directory or the process loader.
 const FORBIDDEN_ENV = /^(?:HOME|USERPROFILE|HOMEDRIVE|HOMEPATH|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES(?:\(X86\))?|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|PATHEXT|TEMP|TMP|PATH|TMPDIR|NODE(?:_[A-Z0-9_]*)?|NPM_.*|LD_.*|DYLD_.*|XDG_.*|CODEX_.*|CLAUDE_CONFIG_DIR|CWR_.*|PYTHON.*|BASH_ENV|ENV|ZDOTDIR|SHELLOPTS|IFS)$/i;
-async function loadConfigDocument(file, platform = process.platform) {
-  const configPath = await fs.realpath(path.dirname(path.resolve(file))).then(d => path.join(d, path.basename(file)));
+async function loadConfigDocument(file, platform = process.platform, deps = {}) {
+  const realpath = deps.realpath ?? (p => fs.realpath(p));
+  // The config file is a trusted root like any other: reject an explicit
+  // UNC/device path lexically before realpath touches it. A relative path still
+  // resolves from cwd. The basename stays unconsumed so a symlinked config file
+  // is still rejected by readJSON, but the containing directory must resolve to a
+  // trusted local root.
+  const requested = assertLocalManagedPath(path.resolve(str(file, 'config file path')), 'config file path', platform);
+  const configPath = await realpath(path.dirname(requested))
+    .then(d => assertLocalManagedPath(path.join(d, path.basename(requested)), 'config file path', platform));
   const raw = await readJSON(configPath, { privateFile: true, maxBytes: 128 * 1024 });
   exact(raw, ['schema', 'stateDir', 'routes'], 'config');
   if (raw.schema !== 'cwr.acp.config/1') throw new Fault('BAD_CONFIG', 'Unsupported config schema.');
   exact(raw.routes, Object.keys(raw.routes ?? {}), 'routes');
-  const stateDir = await canonicalFuture(absolute(raw.stateDir, 'stateDir', platform));
+  const stateDir = await canonicalManagedPath(absolute(raw.stateDir, 'stateDir', platform), 'stateDir', platform, deps.canonicalize);
   return { configPath, raw, stateDir };
 }
 
 // Recovery/control commands need only the trusted state root. They must remain
 // usable when an unrelated route is disabled, malformed, or points at a
 // workspace that disappeared after a crash.
-export async function loadControlConfig(file, platform = process.platform) {
-  const { configPath, stateDir } = await loadConfigDocument(file, platform);
+export async function loadControlConfig(file, platform = process.platform, deps = {}) {
+  const { configPath, stateDir } = await loadConfigDocument(file, platform, deps);
   return { configPath, stateDir };
 }
 
-export async function loadConfig(file, platform = process.platform) {
-  const { configPath, raw, stateDir } = await loadConfigDocument(file, platform);
+export async function loadConfig(file, platform = process.platform, deps = {}) {
+  const { configPath, raw, stateDir } = await loadConfigDocument(file, platform, deps);
+  const realpath = deps.realpath ?? (p => fs.realpath(p));
   const mainHome = await fs.realpath(os.homedir());
   const routes = {};
   for (const [name, r] of Object.entries(raw.routes)) {
@@ -80,12 +97,13 @@ export async function loadConfig(file, platform = process.platform) {
     if (!Array.isArray(r.argv) || !r.argv.length || r.argv.length > 64 || r.argv.some(a => typeof a !== 'string' || a.includes('\0')))
       throw new Fault('BAD_CONFIG', 'argv must be an argument array; shell command strings are not accepted.');
     absolute(r.argv[0], 'argv[0]', platform);
-    const workerHome = await canonicalFuture(absolute(r.workerHome, 'workerHome', platform));
+    const workerHome = await canonicalManagedPath(absolute(r.workerHome, 'workerHome', platform), 'workerHome', platform, deps.canonicalize);
     // A dedicated subtree is allowed, but never the existing user home itself
     // or its ancestor. Homes for other routes must not overlap.
     if (workerHome === mainHome || within(workerHome, mainHome)) throw new Fault('PRIVATE_HOME_REUSE', 'Use a dedicated worker home, not the main home.');
     if (!Array.isArray(r.workspaces) || !r.workspaces.length) throw new Fault('BAD_CONFIG', 'Declare exact allowed workspaces.');
-    const workspaces = await Promise.all(r.workspaces.map(async w => await fs.realpath(absolute(w, 'workspace', platform))));
+    const workspaces = await Promise.all(r.workspaces.map(async w =>
+      assertLocalManagedPath(await realpath(absolute(w, 'workspace', platform)), 'workspace', platform)));
     if (workspaces.some(w => within(w, workerHome) || within(workerHome, w) || within(w, stateDir) || within(stateDir, w)))
       throw new Fault('STATE_IN_WORKSPACE', 'Worker homes/state and granted workspaces must be disjoint.');
     const passEnv = r.passEnv ?? [];
@@ -126,15 +144,16 @@ export function executableProblem(executable, stat, platform = process.platform)
   }
   return (stat.mode & 0o111) ? null : 'ACP executable must exist and be executable.';
 }
-export async function selectRoute(config, name, cwd, permissions = 'read', ambient = process.env, platform = process.platform) {
+export async function selectRoute(config, name, cwd, permissions = 'read', ambient = process.env, platform = process.platform, deps = {}) {
+  const realpath = deps.realpath ?? (p => fs.realpath(p));
   const route = config.routes[name];
   if (!route || route.enabled !== true) throw new Fault('ROUTE_DISABLED', 'The named ACP route is absent or disabled. Native routing has not been changed.');
   if (!['read','full'].includes(permissions) || permissions === 'full' && route.maxPermissions !== 'full')
     throw new Fault('PERMISSION_DENIED', 'This route does not authorize the requested ACP permission mode.');
-  const realCwd = await fs.realpath(absolute(cwd, 'cwd', platform));
+  const realCwd = assertLocalManagedPath(await realpath(absolute(cwd, 'cwd', platform)), 'cwd', platform);
   if (!route.workspaces.includes(realCwd)) throw new Fault('WORKSPACE_NOT_ALLOWED', 'cwd must match an explicitly registered workspace.');
   if (!(await fs.stat(realCwd)).isDirectory()) throw new Fault('BAD_WORKSPACE', 'cwd must be a directory.');
-  const executable = await fs.realpath(route.argv[0]);
+  const executable = assertLocalManagedPath(await realpath(route.argv[0]), 'argv[0]', platform);
   const stat = await fs.stat(executable);
   const problem = executableProblem(executable, stat, platform);
   if (problem) throw new Fault('BAD_EXECUTABLE', problem);
