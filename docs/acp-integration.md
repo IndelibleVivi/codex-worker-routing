@@ -52,7 +52,7 @@ npm run test:acpx
 node src/cli.mjs --help
 ```
 
-目标系统为 macOS/Linux，v0.1 对 Windows 明确拒绝运行。Node.js 至少 22.13。
+目标系统为 macOS、Linux，以及本机固定卷上的 Windows。Node.js 至少 22.13。
 仓库保留已验证的 `package-lock.json`；安装使用 `npm ci` 复现该依赖图。
 任何 top-level acpx 版本偏离 0.15.1 都会被入口拒绝；升级需要重新跑联调。
 
@@ -72,6 +72,39 @@ node src/cli.mjs --help
 先建立干净的工程 profile，再按原 CLI 支持的方式在该 profile 中认证。使用个人 persona
 profile、主会话记忆或私人 hooks 的实例不直接当临时 worker。配置存在不等于已经证明输入隔离；
 需本机采样验证。`contextRevision` 需在配置/工具/指令注入边界变化后更新。
+
+## Windows 支持边界
+
+Windows 是第三类受支持平台，但只声明已实现且可回归的能力。它不是把 POSIX 假设换一个
+`process.platform` 判断：入口在读取配置前先做平台白名单，然后只依赖 Node 实际暴露的能力。
+
+- 入口必须是真实文件且扩展名为 `.exe`、`.com`、`.cmd`、`.bat`；`.ps1`、`.sh` 与无扩展名
+  脚本被拒绝。`.cmd`/`.bat` 交由 acpx 自身的 `%COMSPEC%` shim 策略启动，cwr-acp 不引入
+  `shell:true` 回退，也不接受字符串形式的命令。
+- 只支持本地卷：`stateDir`、`workerHome`、`workspaces` 与 `argv[0]` 拒绝 UNC
+  （`\\server\share`）、设备路径（`\\?\`、`\\.\`）和网络共享形式。映射到网络位置的盘符
+  在本层无法识别，需要操作者自行保证。
+- worker 环境把 `HOME`/`USERPROFILE`/`TEMP`/`TMP`/`APPDATA`/`LOCALAPPDATA` 重定向到独立
+  worker home，并从操作者环境保留 `COMSPEC`、`PATHEXT`、`SystemRoot`/`windir`（缺失时用标准
+  值），因为启动子进程与 acpx 解析命令需要它们；这些变量来自环境而非 route 配置，不含凭据。
+- passEnv 的环境名在 Windows 上按大小写不敏感校验与保留，`home`、`userprofile`、`path`、
+  `comspec`、`appdata` 等写法同样被拒绝，也不会覆盖 worker home 的 `USERPROFILE`。
+- Windows 没有 POSIX mode 位，Node 报告的是 0666/0444 这类合成值。cwr-acp 在 Windows 上不读取
+  也不验证 NTFS ACL，也不检查 stateDir/workerHome 是否位于用户 profile 之下；它仍然拒绝
+  symlink/junction 与 hardlink，并保留“打开后再比较文件身份”的检查。因此操作者必须自行把私有
+  config、stateDir 与 workerHome 放在受 ACL 控制的当前用户位置（或为其建立等效 ACL）；
+  cwr-acp 不实现也不声称提供这项保证，也不会因位置不合规而拒绝启动。这些路径还必须位于本地卷
+  （见上）：映射到网络位置的盘符在本层无法识别，只能由操作者保证。
+- 目录 fsync 在 Windows 上不可用（Node 未暴露可靠的目录句柄 fsync）。`atomicJSON` 仍使用同目录
+  临时文件、文件 fsync 与 atomic rename，但不再声称目录级持久化屏障；`close` 仍要求
+  cleanup confirmed。
+- 只有 SIGINT（Ctrl+C）是 Windows 上的本机信号；SIGTERM 不产生本机事件。取消仍可通过
+  `cancel` 的本机控制邮箱完成。
+- 受管祖先遍历按“相对自身 root”展开，因此盘符与 UNC 前缀不会被重复拼接；`status`/`cancel`/
+  `close` 在 Windows 上也能对已有 state 目录使用 `create:false`。
+- CI 在 `windows-latest` 上执行与 macOS/Linux 相同的 `npm ci --ignore-scripts`、`npm run check`
+  与 `npm run test:acpx`，真实 acpx 合成夹具套件在其中运行；Windows 专属回归不使用 skip 计数
+  作为证据。
 
 ## 日常用法
 
@@ -111,10 +144,13 @@ node "$ENTRY" close --config "$CONFIG" --session UUID
 stateDir 只保存 binding/回执与 acpx 的私有 store。目录 0700、文件 0600；写入使用
 同目录临时文件、fsync 和 atomic rename。输入拒绝 symlink、hardlink、FIFO 等特殊文件。
 workerHome/stateDir 根可使用系统祖先目录的规范路径，但根自身和受管后代不接受 symlink。
+目录 0700/文件 0600 的断言只在暴露 POSIX mode 的平台成立；Windows 上 mode 不是隐私证据，
+隐私边界见上节。
 这些检查降低意外链接/竞争造成的破坏，不构成抵御同 UID 恶意进程的完整文件系统隔离。
 
 CLI 清理自己的环境后才 import acpx；保留 PATH 与固定 locale，重设 HOME/XDG/CODEX_HOME/
 CLAUDE_CONFIG_DIR/TMPDIR，只额外传入 passEnv 明示的变量。宿主 shell、Codex 环境不被改变。
+Windows 上另外重设 TEMP/TMP/APPDATA/LOCALAPPDATA，并保留 COMSPEC/PATHEXT/SystemRoot。
 HOME 分离不限制绝对路径访问、Keychain 或原 CLI 自己的原生工具。
 项目 AGENTS、agent 内置配置与本地工具也必须按真实 profile 验收。
 
@@ -166,9 +202,23 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 acpx 联调全过，覆盖重启、同会话续做、私有环境隔离与 ACP 权限握手，夹具仍是无模型、
 无账号、无网络的合成进程；并发 workspace 回归以隔离方式重复 5 次，5 次均通过。
 `npm run check` 的范围是接入层逻辑、真实文件系统检查、私有环境子进程测试，以及合成 ACP
-server 的直接 stdio 自检（runtime 行为使用合约替身）；新增 work-order 权限措辞测试后为
-67 项全过。这些测试只覆盖生成的措辞与 option 映射，
+server 的直接 stdio 自检（runtime 行为使用合约替身）；加入 Windows 平台回归后为 81 项，
+本机（macOS）78 项通过、3 项仅 Windows 的用例跳过。新增用例覆盖：受管祖先遍历不重复盘符/
+UNC 前缀、private mode 检查按平台能力生效、目录 fsync 只在 Node 暴露时执行、passEnv 大小写
+不敏感拒绝与 `USERPROFILE` 覆盖防护、Windows temp/profile/launcher 环境装配、入口扩展名与
+UNC/设备路径拒绝，以及 package.json 的平台与测试文件列表（避免 `npm ci` 的 EBADPLATFORM 与
+cmd.exe 下未展开的 glob）。work-order 权限措辞测试仍只覆盖生成的措辞与 option 映射，
 不构成文件系统强制行为的证据。
+真实联调套件现共 5 项，其中 2 项仅 Windows：一项要求实际 acpx spawn 出的合成 adapter 子进程
+报告被重定位的 `USERPROFILE`/`TEMP`/`TMP`/`APPDATA`/`LOCALAPPDATA`（用路径包含判断，不用
+字符串前缀）与非空 launcher 变量；一项用带空格的路径生成合成 `.cmd` wrapper，验证 `.cmd` 入口
+确实走 acpx 的 `%COMSPEC%` batch-shim 分支完成一次 `run`，不使用通用 shell 回退。macOS 上这
+2 项计为 skip，本机 3 项真实联调通过。
+
+Windows 专属用例（盘符根 `create:false`、junction 祖先拒绝、UNC stateDir 拒绝、adapter 环境
+断言、`.cmd` batch-shim 的一次完整 `run`）只在 `windows-latest` 上执行并断言，不以其他平台的
+skip 作为证据；junction 用例没有内建 skip 分支，无法创建 junction 的环境直接失败而不是跳过。
+POSIX 上的 mode 断言同样不会被当作 Windows ACL 隐私的证据。
 
 本机 dogfood 使用一个已登记外部 route 完成了当前仓库的 review 修复，并在同一 ACP session
 续做证据校正与权限措辞返修；各轮 cleanup 均 confirmed，私有主会话 marker 检索为 0。
@@ -177,8 +227,11 @@ policy 当成文件系统边界的实证。opt-in Python/native probe 未在本�
 现有 Python regression 通过，但这些事实不冒充新的 native-process 验收。
 
 CI：仓库新增 `.github/workflows/ci.yml`，Ubuntu 上跑 Python 原生测试，Ubuntu 与 macOS 上跑
-`npm ci --ignore-scripts`、ACP 检查与真实合成 acpx 联调，无 secrets、无 live provider 调用。
-本地结果不证明任一 GitHub run 已绿；以目标 commit 或 PR 的当前 checks 为准。
+`npm ci --ignore-scripts`、ACP 检查与真实合成 acpx 联调；加入 Windows 后同一套 ACP 步骤也在
+`windows-latest` 上运行。无 secrets、无 live provider 调用。本次交付在 macOS 主机上编写与
+自测，未在本机 Windows 主机运行；Windows 结论以目标 commit 或 PR 的 `windows-latest` checks
+为准，本地结果不证明任一 GitHub run 已绿。真实 Windows adapter/model 验收仍需 operator 按
+exact route 单独完成。
 
 纳入日常委派前，operator 仍需按 exact adapter/profile 验证输入、provider/model 与权限边界；
 需要强制只读时必须另配 host/OS sandbox 或一次性只读环境。一个 route 的验收不能外推到

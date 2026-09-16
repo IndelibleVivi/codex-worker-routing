@@ -7,7 +7,11 @@ import { randomUUID } from 'node:crypto';
 const home=process.env.HOME;
 const store=path.join(home,'fixture-sessions.json'),audit=path.join(home,'fixture-audit.ndjson');
 let sessions={};try{sessions=JSON.parse(await fs.readFile(store,'utf8'))}catch(e){if(e.code!=='ENOENT')throw e}
-const save=()=>fs.writeFile(store,JSON.stringify(sessions),{mode:0o600});
+async function save(){
+ const temp=`${store}.${randomUUID()}.tmp`;
+ try{await fs.writeFile(temp,JSON.stringify(sessions),{mode:0o600});await fs.rename(temp,store)}
+ finally{await fs.rm(temp,{force:true})}
+}
 const send=x=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',...x})+'\n');
 const reply=(id,result)=>send({id,result});
 const fail=(id,message)=>send({id,error:{code:-32602,message}});
@@ -38,7 +42,12 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     if(allowed)await fs.writeFile(path.join(s.cwd,'fixture-result.txt'),'fixture only\n');
     return complete(id,params,JSON.stringify({turn:s.turn,sessionId:params.sessionId,allowed}));
    }
-   return complete(id,params,JSON.stringify({turn:s.turn,sessionId:params.sessionId,main_marker_present:Boolean(process.env.CWR_PRIVATE_TEST_MARKER),home}));
+   // Echo only the isolation-relevant environment names. Synthetic values only;
+   // no host secrets, credentials, user data or network access.
+   return complete(id,params,JSON.stringify({turn:s.turn,sessionId:params.sessionId,main_marker_present:Boolean(process.env.CWR_PRIVATE_TEST_MARKER),home,
+    temp:process.env.TEMP??null,tmp:process.env.TMP??null,userprofile:process.env.USERPROFILE??null,
+    appdata:process.env.APPDATA??null,localappdata:process.env.LOCALAPPDATA??null,
+    comspec:process.env.COMSPEC??null,pathext:process.env.PATHEXT??null,systemroot:process.env.SystemRoot??null}));
   }
   if(method==='session/cancel'){
    const p=pending.get(params.sessionId);if(p){clearTimeout(p.timer);await complete(p.id,p.params,'','cancelled')}

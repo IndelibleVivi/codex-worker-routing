@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
-import { loadConfig, loadControlConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment } from './config.mjs';
+import { loadConfig, loadControlConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
 
 const HELP = `cwr-acp (optional channel; does not replace native subagents)
@@ -96,7 +96,7 @@ export async function main(args, deps = {}) {
   const opt = parseArgs(args);
   const output = deps.output ?? (r => process.stdout.write(`${JSON.stringify(r)}\n`));
   if (opt.command === 'help') { (deps.help ?? (s => process.stdout.write(s)))(HELP); return 0; }
-  if (process.platform === 'win32') throw new Fault('UNSUPPORTED_PLATFORM','v0.1 supports macOS and Linux; Windows needs separate filesystem/process validation.');
+  assertSupportedPlatform();
   const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';
   const config = controlOnly ? await loadControlConfig(opt.config) : await loadConfig(opt.config);
   let binding;

@@ -12,7 +12,7 @@
     "cwr-acp": "./src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/cli.test.mjs test/config-state.test.mjs test/engine.test.mjs test/fixture.test.mjs",
     "test:acpx": "node --test test/real-acpx.integration.mjs",
     "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/config.mjs && node --check src/state.mjs && npm test"
   },
@@ -21,6 +21,7 @@
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ]
 }

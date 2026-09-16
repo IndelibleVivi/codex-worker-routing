@@ -59,6 +59,17 @@ flowchart LR
 移除宿主自动共享的工程规则，也不构成文件访问 sandbox。native、ACP、provider 与
 model 的临时优先级由 operator 在 Git 外配置，仓库本身不替使用者决定。
 
+## 第一次配置
+
+如果你还没有完整走过一次派工，先看[从零到第一次成功派工](docs/first-delegated-task.md)。
+它把 model/provider、native subagent、Worker Routing plugin、可选 ACP route 和最终验收
+分成五层，并给出三条可独立采用的路线与排错表。
+
+要把自有 API model 放进 Codex native model picker，见
+[自定义 native model picker](docs/native-model-picker.md)。该例子同时覆盖直接连接
+Responses-compatible API 与在本机 router/proxy 后汇集多个 upstream；provider、key、
+套餐优先级和 fallback 始终留在 operator 的 Git 外配置里，不进入 Worker Routing policy。
+
 ## 日常使用
 
 安装后正常提出工程任务即可。主 agent 在有收益时交出完整责任：调查、实现、自测

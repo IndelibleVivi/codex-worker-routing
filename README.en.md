@@ -64,6 +64,20 @@ not remove engineering rules attached by the host or create a file-access sandbo
 Temporary native, ACP, provider, and model priorities belong in operator configuration
 outside Git; the repository does not choose them for the user.
 
+## First Setup
+
+If you have not completed one delegated task end to end, start with
+[from zero to a first successful delegated task](docs/first-delegated-task.en.md). It
+separates model/provider access, native subagents, the Worker Routing plugin, the
+optional ACP route, and coordinator acceptance, then gives three independent setup
+paths and a troubleshooting table.
+
+To add an API model to the native Codex model picker, use the
+[custom native model picker guide](docs/native-model-picker.en.md). It covers both a
+direct Responses-compatible endpoint and several upstreams behind one local
+router/proxy. Provider keys, subscription priorities, and fallback policy remain in
+operator-owned configuration outside Git and never become Worker Routing policy.
+
 ## Everyday Use
 
 After installation, just ask for engineering work as usual. The main agent hands over a

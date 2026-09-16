@@ -17,19 +17,45 @@ export function within(root, candidate) {
   const r = path.relative(root, candidate);
   return r === '' || (!r.startsWith(`..${path.sep}`) && r !== '..' && !path.isAbsolute(r));
 }
+// POSIX mode bits are evidence only where the OS exposes them. Windows reports
+// synthesized read/write modes (0666) that never encode ACL privacy, so callers
+// must treat privacy as unverified there instead of failing closed on 0666.
+export const exposesPosixModes = (platform = process.platform) => platform !== 'win32';
+// Node exposes no portable directory-handle fsync on Windows; atomic rename is
+// still used, only the parent-directory durability barrier is skipped.
+export const exposesDirectoryFsync = (platform = process.platform) => platform !== 'win32';
 function owned(st) {
   if (process.getuid && st.uid !== process.getuid())
     throw new Fault('FOREIGN_OWNER', 'Managed files must belong to the current user.');
 }
-export async function regular(file, { privateFile = false, maxBytes = 1024 * 1024 } = {}) {
+export function assertPrivateMode(st, kind, platform = process.platform) {
+  if (!exposesPosixModes(platform)) return;
+  if (st.mode & 0o077) throw new Fault('PUBLIC_STATE', kind === 'directory' ? 'Private directories require mode 0700.' : 'Private files require mode 0600.');
+}
+// Enumerate managed ancestors without repeating a drive or UNC root. Splitting
+// the raw absolute path repeats `C:`/`\\server\share`; walking relative to the
+// path's own parsed root works for POSIX, drive-letter and UNC forms alike.
+export function ancestorPaths(dir, pathImpl = path) {
+  if (!pathImpl.isAbsolute(dir)) throw new Fault('RELATIVE_STATE', 'State paths must be absolute.');
+  const root = pathImpl.parse(dir).root;
+  const segments = pathImpl.relative(root, dir).split(pathImpl.sep).filter(Boolean);
+  const ancestors = [];
+  let current = root;
+  for (const segment of segments) { current = pathImpl.join(current, segment); ancestors.push(current); }
+  return { root, ancestors };
+}
+export async function regular(file, { privateFile = false, maxBytes = 1024 * 1024, platform = process.platform } = {}) {
   const st = await fs.lstat(file);
   if (!st.isFile() || st.nlink !== 1) throw new Fault('UNSAFE_FILE', 'Expected a single-link regular file.');
   if (st.size > maxBytes) throw new Fault('INPUT_TOO_LARGE', 'Input exceeds the configured byte limit.');
   if (privateFile) {
     owned(st);
-    if ((st.mode & 0o077) !== 0) throw new Fault('PUBLIC_STATE', 'Private files require mode 0600.');
+    assertPrivateMode(st, 'file', platform);
   }
-  const h = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  // O_NOFOLLOW/O_NONBLOCK are POSIX flags. Where the platform does not expose
+  // them the open-then-stat identity comparison below is the no-follow check.
+  const flags = constants.O_RDONLY | (platform === 'win32' ? 0 : (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  const h = await fs.open(file, flags);
   try {
     const now = await h.stat();
     if (!now.isFile() || now.nlink !== 1 || now.ino !== st.ino || now.dev !== st.dev)
@@ -53,21 +79,19 @@ export async function readJSON(file, options = {}) {
 
 // Parent-first validation rejects links/special files before mkdir. On macOS,
 // callers canonicalize existing ancestors (/var -> /private/var) first.
-export async function privateDir(dir, { create = true } = {}) {
-  if (!path.isAbsolute(dir)) throw new Fault('RELATIVE_STATE', 'State paths must be absolute.');
-  const pieces = dir.split(path.sep).filter(Boolean);
-  let current = path.parse(dir).root;
+export async function privateDir(dir, { create = true, platform = process.platform } = {}) {
+  const { ancestors } = ancestorPaths(dir);
   let missing = false;
-  for (let i = 0; i < pieces.length; i++) {
-    current = path.join(current, pieces[i]);
+  for (let i = 0; i < ancestors.length; i++) {
+    const current = ancestors[i];
     let st;
     try { st = await fs.lstat(current); }
     catch (e) { if (e.code !== 'ENOENT') throw e; missing = true; }
     if (st) {
       if (!st.isDirectory()) throw new Fault('UNSAFE_DIRECTORY', 'State ancestry contains a link or non-directory.');
-      if (i === pieces.length - 1) {
+      if (i === ancestors.length - 1) {
         owned(st);
-        if (st.mode & 0o077) throw new Fault('PUBLIC_STATE', 'Private directories require mode 0700.');
+        assertPrivateMode(st, 'directory', platform);
       }
     } else if (!create) throw new Fault('STATE_MISSING', 'The state directory does not exist.');
   }
@@ -75,15 +99,20 @@ export async function privateDir(dir, { create = true } = {}) {
   const st = await fs.lstat(dir);
   if (!st.isDirectory()) throw new Fault('UNSAFE_DIRECTORY', 'Unsafe state directory.');
   owned(st);
-  if (st.mode & 0o077) throw new Fault('PUBLIC_STATE', 'Private directories require mode 0700.');
+  assertPrivateMode(st, 'directory', platform);
 }
-export async function atomicJSON(file, value) {
-  await privateDir(path.dirname(file));
+export async function syncDirectory(dir, platform = process.platform) {
+  if (!exposesDirectoryFsync(platform)) return;
+  const dh = await fs.open(dir, 'r');
+  try { await dh.sync(); } finally { await dh.close(); }
+}
+export async function atomicJSON(file, value, { platform = process.platform } = {}) {
+  await privateDir(path.dirname(file), { platform });
   try {
     const st = await fs.lstat(file);
     if (!st.isFile() || st.nlink !== 1) throw new Fault('UNSAFE_FILE', 'Refusing to replace an unsafe state file.');
     owned(st);
-    if (st.mode & 0o077) throw new Fault('PUBLIC_STATE', 'Private files require mode 0600.');
+    assertPrivateMode(st, 'file', platform);
   } catch (e) { if (e.code !== 'ENOENT') throw e; }
   const temp = `${file}.${randomUUID()}.tmp`;
   const h = await fs.open(temp, 'wx', 0o600);
@@ -93,8 +122,7 @@ export async function atomicJSON(file, value) {
   } finally { await h.close(); }
   try {
     await fs.rename(temp, file);
-    const dh = await fs.open(path.dirname(file), 'r');
-    try { await dh.sync(); } finally { await dh.close(); }
+    await syncDirectory(path.dirname(file), platform);
   } finally { await fs.rm(temp, { force: true }); }
 }
 export async function lock(dir, owner) {
