@@ -32,6 +32,15 @@ export function assertPrivateMode(st, kind, platform = process.platform) {
   if (!exposesPosixModes(platform)) return;
   if (st.mode & 0o077) throw new Fault('PUBLIC_STATE', kind === 'directory' ? 'Private directories require mode 0700.' : 'Private files require mode 0600.');
 }
+// On Windows Node reports dev=0 for a path lstat but the real volume id for the
+// matching open handle. The file id (ino) remains stable. Compare the volume id
+// whenever both sides expose one; never let the synthesized zero reject every
+// normal Windows file.
+export function sameFileIdentity(before, after, platform = process.platform) {
+  if (before.ino !== after.ino) return false;
+  if (platform === 'win32' && (before.dev === 0 || after.dev === 0)) return true;
+  return before.dev === after.dev;
+}
 // Enumerate managed ancestors without repeating a drive or UNC root. Splitting
 // the raw absolute path repeats `C:`/`\\server\share`; walking relative to the
 // path's own parsed root works for POSIX, drive-letter and UNC forms alike.
@@ -58,7 +67,7 @@ export async function regular(file, { privateFile = false, maxBytes = 1024 * 102
   const h = await fs.open(file, flags);
   try {
     const now = await h.stat();
-    if (!now.isFile() || now.nlink !== 1 || now.ino !== st.ino || now.dev !== st.dev)
+    if (!now.isFile() || now.nlink !== 1 || !sameFileIdentity(st, now, platform))
       throw new Fault('FILE_CHANGED', 'Input changed while opening.');
     // Bound the actual read too: the file may grow after stat().
     const buf = Buffer.alloc(maxBytes + 1);

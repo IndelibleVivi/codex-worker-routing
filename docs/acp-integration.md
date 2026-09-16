@@ -95,6 +95,9 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
   config、stateDir 与 workerHome 放在受 ACL 控制的当前用户位置（或为其建立等效 ACL）；
   cwr-acp 不实现也不声称提供这项保证，也不会因位置不合规而拒绝启动。这些路径还必须位于本地卷
   （见上）：映射到网络位置的盘符在本层无法识别，只能由操作者保证。
+- Node 在 Windows 上会让 path `lstat` 的 `dev` 为 0，而同一文件的 open-handle stat 返回真实
+  volume id。cwr-acp 始终要求两侧 file id（`ino`）一致；只有两侧都报告非零 `dev` 时才再比较
+  volume id。这样保留打开后的文件身份检查，不会把每个正常 Windows 文件误判为被替换。
 - 目录 fsync 在 Windows 上不可用（Node 未暴露可靠的目录句柄 fsync）。`atomicJSON` 仍使用同目录
   临时文件、文件 fsync 与 atomic rename，但不再声称目录级持久化屏障；`close` 仍要求
   cleanup confirmed。

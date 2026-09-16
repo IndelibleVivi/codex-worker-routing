@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { loadConfig,selectRoute,buildEnvironment,canonicalFuture,prepareHome,executableProblem,assertLocalManagedPath,assertSupportedPlatform } from '../src/config.mjs';
-import { regular,atomicJSON,privateDir,lock,sessionId,ancestorPaths,assertPrivateMode,syncDirectory,exposesPosixModes } from '../src/state.mjs';
+import { regular,atomicJSON,privateDir,lock,sessionId,ancestorPaths,assertPrivateMode,sameFileIdentity,syncDirectory,exposesPosixModes } from '../src/state.mjs';
 import { fixture } from './helpers.mjs';
 async function f(t){const v=await fixture();t.after(v.cleanup);return v}
 async function rewrite(v,change){change(v.raw);await fs.writeFile(v.configFile,JSON.stringify(v.raw));return loadConfig(v.configFile)}
@@ -58,6 +58,10 @@ test('private-mode enforcement follows platform capability, not assumed POSIX bi
  assert.throws(()=>assertPrivateMode({mode:0o666},'file','linux'),{code:'PUBLIC_STATE'});
  assert.equal(assertPrivateMode({mode:0o666},'file','win32'),undefined);
  assert.equal(assertPrivateMode({mode:0o777},'directory','win32'),undefined);
+ assert.equal(sameFileIdentity({ino:7,dev:0},{ino:7,dev:42},'win32'),true);
+ assert.equal(sameFileIdentity({ino:7,dev:41},{ino:7,dev:42},'win32'),false);
+ assert.equal(sameFileIdentity({ino:7,dev:0},{ino:8,dev:42},'win32'),false);
+ assert.equal(sameFileIdentity({ino:7,dev:0},{ino:7,dev:42},'linux'),false);
 });
 test('state privacy checks accept platform-reported 0666/0755 only where Node exposes no POSIX evidence',async t=>{
  const v=await f(t);const d=path.join(v.root,'mode-target');
