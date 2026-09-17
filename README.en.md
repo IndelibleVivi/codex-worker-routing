@@ -78,6 +78,11 @@ direct Responses-compatible endpoint and several upstreams behind one local
 router/proxy. Provider keys, subscription priorities, and fallback policy remain in
 operator-owned configuration outside Git and never become Worker Routing policy.
 
+ACP route reachability has a separate protocol boundary: the channel carries sessions,
+lifecycle, permissions, and evidence, but it does not translate provider wire formats.
+For why a route or model can initialize while inference still fails, see
+[the ACP channel and provider-protocol boundary](docs/acp-provider-protocols.en.md).
+
 ## Everyday Use
 
 After installation, just ask for engineering work as usual. The main agent hands over a

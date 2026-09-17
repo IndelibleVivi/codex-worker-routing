@@ -18,6 +18,18 @@
 不引入新的 planner/tester/reviewer 流水线，不封装原生工具，不建第二套计划系统。
 少量 binding/receipt JSON 只绑定已有 acpx 会话和执行证据，不复制它的会话实现。
 
+## 责任边界：ACP 通道不翻译 provider 协议
+
+cwr-acp 与 acpx 负责 session、生命周期、权限应答与执行证据；它们不翻译 provider 的
+HTTP wire format，也不决定 worker 用哪个模型客户端。route 的 adapter 与隔离
+worker profile 才决定实际运行什么客户端/运行时，以及它怎样到达 provider。
+
+因此一条 route 或一个已列出的 model 能初始化，不等于真实推理会成功：Codex 自定义
+provider 当前按 Responses wire format 发请求，一个只讲 `/chat/completions` 的上游
+需要中间有协议转换层。这个边界、`codex-acp` 式拓扑的例子、逐层验证阶梯与排错表见
+[ACP 通道与 provider 协议边界](acp-provider-protocols.md)。该文档只描述边界，
+不构成 Worker Routing 的核心契约，也不规定 provider 或 fallback 策略。
+
 ## 实现选择
 
 选择公开 `acpx/runtime` API，固定顶层依赖为 `0.15.1`。调用 `ensureSession`、

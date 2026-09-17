@@ -70,6 +70,10 @@ model 的临时优先级由 operator 在 Git 外配置，仓库本身不替使�
 Responses-compatible API 与在本机 router/proxy 后汇集多个 upstream；provider、key、
 套餐优先级和 fallback 始终留在 operator 的 Git 外配置里，不进入 Worker Routing policy。
 
+ACP route 的可达性另有协议边界：通道负责 session、生命周期、权限与证据，不负责
+provider wire format 的转换。为什么 route 或 model 能初始化而推理仍会失败，见
+[ACP 通道与 provider 协议边界](docs/acp-provider-protocols.md)。
+
 ## 日常使用
 
 安装后正常提出工程任务即可。主 agent 在有收益时交出完整责任：调查、实现、自测
