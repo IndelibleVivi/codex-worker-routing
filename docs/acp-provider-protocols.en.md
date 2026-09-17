@@ -162,3 +162,6 @@ configured endpoint.
   setup.
 - [From zero to a first successful delegated task](first-delegated-task.en.md): locate
   the failing layer first.
+- [Use the Command Code Provider API through Codex Router](commandcode-via-codex-router.en.md):
+  a followable example of a Chat Completions-only upstream behind a local router, plus
+  troubleshooting.

@@ -139,3 +139,5 @@ Worker Routing 或 cwr-acp 的职责范围内。
 - [可选 ACP 执行通道](acp-integration.md)：route schema、命令与安全边界。
 - [自定义 native model picker](native-model-picker.md)：provider 与 catalog 的完整配置。
 - [从零到第一次成功派工](first-delegated-task.md)：先定位失败在哪一层。
+- [经 Codex Router 使用 Command Code Provider API](commandcode-via-codex-router.md)：
+  Chat Completions-only 上游经本地 router 翻译的可照做例子与排错。

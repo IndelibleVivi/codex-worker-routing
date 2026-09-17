@@ -74,6 +74,11 @@ ACP route 的可达性另有协议边界：通道负责 session、生命周期�
 provider wire format 的转换。为什么 route 或 model 能初始化而推理仍会失败，见
 [ACP 通道与 provider 协议边界](docs/acp-provider-protocols.md)。
 
+一个具体的端到端例子见
+[经 Codex Router 使用 Command Code Provider API](docs/commandcode-via-codex-router.md)：
+它把上游 Chat Completions 经本地 Codex Router 翻成 Codex 需要的 Responses，并可选复用
+同一台 router 配置一个隔离的 ACP worker route。
+
 ## 日常使用
 
 安装后正常提出工程任务即可。主 agent 在有收益时交出完整责任：调查、实现、自测

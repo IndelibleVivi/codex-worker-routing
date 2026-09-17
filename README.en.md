@@ -83,6 +83,11 @@ lifecycle, permissions, and evidence, but it does not translate provider wire fo
 For why a route or model can initialize while inference still fails, see
 [the ACP channel and provider-protocol boundary](docs/acp-provider-protocols.en.md).
 
+For one concrete end-to-end example, see
+[using the Command Code Provider API through Codex Router](docs/commandcode-via-codex-router.en.md):
+it turns an upstream Chat Completions API into the Responses shape Codex needs via a local
+Codex Router, and optionally reuses that same router for an isolated ACP worker route.
+
 ## Everyday Use
 
 After installation, just ask for engineering work as usual. The main agent hands over a
