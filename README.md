@@ -10,6 +10,24 @@
 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
 proxy 或固定 planner/tester/reviewer 流水线。
 
+## Dispatch · 派工台
+
+Home 默认显示聚合统计：时间走势、验收构成、route 分工与修正原因；具体工单回放在「记录」。
+
+给日常协作留下一条看得见的轨迹：按时间窗口查看 ACP 工作量，展开同一 worker
+的续做、送验、修正、接受与接管，分别检查主机验证和 worker 自述。白底、鼠尾草绿、马卡龙粉与深茄紫的
+本地面板也能生成横版 / 竖版 SVG、PNG 分享图，导出只含汇总白名单，不含工单、
+私有 route 名、路径或内部 ID。
+
+```sh
+node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
+node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
+```
+
+页面只读、仅监听 loopback、按需运行；没有 analytics 或额外 frontend dependency。
+累计 tokens 去重并标明用量覆盖率，缺少数据保持未知；不把 runtime 完成冒充验收，
+也不估算节省的 Codex 额度。首版统计范围明确为 ACP。见[派工台使用指南](docs/dispatch.md)。
+
 ## 架构
 
 ```mermaid
@@ -27,6 +45,7 @@ flowchart LR
     Native["Native Codex worker<br/>bounded responsibility"]
     ACPBridge["cwr-acp + registered adapter<br/>persistent ACP session"]
     External["External ACP worker<br/>bounded responsibility"]
+    Dispatch["Local Dispatch dashboard<br/>read-only receipt projection"]
   end
 
   Private["Private main-session instructions<br/>outside Git"]
@@ -51,6 +70,8 @@ flowchart LR
   ACPBridge -->|ACP session| External
   External -->|result + evidence| ACPBridge
   ACPBridge -->|receipt + excerpt| Main
+  ACPBridge -->|private receipts| Dispatch
+  Main -->|explicit review events| Dispatch
   Main -->|integrated delivery| User
 ```
 

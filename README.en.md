@@ -13,6 +13,26 @@ plugin; the optional ACP integration connects a registered external coding agent
 hook to load local private instructions automatically. There is no additional MCP
 server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 
+## Dispatch
+
+Home opens with aggregate statistics: activity over time, acceptance composition, route distribution and revision reasons. Individual replays live in Records.
+
+Give everyday collaboration a visible trail: inspect ACP workload by period, replay one
+worker's continuations, submissions, revisions, acceptance and takeovers, and distinguish
+coordinator verification from worker-reported evidence. The white, sage, pink and plum local dashboard
+also exports landscape / portrait SVG and PNG share cards through an aggregate-only allowlist:
+no work orders, private route names, paths or internal IDs.
+
+```sh
+node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
+node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
+```
+
+It is read-only, loopback-only and on demand, with no analytics or additional frontend
+dependency. Cumulative tokens are deduplicated with explicit coverage; missing data stays
+unknown. Runtime completion is not acceptance, and observed workload is not an estimate of
+Codex quota saved. Coverage is explicitly ACP-only. See the [Dispatch guide](docs/dispatch.en.md).
+
 ## Architecture
 
 ```mermaid
@@ -30,6 +50,7 @@ flowchart LR
     Native["Native Codex worker<br/>bounded responsibility"]
     ACPBridge["cwr-acp + registered adapter<br/>persistent ACP session"]
     External["External ACP worker<br/>bounded responsibility"]
+    Dispatch["Local Dispatch dashboard<br/>read-only receipt projection"]
   end
 
   Private["Private main-session instructions<br/>outside Git"]
@@ -54,6 +75,8 @@ flowchart LR
   ACPBridge -->|ACP session| External
   External -->|result + evidence| ACPBridge
   ACPBridge -->|receipt + excerpt| Main
+  ACPBridge -->|private receipts| Dispatch
+  Main -->|explicit review events| Dispatch
   Main -->|integrated delivery| User
 ```
 

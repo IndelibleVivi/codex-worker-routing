@@ -7,6 +7,13 @@ plugin and its optional main-session context integration.
 - Edit `integrations/main-session/` for the native SessionStart adapter.
 - Edit `integrations/acpx/` for the optional ACP transport. Keep route names,
   provider/model priorities, account state, worker homes, and route config outside Git.
+- Dispatch source lives in `integrations/acpx/src/dispatch.mjs`, `dashboard.mjs`,
+  `share.mjs` and `dashboard/`. Receipts own runtime truth; append-only review
+  events own attributed collaboration annotations; projections are rebuildable.
+  Keep HTTP loopback-only and exports aggregate-only. Never publish real state
+  or infer acceptance, rework, provider identity or quota savings from completion.
+  Validate accounting/privacy/shutdown with the ACP suite and exercise the actual
+  dashboard in desktop and narrow browser viewports after UI changes.
 - Keep provider IDs and personal preferences in operator-owned configuration.
 - Never place personal instructions, chats, memory, tokens, real request captures,
   machine paths, or private continuity in this repository, including fixtures.

@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Fault, atomicJSON, privateDir, paths } from './state.mjs';
+import { classifyTurn, planSessionMetadata, planContinuation } from './dispatch.mjs';
 
 const now = () => new Date().toISOString();
 const safeCode = e => typeof e?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(e.code) ? e.code : 'ACP_EXECUTION_FAILED';
@@ -75,6 +76,29 @@ export function runtimeOptions(selection, store, processLifecycle) {
  */
 export async function executeTurn({ config, selection, binding, text, isNew, acpx, signal, requestId = randomUUID(), cleanupMs = 8000, observer }) {
   const p = paths(config.stateDir, binding.id);
+  // Dispatch collaboration metadata is captured for every ACP turn so a
+  // responsibility stays classifiable even if later event recording fails. This
+  // is additive and never a second runtime owner: it merges a small
+  // `binding.dispatch` object before execution. `title`/`category` stay bound
+  // to the session; ordinary binding-write failures retain the runtime gate.
+  const dispatchPlan = isNew
+    ? classifyTurn(binding, { titleProvided: Boolean(config.dispatch?.titleProvided), title: config.dispatch?.title, categoryProvided: Boolean(config.dispatch?.category), category: config.dispatch?.category })
+    : null;
+  const continuationPlan = isNew ? null : planContinuation(binding);
+  // Make the title/category/parent metadata visible while the turn is still
+  // active: write the binding before execution rather than only at the end.
+  // Parent ids are captured before the environment scrub. A new responsibility
+  // binds them directly; a legacy continuation without a recorded parent may
+  // record the OBSERVED parent with `observed_at`, but never claims a historical
+  // association it cannot prove.
+  if (config.dispatch?.parent && !binding.parent) {
+    binding.parent = isNew
+      ? { ...config.dispatch.parent }
+      : { ...config.dispatch.parent, observed_at: new Date().toISOString() };
+  }
+  const earlyMeta = dispatchPlan ? planSessionMetadata(binding, dispatchPlan, { legacy: dispatchPlan.legacy }) : continuationPlan;
+  if (earlyMeta) binding.dispatch = earlyMeta;
+  await atomicJSON(p.binding, binding);
   const recordDir = path.join(config.stateDir, 'acpx', binding.id);
   await privateDir(recordDir);
   await privateDir(p.receipts);
@@ -196,6 +220,11 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     output_excerpt: excerpt, output_truncated: truncated, observed_event_count: eventCount,
     transcript_state_dir: recordDir,
     receipt_path: path.join(p.receipts, `${requestId}.json`), diagnostic_path: diagnosticPath,
+    // Additive Dispatch pointers, written durably with the receipt. The pointer
+    // is a local request id, never a filesystem path: projections never expose it.
+    // A retention failure is recorded here rather than only printed afterwards.
+    work_order_pointer: config.dispatch?.orderPointer ? requestId : null,
+    dispatch_warning: config.dispatch?.orderWarning ?? null,
   };
   await atomicJSON(receipt.receipt_path, receipt);
   binding.lastReceipt = receipt.receipt_path;

@@ -125,6 +125,16 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
   与 `npm run test:acpx`，真实 acpx 合成夹具套件在其中运行；Windows 专属回归不使用 skip 计数
   作为证据。
 
+## 本地 Dispatch 投影
+
+`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 只读面板，`record` 追加
+来源明确的送验、修正、接受和接管事件。runtime receipts 仍是执行真源，协作事件
+不修改回执中的 `task_acceptance: unverified`。新派工可提供 title/category；
+可用的主会话 ID 在环境清理前仅留存于本机 private state，不传入 worker。
+新增 run / continue 工单也留在 private state，按需供本地回放；它们不进入公开分享。
+读取历史与协作事件不要求 adapter、worker home 或原 workspace 仍然可用。
+完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.md)。
+
 ## 日常用法
 
 安装目录变量只用于展示；实际使用登记好的绝对路径。
@@ -160,7 +170,7 @@ node "$ENTRY" close --config "$CONFIG" --session UUID
 
 ## 状态、上下文与安全边界
 
-stateDir 只保存 binding/回执与 acpx 的私有 store。目录 0700、文件 0600；写入使用
+stateDir 保存 binding/回执、Dispatch 的本地协作事件与工单，以及 acpx 的私有 store。目录 0700、文件 0600；写入使用
 同目录临时文件、fsync 和 atomic rename。输入拒绝 symlink、hardlink、FIFO 等特殊文件。
 workerHome/stateDir 根可使用系统祖先目录的规范路径，但根自身和受管后代不接受 symlink。
 目录 0700/文件 0600 的断言只在暴露 POSIX mode 的平台成立；Windows 上 mode 不是隐私证据，

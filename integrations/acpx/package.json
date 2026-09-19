@@ -12,9 +12,9 @@
     "cwr-acp": "./src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test test/cli.test.mjs test/config-state.test.mjs test/engine.test.mjs test/fixture.test.mjs",
+    "test": "node --test test/cli.test.mjs test/config-state.test.mjs test/engine.test.mjs test/fixture.test.mjs test/dispatch.test.mjs test/dashboard.test.mjs",
     "test:acpx": "node --test test/real-acpx.integration.mjs",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/config.mjs && node --check src/state.mjs && npm test"
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/config.mjs && node --check src/state.mjs && node --check src/dispatch.mjs && node --check src/dashboard.mjs && node --check src/share.mjs && node --check src/dashboard/app.mjs && npm test"
   },
   "dependencies": {
     "acpx": "0.15.1"

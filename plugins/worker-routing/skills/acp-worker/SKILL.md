@@ -35,7 +35,7 @@ prerequisite and keep the existing native route available.
 Use the trusted, operator-supplied paths in place of ENTRY and CONFIG:
 
 ```sh
-node ENTRY run --config CONFIG --route NAME --cwd WORKSPACE --file ORDER
+node ENTRY run --config CONFIG --route NAME --cwd WORKSPACE --file ORDER --title TITLE --category implementation
 node ENTRY continue --config CONFIG --session UUID --file INCREMENT
 node ENTRY status --config CONFIG --session UUID
 node ENTRY cancel --config CONFIG --session UUID
@@ -78,3 +78,39 @@ and conversation state stays in the private local acpx store. Missing usage stay
 unknown. Advertised model/usage fields are adapter reports, not billing evidence or
 proof of provider identity. Continue the same session for authorized implementation
 and rework. Close the responsibility after acceptance; closing does not delete history.
+
+## Natural collaboration records
+
+When the operator's canonical entry supports Dispatch (`stats`, `record`, `dashboard`),
+record collaboration as part of the coordinator's existing actions. The user should
+not maintain a performance form. Give a new responsibility a short task title and
+one category: investigation, implementation, review, other. The runtime retains the
+new work order locally and binds available parent ids; do not copy private context.
+
+Use `node ENTRY record --config CONFIG --session UUID --file EVENT_JSON` for an
+actual submission for review, explicit revision request, coordinator acceptance or
+coordinator takeover. Ordinary continuation is not a revision. Do not infer acceptance
+from runtime completion, classify provider text automatically, or backfill old decisions
+from memory. Use a note when describing a retrospective observation.
+
+The input uses schema `cwr.dispatch.event/1`, a new UUID `event_id` per action, the
+existing `session_id`, and `kind`: submitted, revision_requested, accepted, taken_over,
+or note. Keep this small JSON outside Git; do not put raw work orders or transcripts
+in it. `summary` is optional. Revision/takeover requires one reason: requirement_missed,
+validation_failed, scope_changed, constraint_added, environment_blocked, uncertain.
+Only claim checks actually performed. Optional evidence entries are
+`{source: coordinator|worker, kind: diff|test|manual|other, summary: text}`; worker
+claims keep their own source. An optional request_id must name an existing receipt.
+
+Keep the same event_id when retrying an uncertain write. Correct a mistaken label
+with a new event_id and `supersedes` pointing to the latest event in its chain; never
+rewrite the original file. If recording fails, report the missing annotation and
+continue the authorized work: never rerun the worker to repair telemetry. Record a
+real takeover when the coordinator finishes a worker's incomplete responsibility.
+Read `docs/dispatch-data.md` in the canonical checkout for the full contract.
+
+Use `stats --config CONFIG --since 7d` for local totals and `dashboard --config CONFIG`
+when asked for the visual overview. Neither invokes a model or reads account quota.
+Only the dashboard's aggregate export is prepared for sharing; stats JSON and detail
+contain local identifiers and task information. No automatic upload, A/B workload or
+quota-savings percentage is part of this flow.
