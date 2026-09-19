@@ -12,12 +12,20 @@ proxy 或固定 planner/tester/reviewer 流水线。
 
 ## Dispatch · 派工台
 
-Home 默认显示聚合统计：时间走势、验收构成、route 分工与修正原因；具体工单回放在「记录」。
+Home 默认显示聚合统计：时间走势、执行结果与可选复盘、route 分工与修正原因；具体工单回放在「记录」。
 
 给日常协作留下一条看得见的轨迹：按时间窗口查看 ACP 工作量，展开同一 worker
-的续做、送验、修正、接受与接管，分别检查主机验证和 worker 自述。白底、鼠尾草绿、马卡龙粉与深茄紫的
-本地面板也能生成横版 / 竖版 SVG、PNG 分享图，导出只含汇总白名单，不含工单、
-私有 route 名、路径或内部 ID。
+的续做、送验、修正、接受与接管，分别检查主机验证和 worker 自述。本地面板提供四套纸张配色，
+各配一只同族动物：默认「鼠尾草猫 / Sage cat」（折耳猫就是 Canon 身份），另有
+「燕麦玫瑰兔 / Oat bunny」「雾蓝奶油狗 / Mist puppy」「薰衣草杏熊 / Lilac bear」。
+配色应用到面板与图表，陪伴动物出现在首页标签与分享图圆章；选择记录在同源 localStorage 里，刷新后恢复。
+导出窗口每次从面板当前配色打开，可单独改配色而不影响面板，并可选择中文 / English 与横版 / 竖版，
+生成 SVG、PNG 分享图；文件名形如 `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`。
+导出只含汇总白名单，不含工单、私有 route 名、路径或内部 ID。Canon 是「折耳猫 + 默认鼠尾草」这一组：
+页首标识、favicon 与分享图页首在每套主题下都是同一矢量、同一颜色，独立 logo 下载也始终是它。
+
+统计自动读取执行回执，普通完成不需要另写验收标记，也不会变成待办。真正需要保留的返修
+可通过 `continue --revision-reason` 顺手记录；`pending` 仅按需列出异常和明确提出的复查。
 
 ```sh
 node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json

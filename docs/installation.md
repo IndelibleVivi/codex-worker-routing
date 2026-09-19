@@ -15,9 +15,9 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
 ## Dispatch 本地面板
 
 Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统服务。
-已有 ACP runtime 的 operator 可以直接运行 canonical CLI 的 `stats` / `dashboard`；
+已有 ACP runtime 的 operator 可以直接运行 canonical CLI 的 `stats` / `pending` / `dashboard`；
 读取历史无需启动 adapter。新增协作事件的自然记录说明位于 `acp-worker` skill，
-需要按上述 Plugin 流程刷新 installed copy；只有修改 source 不会改变旧 session 已加载的说明。
+连同内置猫头 icon 一起按上述 Plugin 流程刷新 installed copy；只有修改 source 不会改变旧 session 已加载的说明。
 完整命令、私有数据边界、导出与退出行为见[派工台](dispatch.md)。
 
 ## 主 session 自动加载

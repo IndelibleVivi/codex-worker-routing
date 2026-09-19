@@ -1,0 +1,13 @@
+<!-- SPDX-License-Identifier: SUL-1.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 128 128" role="img" aria-label="Worker Routing cat logo"><g transform="translate(-11 -10) scale(.12)">
+    <path fill="#44324f" d="M285 484C291 418 308 341 355 323C389 306 476 353 520 394C610 386 689 402 762 421L858 386C915 362 944 384 976 423L1033 480C1052 499 1043 539 1011 575L1005 595C1043 650 1050 742 1032 774C1004 883 897 918 733 929C574 940 423 922 337 890C254 860 200 769 196 685C191 601 238 532 285 484Z"/>
+    <path fill="#fffefa" d="M343 451C338 436 354 382 371 372C386 359 408 388 420 407Q428 419 413 423Q378 433 351 451Q344 457 343 451ZM859 473Q849 524 886 530Q905 533 920 526Q884 510 859 473Z"/>
+    <path fill="#a8be9c" d="M839 417C850 390 871 378 894 381C937 376 952 409 989 445L1033 480C1053 501 1042 545 1013 576C1022 552 1025 528 1003 529C954 540 916 529 890 498C865 471 874 443 852 435C839 432 832 431 839 417Z"/>
+    <path d="M396 595C438 576 494 591 522 621" fill="none" stroke="#fffefa" stroke-width="24" stroke-linecap="round"/>
+    <path fill="#fffefa" d="M740 661C763 646 810 635 831 642C843 647 848 660 841 668C813 662 778 666 745 672Q732 674 740 661Z"/>
+    <ellipse cx="386" cy="681" rx="51" ry="35" transform="rotate(9 386 681)" fill="#edbed0"/>
+    <ellipse cx="842" cy="759" rx="51" ry="33" transform="rotate(8 842 759)" fill="#edbed0"/>
+    <path d="M546 718C568 729 600 719 612 697C624 728 700 752 726 713M241 625L306 637M245 679L302 666M932 727L1001 732M929 759L985 784" fill="none" stroke="#fffefa" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+    <path fill="#edbed0" d="M599 655C611 653 637 657 646 663C658 676 629 689 617 691C603 685 581 660 599 655Z"/>
+    <path d="M377 670L366 683M405 678L393 691M836 750L825 764M861 758L850 771" fill="none" stroke="#88657f" stroke-width="8" stroke-linecap="round"/>
+  </g></svg>

@@ -9,6 +9,10 @@
 测试事件是本机协议 fixture，没有真实账号、私人请求或模型输出，没有复制 Codex
 runtime 或外部 adapter 实现。`acpx` 及其传递依赖保持各自的第三方许可。
 
+猫头标识经历本项目的图像生成探索，折耳猫以原生 SVG 重绘；运行和分发使用
+`integrations/acpx/src/brand.mjs` 的矢量实现；概念图不属于运行依赖。相邻主题中的兔、狗、熊为本项目原生 SVG 绘制，
+由 `integrations/acpx/src/mascots.mjs` 维护，保留同一家族的造型语言。
+
 接口参考 OpenAI 的 [Hooks](https://learn.chatgpt.com/docs/hooks) 和
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档，
 并用本机 binary 独立观察。本项目不是 OpenAI 官方产品或其维护的 fork。

@@ -8,7 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
 import { loadConfig, loadControlConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
-import { recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder } from './dispatch.mjs';
+import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
+
 
 // Property tables for the argument parser. `flags` take no value; `values` take
 // exactly one. The legacy commands keep their exact option sets. `--json` is a
@@ -18,12 +19,13 @@ const FLAG = Object.freeze({
 });
 const VALUES = Object.freeze({
   run: ['config', 'route', 'cwd', 'file', 'permissions', 'title', 'category'],
-  continue: ['config', 'session', 'file', 'permissions'],
+  continue: ['config', 'session', 'file', 'permissions', 'revision-reason'],
   status: ['config', 'session'],
   cancel: ['config', 'session'],
   close: ['config', 'session'],
   stats: ['config', 'since'],
   record: ['config', 'session', 'file'],
+  pending: ['config'],
   dashboard: ['config', 'since', 'port'],
 });
 const REQUIRED = Object.freeze({
@@ -34,6 +36,7 @@ const REQUIRED = Object.freeze({
   close: ['config', 'session'],
   stats: ['config'],
   record: ['config', 'session', 'file'],
+  pending: ['config'],
   dashboard: ['config'],
 });
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
@@ -42,10 +45,12 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   run      --config FILE --route NAME --cwd DIR --file ORDER [--permissions read|full]
            [--title TEXT] [--category investigation|implementation|review|other]
   continue --config FILE --session UUID --file INCREMENT [--permissions read|full]
+           [--revision-reason REASON]
   status   --config FILE --session UUID
   cancel   --config FILE --session UUID
   close    --config FILE --session UUID
   record   --config FILE --session UUID --file EVENT_JSON
+  pending  --config FILE
   stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--json]
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
 
@@ -53,10 +58,25 @@ run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTER
 request cancellation. cancel writes a nonce-bound local request; it does not
 claim the worker has stopped. No automatic route fallback or background wakeup.
 
-stats and record read the private state root only; they never load, import or
-scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs. All
-three are read-only projections except record, which appends one collaboration
-event and never rewrites a runtime receipt.
+stats, record and pending read the private state root only; they never load,
+import or scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
+All are read-only projections except record, which appends one collaboration event
+and never rewrites a runtime receipt.
+
+continue --revision-reason REASON is an OPTIONAL shortcut for a genuine
+correction: it appends a revision_requested event (using the documented reason
+enum) before the prompt, so the rework is attributed without a separate file. It
+is not required for ordinary continuation, and a plain continue never records a
+revision. If the annotation cannot be recorded, the interruption is surfaced as a
+dispatch warning and the authorized task still runs exactly once. REASON is one
+of requirement_missed, validation_failed, scope_changed, constraint_added,
+environment_blocked, uncertain.
+
+Review state is derived automatically from existing receipts and explicit review
+events; ordinary completion or close without any annotation is normal and is not
+an outstanding review obligation. pending is an on-demand read-only view of only
+actionable records (awaiting_review, changes_requested, needs_attention); it is
+not a backlog you must clear. Safe ids, state, status and title only.
 `;
 export function parseArgs(args) {
   const [command, ...rest] = args;
@@ -151,6 +171,13 @@ export async function main(args, deps = {}) {
     output(await recordEvent(config.stateDir, opt.session, event));
     return 0;
   }
+  if (opt.command === 'pending') {
+    // Read-only: actionable tracked review records only, no legacy backlog and
+    // no adapter. Never prints work-order text, output or a filesystem path.
+    const config = await loadControlConfig(opt.config);
+    output(await listPendingSessions(config.stateDir));
+    return 0;
+  }
   if (opt.command === 'dashboard') {
     const config = await loadControlConfig(opt.config);
     return startDashboardCommand(config, opt, { text, output, deps });
@@ -164,6 +191,13 @@ export async function main(args, deps = {}) {
     }
     if (opt.category !== undefined && !['investigation', 'implementation', 'review', 'other'].includes(opt.category))
       throw new Fault('USAGE', '--category must be investigation, implementation, review or other.');
+    // Validated in NORMAL preflight, before any lock or prompt, so an invalid
+    // reason never starts an adapter turn.
+    if (opt['revision-reason'] !== undefined) {
+      if (opt.command !== 'continue') throw new Fault('USAGE', '--revision-reason is only valid for continue.');
+      if (!REASON_VALUES.includes(opt['revision-reason']))
+        throw new Fault('USAGE', `--revision-reason must be one of ${REASON_VALUES.join(', ')}.`);
+    }
     // The parent identifiers come from the coordinator's own process and must be
     // captured BEFORE buildEnvironment/replaceOwnEnvironment scrubs them. They
     // are identifiers only; nothing is taken from the child environment.
@@ -180,7 +214,12 @@ export async function main(args, deps = {}) {
   if (opt.command === 'close') {
     const p = paths(config.stateDir,binding.id);
     const unlock = await lock(p.lock,{nonce:randomUUID(),pid:process.pid});
-    try { output(await closeBinding({config,binding})); return 0; } finally { await unlock(); }
+    try {
+      // Reload under the held session lock so a concurrent change between the
+      // initial read and lock acquisition cannot close stale state.
+      const current = await loadBinding(config.stateDir, binding.id);
+      output(await closeBinding({config,binding:current})); return 0;
+    } finally { await unlock(); }
   }
   if (binding?.closed) throw new Fault('SESSION_CLOSED','The work order is closed.');
   const selection = await selectRoute(config, opt.route ?? binding.route, opt.cwd ?? binding.cwd, opt.permissions ?? 'read');
@@ -222,6 +261,7 @@ export async function main(args, deps = {}) {
   config.dispatch.orderPointer = orderPointer;
   config.dispatch.orderWarning = metadataWarning;
   let safeRelease = false, timer, receipt;
+  let runtimeStarted = false;
   const controller = new AbortController();
   const interrupt = () => controller.abort(new Fault('CANCEL_REQUESTED','Cancellation requested.'));
   process.on('SIGINT',interrupt); process.on('SIGTERM',interrupt);
@@ -236,7 +276,42 @@ export async function main(args, deps = {}) {
     finally { checking = false; }
   },200);
   try {
+    // Fresh read under BOTH held locks: a continue/run that read an open binding
+    // before a concurrent close could otherwise execute its stale open binding.
+    // Reload, recheck closure and route fingerprint, and use the current handle
+    // so no review write or prompt proceeds against superseded state. Errors here
+    // happen before the runtime is touched, so the finally block safely releases
+    // every owned lock.
+    if (binding && opt.command === 'continue') {
+      const current = await loadBinding(config.stateDir, binding.id);
+      if (current.closed === true) throw new Fault('SESSION_CLOSED', 'The work order is closed.');
+      if (current.routeFingerprint !== selection.fingerprint)
+        throw new Fault('ROUTE_CHANGED', 'Route/context revision changed. Start an explicit new responsibility.');
+      binding = current;
+    }
     if (opt.command === 'run') await atomicJSON(p.binding,binding);
+    // OPTIONAL `continue --revision-reason REASON` records one revision_requested
+    // event before the prompt. It is a shortcut for a genuine correction, not a
+    // required annotation. The reason is validated during normal continuation
+    // preflight above; an annotation WRITE failure never blocks the authorized
+    // task: it is surfaced through the existing additive dispatch warning path
+    // and execution proceeds exactly once.
+    if (opt['revision-reason'] !== undefined) {
+      try {
+        await recordEvent(config.stateDir, binding.id, {
+          schema: EVENT_SCHEMA, event_id: randomUUID(), session_id: binding.id,
+          kind: 'revision_requested', reason: opt['revision-reason'],
+          request_id: null, summary: null, evidence: [], supersedes: null,
+        });
+      } catch (e) {
+        // Retain any earlier warning information instead of overwriting it.
+        const prior = config.dispatch.orderWarning;
+        config.dispatch.orderWarning = prior && prior !== 'REVIEW_NOT_RECORDED' && !String(prior).includes('REVIEW_NOT_RECORDED')
+          ? `${prior}+REVIEW_NOT_RECORDED` : 'REVIEW_NOT_RECORDED';
+        (deps.progress ?? (s => process.stderr.write(s)))(`[acp] revision annotation not recorded (${typeof e?.code === 'string' ? e.code : 'REVIEW_NOT_RECORDED'}); continuing.\n`);
+      }
+    }
+    runtimeStarted = true;
     (deps.progress ?? (s => process.stderr.write(s)))(`[acp] session ${binding.id}; ${selection.permissions} permissions\n`);
     receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId});
     safeRelease = receipt.cleanup === 'confirmed';
@@ -244,6 +319,10 @@ export async function main(args, deps = {}) {
   } finally {
     clearInterval(timer);
     process.off('SIGINT',interrupt); process.off('SIGTERM',interrupt);
+    // A failure before the runtime was touched (for example a stale binding)
+    // leaves no adapter process behind, so the owned locks
+    // are safely releasable and are not retained for reconciliation.
+    if (!runtimeStarted) safeRelease = true;
     if (safeRelease) {
       try {
         const c = await readJSON(path.join(p.lock,'cancel.json'),{privateFile:true});
@@ -271,6 +350,10 @@ export function renderStatsText(p) {
     `submitted ${s.submissions} | revisions ${s.revisions} | accepted ${s.accepted} | taken over ${s.taken_over}`,
     `external tokens ${s.external_tokens === null ? 'unknown' : s.external_tokens} across ${s.usage_sessions}/${s.usage_total_sessions} sessions with a complete snapshot`,
   ];
+  if (s.review) {
+    const actionable = s.review.awaiting_review + s.review.changes_requested + s.review.needs_attention;
+    lines.push(`review actionable ${actionable} | ${Object.entries(s.review).map(([state, count]) => `${state} ${count}`).join('  ')}`);
+  }
   if (p.routes.length) {
     lines.push('routes:');
     for (const r of p.routes) lines.push(`  ${r.name}  responsibilities ${r.responsibilities}  turns ${r.worker_turns}  tokens ${r.external_tokens === null ? 'unknown' : r.external_tokens}  sessions ${r.usage_sessions}  median ${r.median_elapsed_ms === null ? 'unknown' : r.median_elapsed_ms + 'ms'}`);

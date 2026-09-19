@@ -127,12 +127,16 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
 
 ## 本地 Dispatch 投影
 
-`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 只读面板，`record` 追加
-来源明确的送验、修正、接受和接管事件。runtime receipts 仍是执行真源，协作事件
-不修改回执中的 `task_acceptance: unverified`。新派工可提供 title/category；
-可用的主会话 ID 在环境清理前仅留存于本机 private state，不传入 worker。
-新增 run / continue 工单也留在 private state，按需供本地回放；它们不进入公开分享。
-读取历史与协作事件不要求 adapter、worker home 或原 workspace 仍然可用。
+`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 只读面板，`record` 按需追加
+来源明确的送验、修正、接受和接管事件，`pending` 按需列出仍可行动的复查记录。
+runtime receipts 仍是执行真源，协作事件不修改回执中的 `task_acceptance: unverified`。
+统计是轻量、观察性的：runtime 事实自动从既有回执派生，普通完成或正常关闭**不需要**
+任何标注，也不是待办复查义务。新派工可提供 title/category；可用的主会话 ID 在环境
+清理前仅留存于本机 private state，不传入 worker。新增 run / continue 工单也留在
+private state，按需供本地回放；它们不进入公开分享。读取历史与协作事件不要求 adapter、
+worker home 或原 workspace 仍然可用。`stats`、`record`、`pending` 只读本机 private
+state，不加载 adapter。投影为每个责任派生互斥的 `review_state`（`summary.review`
+给出各状态计数）；未登记的 legacy 责任为 `legacy_untracked`，只是安静的历史记录。
 完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.md)。
 
 ## 日常用法
@@ -150,19 +154,35 @@ node "$ENTRY" run --config "$CONFIG" --route kimi-worker \
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
   --file /absolute/increment.md
 
+# 明确返修（可选快捷方式）：记录本次修正原因再续做；普通续做无需任何标注
+node "$ENTRY" continue --config "$CONFIG" --session UUID \
+  --file /absolute/rework-order.md --revision-reason requirement_missed
+
 # 只有路线和当前任务都授权时使用；此项会批准所有 ACP 权限请求
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
   --file /absolute/implementation-order.md --permissions full
 
 node "$ENTRY" status --config "$CONFIG" --session UUID
 node "$ENTRY" cancel --config "$CONFIG" --session UUID
+
+# 按需查看仍可行动的复查记录（只读；不含 legacy 历史，也不加载 adapter）
+node "$ENTRY" pending --config "$CONFIG"
+
+# 正常关闭即普通生命周期收尾，不需要标注，也不表示已验收
 node "$ENTRY" close --config "$CONFIG" --session UUID
+
+# 确有需要留存复查证据时，才用独立 record 追加一个明确事件
+node "$ENTRY" record --config "$CONFIG" --session UUID --file /absolute/event.json
 ```
 
 `cancel` 写入当前 operation nonce 对应的取消请求，运行进程每 200ms 检查本地控制邮箱。
 它是本地控制实现，不要求主模型反复读取 worker 状态。回执中 `stopped:false` 明确表示
 只确认发出请求；要等执行命令返回终态与清理结果。Ctrl+C 和 SIGTERM 也请求合作取消。
 `close` 关闭工作责任，保留历史；活跃或清理未确认时拒绝关闭。
+`close` 是普通生命周期收尾，不需要任何验收标注。`continue --revision-reason` 是可选的
+返修快捷方式：reason 在普通 preflight 校验，写入失败不会阻塞已授权任务，只会通过既有的
+additive `dispatch_warning` 暴露，不会重复调用模型。日常只需 run/continue/close，
+无需在每次派工后补记任何东西。
 
 退出码：0 为 runtime 本轮完成且清理已确认；1 为执行失败或清理未确认；130 为取消；
 2 为本地配置/前置条件/控制错误。即使退出 0，`task_acceptance` 也始终是 `unverified`，
@@ -225,29 +245,20 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 
 ## 验收门
 
-本交付在 canonical macOS 主机上复核通过：`npm ci --ignore-scripts` 从 registry 正常完成
-（27 个包，0 vulnerabilities）；`python3 -m unittest discover -s tests -p 'test_*.py'`
-25 项全过，含 `test_socket_managed_output_fails_closed`；`npm run test:acpx` 的 3 项真实
-acpx 联调全过，覆盖重启、同会话续做、私有环境隔离与 ACP 权限握手，夹具仍是无模型、
-无账号、无网络的合成进程；并发 workspace 回归以隔离方式重复 5 次，5 次均通过。
-`npm run check` 的范围是接入层逻辑、真实文件系统检查、私有环境子进程测试，以及合成 ACP
-server 的直接 stdio 自检（runtime 行为使用合约替身）；加入 Windows 平台回归与 canonical
-根复检回归后为 85 项，本机（macOS）81 项通过、4 项仅 Windows 的用例跳过。新增用例覆盖：受管
-祖先遍历不重复盘符/UNC 前缀、private mode 检查按平台能力生效、目录 fsync 只在 Node 暴露时
-执行、passEnv 大小写不敏感拒绝与 `USERPROFILE` 覆盖防护、Windows temp/profile/launcher 环境
-装配、入口扩展名与 UNC/设备路径拒绝、config 文件路径/`stateDir`/`workerHome`/`workspaces`/
-`cwd`/resolved `argv[0]` 在 canonicalize 后落到 UNC/设备根时的复检拒绝（只注入 canonicalizer，
-不需要真实 Windows share）、config 文件路径按 cwd 解析后的词法本地检查（相对路径仍从 cwd
-解析，行为不变），以及 package.json 的平台与测试文件列表（避免 `npm ci` 的 EBADPLATFORM 与
-cmd.exe 下未展开的 glob）。work-order 权限措辞测试仍只覆盖生成的措辞与 option 映射，不构成
-文件系统强制行为的证据。
-真实联调套件现共 6 项，其中 2 项仅 Windows：一项要求实际 acpx spawn 出的合成 adapter 子进程
-报告被重定位的 `USERPROFILE`/`TEMP`/`TMP`/`APPDATA`/`LOCALAPPDATA`（用路径包含判断，不用
-字符串前缀）与非空 launcher 变量；一项用带空格的路径生成合成 `.cmd` wrapper，验证 `.cmd` 入口
-确实走 acpx 的 `%COMSPEC%` batch-shim 分支完成一次 `run`，不使用通用 shell 回退。第三项不依赖
-平台：等待 `FIXTURE_WAIT` 的合成 turn 只有在 audit 文件证明 prompt 已到达被 spawn 的 adapter
-之后才被 `cancel`，随后断言 receipt 为 `cancelled`、cleanup 为 `confirmed`，且 `status` 回到
-`idle`（无固定 sleep 竞态）。macOS 上 2 项 Windows 用例计为 skip，本机 4 项真实联调通过。
+2026-09-20 的 Dispatch follow-up 在 canonical macOS 主机重新运行
+`npm ci --ignore-scripts`、`npm run check` 与 `npm run test:acpx`：接入层检查共
+175 项，171 pass、4 项 Windows-only skip；真实 acpx + synthetic ACP server
+联调共 6 项，4 pass、2 项 Windows-only skip。它们覆盖本地状态/路径边界、
+同会话续做、权限握手、取消和清理，以及 Dispatch 的计量、主动复盘状态、可选
+返修注记失败不阻断、持锁后 binding 复查、loopback/privacy、双语分享白名单与四套动物主题。
+Dashboard 另在桌面和窄屏真实浏览器验证统计首页、筛选、详情、主题切换、键盘焦点，
+以及四主题 × 双语 × 横竖版 × SVG/PNG 的 32 种实际下载组合。
+
+联调使用无模型、无账号、无网络的合成 adapter 进程，不能证明真实 provider 的
+身份、计费或质量。合成取消用例等待 audit 文件证明 prompt 已到达 adapter，再
+发出 cancel，并断言 `cancelled`、`cleanup=confirmed` 与后续 `idle`。
+此次没有修改 Python/native hook source，未重跑原生 context probe；此前的
+25 项 Python regression 与真实 root/child 输入边界证据属于各自历史验收。
 
 Windows 专属用例（盘符根 `create:false`、junction 祖先拒绝、UNC stateDir 拒绝、显式 UNC/设备
 config 文件路径在 `realpath` 之前被拒绝、adapter 环境断言、`.cmd` batch-shim 的一次完整 `run`）
@@ -255,7 +266,7 @@ config 文件路径在 `realpath` 之前被拒绝、adapter 环境断言、`.cmd
 分支，无法创建 junction 的环境直接失败而不是跳过。POSIX 上的 mode 断言同样不会被当作
 Windows ACL 隐私的证据。
 
-本机 dogfood 使用一个已登记外部 route 完成了当前仓库的 review 修复，并在同一 ACP session
+此前本机 dogfood 使用一个已登记外部 route 完成了当前仓库的 review 修复，并在同一 ACP session
 续做证据校正与权限措辞返修；各轮 cleanup 均 confirmed，私有主会话 marker 检索为 0。
 其中一次 `read` continuation 仍直接改写了文档，这项反例正是上文不能把 permission-response
 policy 当成文件系统边界的实证。opt-in Python/native probe 未在本交付中重跑；原生源码未改，

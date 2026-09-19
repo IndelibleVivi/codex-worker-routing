@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createProjectionReader } from './dispatch.mjs';
 import { projectShare } from './share.mjs';
+import { renderLogoSVG } from './brand.mjs';
 import { Fault } from './state.mjs';
 
 const files = new Map([
@@ -47,7 +48,10 @@ export async function startDashboard({stateDir, since='all', port=0, reader, idl
       }
       if(req.method !== 'GET') return send(405,{error:'Method not allowed.'});
       if(url.pathname === '/share.mjs') return send(200,await fs.readFile(new URL('./share.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
-      if(url.pathname === '/favicon.ico') { res.writeHead(204,headers);res.end();return; }
+      if(url.pathname === '/themes.mjs') return send(200,await fs.readFile(new URL('./themes.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
+      if(url.pathname === '/mascots.mjs') return send(200,await fs.readFile(new URL('./mascots.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
+      if(url.pathname === '/brand.mjs') return send(200,await fs.readFile(new URL('./brand.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
+      if(url.pathname === '/logo.svg') return send(200,renderLogoSVG(),'image/svg+xml');
       const asset = files.get(url.pathname);
       if(!asset) return send(404,{error:'Not found.'});
       send(200,await fs.readFile(new URL(`./dashboard/${asset[0]}`,import.meta.url),'utf8'),asset[1]);

@@ -7,11 +7,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { atomicJSON, paths } from '../src/state.mjs';
+import { atomicJSON, paths, lock, digest } from '../src/state.mjs';
 import {
-  EVENT_SCHEMA, PROJECTION_SCHEMA, validateEventInput, normalizeStoredEvent, foldEvents, recordEvent,
+  EVENT_SCHEMA, PROJECTION_SCHEMA, BINDING_SCHEMA, validateEventInput, normalizeStoredEvent, foldEvents, recordEvent,
   eventDir, eventFile, requestOrderFile, classifyTurn, planSessionMetadata, planContinuation,
   captureParentMetadata, writeRequestOrder, normalizeSince, createSessionAccounting, createProjectionReader,
+  listPendingSessions, deriveReviewState,
 } from '../src/dispatch.mjs';
 import { parseArgs, main, renderStatsText } from '../src/cli.mjs';
 import { fixture, fakeAcpx } from './helpers.mjs';
@@ -515,16 +516,20 @@ test('dashboard resolves on server close and on SIGINT, removing handlers', asyn
   const fake = { startDashboard: async options => { assert.equal(options.since, 'all'); return { url: 'http://127.0.0.1:0/', server, close: async () => { closed = true; } }; } };
   const before = process.listenerCount('SIGINT');
   const lines = [];
-  const pending = main(['dashboard', '--config', f.configFile], { text: s => lines.push(s), output: () => {}, loadDashboard: async () => fake });
-  await new Promise(r => setTimeout(r, 20));
+  let ready;
+  const started = new Promise(resolve => { ready = resolve; });
+  const pending = main(['dashboard', '--config', f.configFile], { text: s => { lines.push(s); ready(); }, output: () => {}, loadDashboard: async () => fake });
+  await started;
   assert.equal(process.listenerCount('SIGINT'), before + 1);
   server.emit('close'); // the server's own lifecycle ends the CLI
   assert.equal(await pending, 0);
   assert.equal(process.listenerCount('SIGINT'), before);
   assert.ok(lines.join('').includes('http://127.0.0.1:0/'));
 
-  const pending2 = main(['dashboard', '--config', f.configFile], { text: () => {}, output: () => {}, loadDashboard: async () => ({ ...fake, startDashboard: async () => ({ url: 'u', server: new EventEmitter(), close: async () => { closed = true; } }) }) });
-  await new Promise(r => setTimeout(r, 20));
+  let ready2;
+  const started2 = new Promise(resolve => { ready2 = resolve; });
+  const pending2 = main(['dashboard', '--config', f.configFile], { text: () => ready2(), output: () => {}, loadDashboard: async () => ({ ...fake, startDashboard: async () => ({ url: 'u', server: new EventEmitter(), close: async () => { closed = true; } }) }) });
+  await started2;
   process.emit('SIGINT');
   assert.equal(await pending2, 0);
   assert.equal(closed, true);
@@ -685,4 +690,456 @@ test('ISO offsets crossing a UTC day are accepted; invalid calendars and enormou
   assert.equal(normalizeSince('2026-01-01T01:00:00+08:00'),'2025-12-31T17:00:00.000Z');
   assert.throws(()=>normalizeSince('2026-02-31T01:00:00+08:00'),{code:'BAD_PERIOD'});
   assert.throws(()=>normalizeSince('99999999999999d'),{code:'BAD_PERIOD'});
+});
+
+// ---------------------------------------------------------------------------
+// Review state (light/observational): tracking, defaults, invalidations
+// ---------------------------------------------------------------------------
+const dispatchedMeta = (over = {}) => ({ schema: BINDING_SCHEMA, type: 'dispatched', category: 'other', title: 'Synthetic', ...over });
+
+test('summary.review carries every state key including zeros and agrees with sessions', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1'));
+  const p = await createProjectionReader(stateDir).read();
+  assert.deepEqual(Object.keys(p.summary.review).sort(), [
+    'accepted', 'awaiting_review', 'changes_requested', 'legacy_untracked', 'needs_attention', 'no_receipt', 'not_requested', 'taken_over',
+  ]);
+  assert.equal('unreviewed_closed' in p.summary.review, false);
+  for (const value of Object.values(p.summary.review)) assert.equal(typeof value, 'number');
+  const session = p.sessions.find(s => s.id === id);
+  assert.deepEqual(Object.keys(session.review).sort(), ['decision', 'decision_at', 'state', 'tracked']);
+  assert.equal(session.review.tracked, true);
+  assert.equal(p.summary.review[session.review_state], 1); // counts agree with the session
+});
+
+test('ordinary completed work with no review annotation is not_requested, not an obligation', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1'));
+  const p = await createProjectionReader(stateDir).read();
+  const session = p.sessions.find(s => s.id === id);
+  assert.equal(session.review_state, 'not_requested');
+  assert.equal(session.acceptance, 'unverified');
+  assert.equal(session.review.decision, null);
+  assert.equal(p.summary.review.not_requested, 1);
+  // Ordinary completion is never a pending review obligation.
+  assert.equal((await listPendingSessions(stateDir)).count, 0);
+});
+
+test('a tracked responsibility with no receipt is no_receipt, never proof of a running process', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  const p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'no_receipt');
+  assert.equal((await listPendingSessions(stateDir)).count, 0);
+});
+
+test('a legacy binding with no tracking and no explicit review event is legacy_untracked', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id)); // no dispatch metadata
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1'));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'note', summary: 'observed' }), { stamp: at(30) });
+  const p = await createProjectionReader(stateDir).read();
+  const session = p.sessions.find(s => s.id === id);
+  assert.equal(session.review_state, 'legacy_untracked');
+  assert.equal(session.review.tracked, false);
+  assert.equal(p.summary.review.legacy_untracked, 1);
+  assert.equal((await listPendingSessions(stateDir)).count, 0);
+});
+
+test('each explicit review event kind establishes tracking on a legacy binding', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const accept = randomUUID(), takeover = randomUUID(), submit = randomUUID(), revision = randomUUID(), note = randomUUID();
+  for (const id of [accept, takeover, submit, revision, note]) {
+    await writeBinding(stateDir, bindingFor(id));
+    await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  }
+  await recordEvent(stateDir, accept, eventInput(accept, { kind: 'accepted' }), { stamp: at(30) });
+  await recordEvent(stateDir, takeover, eventInput(takeover, { kind: 'taken_over', reason: 'uncertain' }), { stamp: at(30) });
+  await recordEvent(stateDir, submit, eventInput(submit, { kind: 'submitted' }), { stamp: at(30) });
+  await recordEvent(stateDir, revision, eventInput(revision, { kind: 'revision_requested', reason: 'uncertain' }), { stamp: at(30) });
+  await recordEvent(stateDir, note, eventInput(note, { kind: 'note' }), { stamp: at(30) });
+  const p = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(p.sessions.map(s => [s.id, s]));
+  assert.equal(byId[accept].review_state, 'accepted');
+  assert.equal(byId[accept].review.tracked, true);
+  assert.equal(byId[accept].acceptance, 'accepted');
+  assert.equal(byId[takeover].review_state, 'taken_over');
+  assert.equal(byId[takeover].acceptance, 'taken_over');
+  assert.equal(byId[submit].review_state, 'awaiting_review');
+  assert.equal(byId[submit].acceptance, 'unverified');
+  assert.equal(byId[revision].review_state, 'changes_requested');
+  // A plain note alone never establishes tracking.
+  assert.equal(byId[note].review_state, 'legacy_untracked');
+  assert.equal(p.summary.review.legacy_untracked, 1);
+  assert.equal(p.summary.review.accepted, 1);
+  assert.equal(p.summary.review.taken_over, 1);
+  assert.equal(p.summary.review.awaiting_review, 1);
+  assert.equal(p.summary.review.changes_requested, 1);
+});
+
+test('awaiting_review requires an explicit submitted event, not merely a turn', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const noEvent = randomUUID(), withEvent = randomUUID();
+  await writeBinding(stateDir, bindingFor(noEvent, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, noEvent, receiptFor(noEvent, 'req-1'));
+  await writeBinding(stateDir, bindingFor(withEvent, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, withEvent, receiptFor(withEvent, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  await recordEvent(stateDir, withEvent, eventInput(withEvent, { kind: 'submitted', summary: 'ready for review' }), { stamp: at(30) });
+  const p = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  assert.equal(byId[noEvent], 'not_requested');
+  assert.equal(byId[withEvent], 'awaiting_review');
+});
+
+test('a later submitted event invalidates a standing acceptance', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'accepted' }), { stamp: at(30) });
+  let p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'accepted');
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'submitted', summary: 'new revision' }), { stamp: at(40) });
+  p = await createProjectionReader(stateDir).read();
+  const session = p.sessions.find(s => s.id === id);
+  assert.equal(session.review_state, 'awaiting_review');
+  assert.equal(session.acceptance, 'unverified');
+  assert.equal(p.summary.review.accepted, 0);
+});
+
+test('an accepted decision is invalidated by a later terminal turn', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'accepted' }), { stamp: at(30) });
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-2', { started_at: at(40), finished_at: at(50) }));
+  const p = await createProjectionReader(stateDir).read();
+  const session = p.sessions.find(s => s.id === id);
+  assert.equal(session.review_state, 'not_requested');
+  assert.equal(session.acceptance, 'unverified');
+  assert.equal(p.summary.review.accepted, 0);
+});
+
+test('a later successful turn clears an outstanding correction to not_requested', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'revision_requested', reason: 'validation_failed' }), { stamp: at(30) });
+  // A note after the revision never clears it.
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'note', summary: 'checked' }), { stamp: at(35) });
+  let p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'changes_requested');
+  // The reworked turn returns successfully and nobody re-requests review.
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-2', { started_at: at(40), finished_at: at(50) }));
+  p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'not_requested');
+});
+
+test('a newer submitted event after a reworked turn re-requests review', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(5), finished_at: at(8) }));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'revision_requested', reason: 'uncertain' }), { stamp: at(20) });
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-2', { started_at: at(30), finished_at: at(40) }));
+  let p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'not_requested');
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'submitted', summary: 'please look again' }), { stamp: at(50) });
+  p = await createProjectionReader(stateDir).read();
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'awaiting_review');
+});
+
+test('taken_over beats accepted; failed/cancelled/unconfirmed open work is needs_attention', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const take = randomUUID(), failed = randomUUID(), cancelled = randomUUID(), unconfirmed = randomUUID();
+  await writeBinding(stateDir, bindingFor(take, { dispatch: dispatchedMeta({ title: 'Take' }) }));
+  await recordEvent(stateDir, take, eventInput(take, { kind: 'accepted' }), { stamp: at(10) });
+  await recordEvent(stateDir, take, eventInput(take, { kind: 'taken_over', reason: 'environment_blocked' }), { stamp: at(20) });
+  await writeBinding(stateDir, bindingFor(failed, { dispatch: dispatchedMeta({ title: 'Failed' }) }));
+  await writeReceipt(stateDir, failed, receiptFor(failed, 'req-1', { runtime_status: 'failed' }));
+  await writeBinding(stateDir, bindingFor(cancelled, { dispatch: dispatchedMeta({ title: 'Cancelled' }) }));
+  await writeReceipt(stateDir, cancelled, receiptFor(cancelled, 'req-1', { runtime_status: 'cancelled' }));
+  await writeBinding(stateDir, bindingFor(unconfirmed, { dispatch: dispatchedMeta({ title: 'Unconfirmed' }) }));
+  await writeReceipt(stateDir, unconfirmed, receiptFor(unconfirmed, 'req-1', { cleanup: 'unconfirmed' }));
+  const p = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  assert.equal(byId[take], 'taken_over');
+  assert.equal(byId[failed], 'needs_attention');
+  assert.equal(byId[cancelled], 'needs_attention');
+  assert.equal(byId[unconfirmed], 'needs_attention');
+  assert.equal(p.summary.review.taken_over, 1);
+  assert.equal(p.summary.review.needs_attention, 3);
+});
+
+test('intentionally closed work without a review decision is not_requested, not an obligation', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const closedClean = randomUUID(), closedAccepted = randomUUID(), closedCompromised = randomUUID();
+  await writeBinding(stateDir, bindingFor(closedClean, { dispatch: dispatchedMeta({ title: 'ClosedClean' }), closed: true, closedAt: at(60) }));
+  await writeReceipt(stateDir, closedClean, receiptFor(closedClean, 'req-1', { started_at: at(10), finished_at: at(20) }));
+  await writeBinding(stateDir, bindingFor(closedAccepted, { dispatch: dispatchedMeta({ title: 'ClosedAccepted' }), closed: true, closedAt: at(60) }));
+  await writeReceipt(stateDir, closedAccepted, receiptFor(closedAccepted, 'req-1', { started_at: at(10), finished_at: at(20) }));
+  await recordEvent(stateDir, closedAccepted, eventInput(closedAccepted, { kind: 'accepted' }), { stamp: at(30) });
+  // A closed responsibility whose latest runtime was compromised is still just closed.
+  await writeBinding(stateDir, bindingFor(closedCompromised, { dispatch: dispatchedMeta({ title: 'ClosedCompromised' }), closed: true, closedAt: at(60) }));
+  await writeReceipt(stateDir, closedCompromised, receiptFor(closedCompromised, 'req-1', { runtime_status: 'failed', started_at: at(10), finished_at: at(20) }));
+  const p = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  assert.equal(byId[closedClean], 'not_requested');
+  assert.equal(byId[closedAccepted], 'accepted');
+  assert.equal(byId[closedCompromised], 'not_requested');
+  // None of these is a pending review obligation.
+  assert.equal((await listPendingSessions(stateDir)).count, 0);
+});
+
+test('a closed responsibility can still carry an explicit review request or correction', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const submitted = randomUUID(), revised = randomUUID();
+  await writeBinding(stateDir, bindingFor(submitted, { dispatch: dispatchedMeta({ title: 'S' }), closed: true, closedAt: at(60) }));
+  await recordEvent(stateDir, submitted, eventInput(submitted, { kind: 'submitted' }), { stamp: at(30) });
+  await writeBinding(stateDir, bindingFor(revised, { dispatch: dispatchedMeta({ title: 'R' }), closed: true, closedAt: at(60) }));
+  await recordEvent(stateDir, revised, eventInput(revised, { kind: 'revision_requested', reason: 'uncertain' }), { stamp: at(30) });
+  const p = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  // An explicit review request/correction is still exposed even after closure.
+  assert.equal(byId[submitted], 'awaiting_review');
+  assert.equal(byId[revised], 'changes_requested');
+});
+
+test('future decisions and future turns are ignored by the current review state', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: at(10), finished_at: at(20) }));
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'accepted' }), { stamp: at(9000) });
+  const p = await createProjectionReader(stateDir).read({ now: Date.parse(at(300)) });
+  assert.equal(p.sessions.find(s => s.id === id).review_state, 'not_requested');
+  assert.equal(p.summary.review.accepted, 0);
+});
+
+test('deriveReviewState is a pure, source-honest projection of the evidence', () => {
+  const id = randomUUID();
+  const event = (kind, ms) => ({ ...eventInput(id, { kind, reason: kind === 'revision_requested' ? 'uncertain' : null }), at: at(ms) });
+  const meta = dispatchedMeta();
+  assert.equal(deriveReviewState({ meta: null, effective: [], turns: [] }).state, 'legacy_untracked');
+  assert.equal(deriveReviewState({ meta, effective: [], turns: [] }).state, 'no_receipt');
+  assert.equal(deriveReviewState({ meta: null, effective: [event('accepted', 10)], turns: [] }).state, 'accepted');
+  assert.equal(deriveReviewState({ meta, effective: [event('accepted', 10)], turns: [{ runtime_status: 'completed', started_at: at(20), finished_at: at(30) }] }).state, 'not_requested');
+  assert.equal(deriveReviewState({ meta, effective: [event('submitted', 10)], turns: [] }).state, 'awaiting_review');
+  assert.equal(deriveReviewState({ meta, effective: [event('accepted', 10)], turns: [], closed: true }).state, 'accepted');
+});
+
+// ---------------------------------------------------------------------------
+// pending: actionable only, on demand, no legacy backlog
+// ---------------------------------------------------------------------------
+test('pending returns only actionable records and never legacy or ordinary completion', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const submitted = randomUUID(), legacy = randomUUID(), normal = randomUUID(), accepted = randomUUID(), changes = randomUUID(), needs = randomUUID(), closed = randomUUID();
+  await writeBinding(stateDir, bindingFor(submitted, { dispatch: dispatchedMeta({ title: 'Awaiting' }) }));
+  await recordEvent(stateDir, submitted, eventInput(submitted, { kind: 'submitted' }), { stamp: at(10) });
+  await writeBinding(stateDir, bindingFor(legacy)); // untracked, with a note
+  await writeReceipt(stateDir, legacy, receiptFor(legacy, 'req-1'));
+  await recordEvent(stateDir, legacy, eventInput(legacy, { kind: 'note' }), { stamp: at(10) });
+  await writeBinding(stateDir, bindingFor(normal, { dispatch: dispatchedMeta({ title: 'Normal' }) })); // ordinary completion
+  await writeReceipt(stateDir, normal, receiptFor(normal, 'req-1'));
+  await writeBinding(stateDir, bindingFor(accepted, { dispatch: dispatchedMeta({ title: 'Done' }) }));
+  await recordEvent(stateDir, accepted, eventInput(accepted, { kind: 'accepted' }), { stamp: at(10) });
+  await writeBinding(stateDir, bindingFor(changes, { dispatch: dispatchedMeta({ title: 'Rework' }) }));
+  await recordEvent(stateDir, changes, eventInput(changes, { kind: 'revision_requested', reason: 'scope_changed' }), { stamp: at(10) });
+  await writeBinding(stateDir, bindingFor(needs, { dispatch: dispatchedMeta({ title: 'Broken' }) }));
+  await writeReceipt(stateDir, needs, receiptFor(needs, 'req-1', { runtime_status: 'failed' }));
+  await writeBinding(stateDir, bindingFor(closed, { dispatch: dispatchedMeta({ title: 'Closed' }), closed: true, closedAt: at(60) }));
+  await writeReceipt(stateDir, closed, receiptFor(closed, 'req-1'));
+  const pending = await listPendingSessions(stateDir);
+  const ids = pending.records.map(r => r.session_id);
+  assert.equal(pending.schema, 'cwr.dispatch.pending/1');
+  assert.equal(pending.count, 3);
+  assert.ok(ids.includes(submitted));
+  assert.ok(ids.includes(changes));
+  assert.ok(ids.includes(needs));
+  assert.ok(!ids.includes(legacy));   // legacy is quietly historical
+  assert.ok(!ids.includes(normal));   // ordinary completion is not an obligation
+  assert.ok(!ids.includes(accepted)); // a current decision needs no action
+  assert.ok(!ids.includes(closed));   // intentional closure is not an obligation
+  for (const record of pending.records) {
+    assert.deepEqual(Object.keys(record).sort(), ['closed', 'review_state', 'session_id', 'status', 'title', 'updated_at']);
+    assert.ok(['awaiting_review', 'changes_requested', 'needs_attention'].includes(record.review_state));
+  }
+});
+
+test('pending never leaks work-order text, output, paths or diagnostics', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta({ title: 'Safe title' }) }));
+  await writeReceipt(stateDir, id, { ...receiptFor(id, 'req-1', { output_excerpt: 'RAW_OUTPUT_SECRET' }), transcript_state_dir: '/synthetic/private/acpx', receipt_path: '/synthetic/private/receipt.json' });
+  await writeRequestOrder(stateDir, id, 'req-1', 'WORK_ORDER_SECRET');
+  await recordEvent(stateDir, id, eventInput(id, { kind: 'submitted' }), { stamp: at(30) });
+  const pending = await listPendingSessions(stateDir);
+  const serialized = JSON.stringify(pending);
+  for (const secret of ['RAW_OUTPUT_SECRET', 'WORK_ORDER_SECRET', '/synthetic/private']) assert.ok(!serialized.includes(secret), `pending leaked ${secret}`);
+});
+
+test('pending prints actionable review records without loading an adapter', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const id = randomUUID();
+  await writeBinding(f.config.stateDir, bindingFor(id, { dispatch: dispatchedMeta({ title: 'Review me' }) }));
+  await recordEvent(f.config.stateDir, id, eventInput(id, { kind: 'submitted' }), { stamp: at(30) });
+  let adapterLoads = 0;
+  const out = [];
+  assert.equal(await main(['pending', '--config', f.configFile], { output: r => out.push(r), loadAcpx: async () => { adapterLoads++; throw new Error('no adapter'); } }), 0);
+  const pending = out.at(-1);
+  assert.equal(pending.schema, 'cwr.dispatch.pending/1');
+  assert.ok(pending.records.some(r => r.session_id === id && r.review_state === 'awaiting_review'));
+  assert.equal(adapterLoads, 0);
+});
+
+// ---------------------------------------------------------------------------
+// continue --revision-reason: optional shortcut, never blocks the task
+// ---------------------------------------------------------------------------
+test('continue --revision-reason records a revision_requested without a separate file', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  const id = results.at(-1).session_id;
+  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'requirement_missed'], deps), 0);
+  const detail = await createProjectionReader(f.config.stateDir).detail(id);
+  assert.equal(detail.events.filter(e => e.kind === 'revision_requested').length, 1);
+  assert.equal(detail.session.revisions, 1);
+  assert.equal(detail.session.acceptance, 'unverified');
+  // The continuation's own successful turn clears the correction to not_requested.
+  assert.equal(detail.session.review_state, 'not_requested');
+});
+
+test('a plain continue never fabricates a revision', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  const id = results.at(-1).session_id;
+  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
+  const detail = await createProjectionReader(f.config.stateDir).detail(id);
+  assert.equal(detail.events.length, 0);
+  assert.equal(detail.session.review_state, 'not_requested');
+});
+
+test('an invalid --revision-reason is rejected before any prompt', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  const id = results.at(-1).session_id;
+  const startsBefore = api.calls.filter(c => c[0] === 'start').length;
+  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'not_a_reason'], deps), { code: 'USAGE' });
+  assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
+});
+
+test('a --revision-reason annotation write failure still runs the authorized task exactly once', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  const progress = [];
+  const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: s => progress.push(s) };
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  const id = results.at(-1).session_id;
+  const startsBefore = api.calls.filter(c => c[0] === 'start').length;
+  // Force the revision annotation write to fail: the events path is a file.
+  await fs.writeFile(path.join(f.config.stateDir, 'events'), 'blocked', { mode: 0o600 });
+  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), 0);
+  // Exactly one turn executed, the receipt exposes the additive warning, and the
+  // owned locks were released.
+  assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore + 1);
+  assert.equal(results.at(-1).dispatch_warning, 'REVIEW_NOT_RECORDED');
+  assert.ok(progress.join('').includes('revision annotation not recorded'));
+  await fs.lstat(paths(f.config.stateDir, id).lock).then(() => { throw new Error('session lock retained'); }, e => assert.equal(e.code, 'ENOENT'));
+  await fs.lstat(path.join(f.config.stateDir, 'workspace-locks', digest(f.selection.cwd))).then(() => { throw new Error('workspace lock retained'); }, e => assert.equal(e.code, 'ENOENT'));
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency: fresh binding read under the lock
+// ---------------------------------------------------------------------------
+test('a continue whose binding becomes closed before lock acquisition does not prompt or record', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  const id = results.at(-1).session_id;
+  const startsBefore = api.calls.filter(c => c[0] === 'start').length;
+  const deps = {
+    loadAcpx: async () => api, output: r => results.push(r), progress: () => {},
+    replaceEnvironment: async () => {
+      const stored = JSON.parse(await fs.readFile(paths(f.config.stateDir, id).binding, 'utf8'));
+      await writeBinding(f.config.stateDir, { ...stored, closed: true, closedAt: at(Date.now()) });
+    },
+  };
+  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'SESSION_CLOSED' });
+  // No adapter prompt happened and the owned locks were released.
+  assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
+  await fs.lstat(paths(f.config.stateDir, id).lock).then(() => { throw new Error('session lock retained'); }, e => assert.equal(e.code, 'ENOENT'));
+  await fs.lstat(path.join(f.config.stateDir, 'workspace-locks', digest(f.selection.cwd))).then(() => { throw new Error('workspace lock retained'); }, e => assert.equal(e.code, 'ENOENT'));
+});
+
+test('a continue --revision-reason whose binding becomes closed adds no revision event', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  const id = results.at(-1).session_id;
+  const deps = {
+    loadAcpx: async () => api, output: r => results.push(r), progress: () => {},
+    replaceEnvironment: async () => {
+      const stored = JSON.parse(await fs.readFile(paths(f.config.stateDir, id).binding, 'utf8'));
+      await writeBinding(f.config.stateDir, { ...stored, closed: true, closedAt: at(Date.now()) });
+    },
+  };
+  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), { code: 'SESSION_CLOSED' });
+  const detail = await createProjectionReader(f.config.stateDir).detail(id);
+  assert.equal(detail.events.length, 0); // no revision event was appended
+});
+
+test('a continue whose route fingerprint changes before lock acquisition is refused', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const api = fakeAcpx();
+  const results = [];
+  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  const id = results.at(-1).session_id;
+  const startsBefore = api.calls.filter(c => c[0] === 'start').length;
+  const deps = {
+    loadAcpx: async () => api, output: r => results.push(r), progress: () => {},
+    replaceEnvironment: async () => {
+      const stored = JSON.parse(await fs.readFile(paths(f.config.stateDir, id).binding, 'utf8'));
+      await writeBinding(f.config.stateDir, { ...stored, routeFingerprint: 'changed-fingerprint' });
+    },
+  };
+  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'ROUTE_CHANGED' });
+  assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
+});
+
+// ---------------------------------------------------------------------------
+// CLI parser / removed commands
+// ---------------------------------------------------------------------------
+test('pending and optional revision reason use their documented parser contracts', () => {
+  assert.equal(parseArgs(['continue', '--config', 'c', '--session', 's', '--file', 'f', '--revision-reason', 'uncertain'])['revision-reason'], 'uncertain');
+  assert.equal(parseArgs(['pending', '--config', '/x.json']).command, 'pending');
+  assert.throws(() => parseArgs(['pending']), { code: 'USAGE' });
+  assert.throws(() => parseArgs(['pending', '--config', 'c', '--since', '7d']), { code: 'USAGE' });
+});
+
+test('a later failed result cannot revive an old acceptance after closing',()=>{
+  const meta={schema:BINDING_SCHEMA,type:'dispatched'};
+  const effective=[{kind:'accepted',at:'2026-01-01T01:00:00Z'}];
+  const turns=[{runtime_status:'failed',finished_at:'2026-01-01T02:00:00Z',cleanup:'confirmed'}];
+  assert.equal(deriveReviewState({meta,effective,turns}).state,'needs_attention');
+  assert.equal(deriveReviewState({meta,effective,turns,closed:true}).state,'not_requested');
+  assert.equal(deriveReviewState({meta,effective:[],turns:[],closed:true}).state,'not_requested');
 });

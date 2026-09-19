@@ -26,10 +26,31 @@ export const ORDER_SCHEMA = 'cwr.dispatch.order/1';
 const UUID_RE = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const OPAQUE_RE = /^[A-Za-z0-9._:-]{1,160}$/;
 const EVENT_KINDS = Object.freeze(['submitted', 'revision_requested', 'accepted', 'taken_over', 'note']);
-const REASONS = Object.freeze(['requirement_missed', 'validation_failed', 'scope_changed', 'constraint_added', 'environment_blocked', 'uncertain']);
+export const REASON_VALUES = Object.freeze(['requirement_missed', 'validation_failed', 'scope_changed', 'constraint_added', 'environment_blocked', 'uncertain']);
 const EVIDENCE_SOURCES = Object.freeze(['coordinator', 'worker']);
 const EVIDENCE_KINDS = Object.freeze(['diff', 'test', 'manual', 'other']);
 const CATEGORIES = Object.freeze(['investigation', 'implementation', 'review', 'other']);
+// Mutually exclusive review states, derived only from source evidence. This is
+// the interface main uses as `session.review_state` / `session.review.state` and
+// `summary.review.<state>`; every key is always present, including zeros.
+// `not_requested` is the ordinary, common state: runtime facts are automatic and
+// no review was asked for. Statistics stay light and observational — no stamp is
+// required after every delegation.
+const REVIEW_STATES = Object.freeze([
+  'accepted', 'taken_over', 'awaiting_review', 'changes_requested', 'needs_attention',
+  'no_receipt', 'not_requested', 'legacy_untracked',
+]);
+// On-demand, read-only actionable review records that `pending` returns, newest
+// first: an explicit review request, an unreturned correction, or a compromised
+// open runtime. Ordinary completion or closure without a review annotation is
+// normal and is NOT an outstanding review obligation.
+const ACTIONABLE_REVIEW_STATES = Object.freeze(['awaiting_review', 'changes_requested', 'needs_attention']);
+// Kinds that are explicit review evidence: they establish tracking on a legacy
+// binding, and they participate in the chronological review derivation.
+// `accepted`/`taken_over` set a decision; `submitted` is an explicit review
+// request; `revision_requested` is an explicit correction. `note` is an
+// observation only and never creates a review obligation or tracking.
+const REVIEW_TRACKING_KINDS = Object.freeze(['submitted', 'revision_requested', 'accepted', 'taken_over']);
 const EVENT_FIELDS = Object.freeze(['schema', 'event_id', 'session_id', 'kind', 'request_id', 'reason', 'summary', 'evidence', 'supersedes']);
 const EVENT_FILE_FIELDS = Object.freeze([...EVENT_FIELDS, 'at']);
 const EVIDENCE_FIELDS = Object.freeze(['source', 'kind', 'summary']);
@@ -98,7 +119,7 @@ export function validateEventInput(raw) {
   const request_id = opaqueOrNull(raw.request_id, 'request_id');
   const reason = raw.reason ?? null;
   if (raw.kind === 'revision_requested' || raw.kind === 'taken_over') {
-    if (!REASONS.includes(reason)) throw new Fault('BAD_EVENT', `reason is required for ${raw.kind} and must be one of ${REASONS.join(', ')}.`);
+    if (!REASON_VALUES.includes(reason)) throw new Fault('BAD_EVENT', `reason is required for ${raw.kind} and must be one of ${REASON_VALUES.join(', ')}.`);
   } else if (reason !== null) {
     throw new Fault('BAD_EVENT', `reason is only recorded for revision_requested or taken_over, not ${raw.kind}.`);
   }
@@ -322,12 +343,19 @@ export function planSessionMetadata(binding, plan, { legacy = false } = {}) {
   const resolvedTitle = typeof plan.title === 'string' && plan.title.trim()
     ? plan.title
     : legacy ? null : `Worker session ${String(binding?.id ?? '').slice(0, 8)}`;
-  return { schema: BINDING_SCHEMA, type: plan.type, category: plan.category ?? 'other', title: resolvedTitle };
+  const meta = { schema: BINDING_SCHEMA, type: plan.type, category: plan.category ?? 'other', title: resolvedTitle };
+  // Prospective tracking starts now. A legacy continuation adopts tracking at
+  // the moment it is CONTINUED under a current version; turns observed before
+  // this instant must never be retroactively treated as reviewed.
+  if (legacy) meta.tracking_started_at = new Date().toISOString();
+  return meta;
 }
 export function planContinuation(binding) {
   const meta = isPlainObject(binding?.dispatch) ? binding.dispatch : {};
   if (meta.type) return null;
-  return { schema: BINDING_SCHEMA, type: 'continued', category: meta.category ?? 'other', title: meta.title ?? null };
+  // A legacy binding has no `type`; continuing it starts prospective tracking
+  // from this instant rather than claiming all past turns were reviewed.
+  return { schema: BINDING_SCHEMA, type: 'continued', category: meta.category ?? 'other', title: meta.title ?? null, tracking_started_at: new Date().toISOString() };
 }
 
 export function captureParentMetadata(env, platform = process.platform) {
@@ -569,7 +597,7 @@ export function createProjectionReader(stateDir) {
 
     const accounting = createSessionAccounting({ sinceIso, now: nowMs });
     const sessions = [];
-    const summary = { responsibilities: 0, worker_turns: 0, runtime_completed: 0, failed: 0, cancelled: 0, submissions: 0, revisions: 0, accepted: 0, taken_over: 0, usage_sessions: 0, usage_total_sessions: 0, external_tokens: null };
+    const summary = { responsibilities: 0, worker_turns: 0, runtime_completed: 0, failed: 0, cancelled: 0, submissions: 0, revisions: 0, accepted: 0, taken_over: 0, review: emptyReviewCounts(), usage_sessions: 0, usage_total_sessions: 0, external_tokens: null };
     const routes = new Map();
     const activity = new Map();
 
@@ -605,7 +633,15 @@ export function createProjectionReader(stateDir) {
       const submissions = periodEvents.filter(e => e.kind === 'submitted').length;
       const revisions = periodEvents.filter(e => e.kind === 'revision_requested').length;
       const evidenceCount = periodEvents.reduce((n, e) => n + e.evidence.filter(v => v.source === 'coordinator').length, 0);
-      const acceptance = currentAcceptance(effectiveEvents, loaded.receipts);
+      // review_state is derived from ALL recorded evidence (not just the period),
+      // so a decision recorded before this window still classifies the record.
+      const review = reviewSummaryFor({ meta: loaded.meta, effective: effectiveEvents, turns: loaded.receipts, closed, nowMs });
+      const acceptance = review.state === 'accepted' || review.state === 'taken_over' ? review.state : 'unverified';
+      summary.review[review.state] += 1;
+      // Keep the compatible acceptance counters and review view derived from
+      // the same current explicit decision, including legacy bindings.
+      if (acceptance === 'accepted') summary.accepted += 1;
+      if (acceptance === 'taken_over') summary.taken_over += 1;
 
       summary.responsibilities += 1;
       summary.worker_turns += turnReceipts.length;
@@ -616,8 +652,6 @@ export function createProjectionReader(stateDir) {
       else if (latestTurn?.runtime_status === 'cancelled') summary.cancelled += 1;
       summary.submissions += submissions;
       summary.revisions += revisions;
-      if (acceptance === 'accepted') summary.accepted += 1;
-      if (acceptance === 'taken_over') summary.taken_over += 1;
 
       const timeline = buildTimeline({ binding: loaded.binding, turns: loaded.receipts, history: loaded.history, closed, limit, nowMs });
       sessions.push({
@@ -635,6 +669,8 @@ export function createProjectionReader(stateDir) {
         submissions,
         revisions,
         acceptance,
+        review_state: review.state,
+        review: { state: review.state, tracked: review.tracked, decision: review.decision, decision_at: review.decision_at },
         evidence_count: evidenceCount,
         usage: usageForProjection(usageState),
         timeline,
@@ -732,6 +768,7 @@ export function createProjectionReader(stateDir) {
 
     const effective = [...folded.effective.values()];
     const latestTurn = [...turns].reverse().find(t => t.runtime_status !== null) ?? turns.at(-1) ?? null;
+    const review = reviewSummaryFor({ meta, effective, turns, closed: binding.closed === true, nowMs: Date.now() });
     const session = {
       id,
       title: titleOf(meta),
@@ -746,7 +783,9 @@ export function createProjectionReader(stateDir) {
       turns: turns.length,
       submissions: effective.filter(e => e.kind === 'submitted').length,
       revisions: effective.filter(e => e.kind === 'revision_requested').length,
-      acceptance: currentAcceptance(effective, turns),
+      acceptance: review.state === 'accepted' || review.state === 'taken_over' ? review.state : 'unverified',
+      review_state: review.state,
+      review: { state: review.state, tracked: review.tracked, decision: review.decision, decision_at: review.decision_at },
       evidence_count: effective.reduce((n, e) => n + e.evidence.filter(v => v.source === 'coordinator').length, 0),
       usage: { input: null, output: null, thought: null, total: null },
       timeline: buildTimeline({ binding, turns: turns.map(t => ({ ...t, usage: null })), history: folded.history, closed: binding.closed === true, limit: -Infinity, nowMs: Date.now() }),
@@ -767,16 +806,123 @@ export function createProjectionReader(stateDir) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function currentAcceptance(effective, turns = []) {
-  // Acceptance is the latest relevant decision. A later revision/submission/
-  // continue invalidates an earlier stale `accepted`, so order truly decides.
-  const ordered = [...effective].filter(e => ['accepted', 'taken_over', 'revision_requested', 'submitted'].includes(e.kind)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  const last = ordered.at(-1);
-  if (!last || turns.some(t => Date.parse(t.started_at) > Date.parse(last.at))) return 'unverified';
-  if (last.kind === 'taken_over') return 'taken_over';
-  if (last.kind === 'accepted') return 'accepted';
-  return 'unverified';
+/**
+ * Derive the single mutually exclusive review_state from source evidence only.
+ *
+ * Tracking is prospective: a binding with a `type` is tracked from its metadata,
+ * and an EXPLICIT review event (accepted/taken_over/submitted/revision_requested)
+ * establishes tracking even on a legacy binding that predates the metadata. A
+ * plain note alone never establishes tracking, so a legacy binding with only
+ * notes stays `legacy_untracked` — quietly historical, never an obligation.
+ *
+ * The state follows one chronological walk over source events and terminal turns:
+ * - `accepted`/`taken_over` set the current decision.
+ * - `revision_requested` sets `changes_requested` (an explicit correction).
+ * - `submitted` is an explicit review request: it invalidates a standing decision
+ *   and puts the record in `awaiting_review`.
+ * - A later successful (`completed`) turn clears an outstanding
+ *   `changes_requested`/`awaiting_review` back to `not_requested` (the rework came
+ *   back and nobody re-requested review); it also invalidates a standing
+ *   acceptance. A later failed/cancelled/unconfirmed turn on OPEN work marks the
+ *   record `needs_attention`.
+ * - `completed` is never evidence of acceptance by itself. Future observations
+ *   are ignored.
+ *
+ * `awaiting_review` therefore requires an explicit `submitted` event, not merely
+ * a turn. End state for a tracked record with no obligation: `no_receipt` if no
+ * receipt exists yet (never proof of a running process); `needs_attention` if the
+ * latest runtime is compromised and the work is open; otherwise `not_requested`
+ * (including intentionally closed work). Closing is ordinary lifecycle, never a
+ * review obligation.
+ */
+function reviewStateOf({ meta, effective, turns = [], receipts = [], closed = false, nowMs = Infinity }) {
+  const visible = at => typeof at === 'string' && Number.isFinite(Date.parse(at)) && Date.parse(at) <= nowMs;
+  // Explicit review evidence establishes tracking even without metadata.
+  const metaTracked = isPlainObject(meta) && typeof meta.type === 'string' && meta.type !== '';
+  const explicit = effective.some(e => REVIEW_TRACKING_KINDS.includes(e.kind) && visible(e.at));
+  if (!metaTracked && !explicit) return { state: 'legacy_untracked', decision_at: null, tracked: false };
+  const start = metaTracked ? trackedStart(meta) : null;
+  const prospective = at => visible(at) && (start === null || Date.parse(at) >= start);
+
+  // One chronological sequence of review-relevant observations. A decision
+  // (accepted/taken_over/revision) is a decision; a submission is a re-delivery;
+  // a terminal turn returns the work for a fresh look.
+  const observations = [];
+  for (const e of effective) {
+    if (!prospective(e.at)) continue;
+    if (REVIEW_TRACKING_KINDS.includes(e.kind)) observations.push({ at: e.at, kind: e.kind });
+  }
+  for (const t of turns) {
+    const at = t.finished_at ?? t.started_at ?? null;
+    if (!prospective(at)) continue;
+    observations.push({ at, kind: 'turn', status: t.runtime_status ?? null, cleanup: t.cleanup ?? null });
+  }
+  observations.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.kind.localeCompare(b.kind));
+
+  let decision = null;         // 'accepted' | 'taken_over' | 'changes_requested' | null
+  let decisionAt = null;
+  let reviewRequested = false; // an explicit `submitted` is outstanding
+  let compromised = false;     // latest terminal runtime is failed/cancelled/unconfirmed
+  for (const o of observations) {
+    if (o.kind === 'accepted' || o.kind === 'taken_over') { decision = o.kind; decisionAt = o.at; reviewRequested = false; compromised = false; }
+    else if (o.kind === 'revision_requested') { decision = 'changes_requested'; decisionAt = o.at; reviewRequested = false; compromised = false; }
+    else if (o.kind === 'submitted') { decision = null; decisionAt = null; reviewRequested = true; compromised = false; }
+    else if (o.kind === 'turn') {
+      if (o.status === 'failed' || o.status === 'cancelled' || o.cleanup === 'unconfirmed') {
+        compromised = true;
+        // A later failed result also invalidates the older accepted result.
+        if (decision === 'accepted' || decision === 'taken_over') { decision = null; decisionAt = null; }
+      }
+      else if (o.status === 'completed') {
+        // A successful turn invalidates a standing acceptance and clears an
+        // outstanding correction/review request: the work came back and nobody
+        // has re-requested review or re-decided.
+        if (decision !== null) { decision = null; decisionAt = null; }
+        reviewRequested = false;
+        compromised = false;
+      }
+    }
+  }
+
+  let state;
+  // A compromised runtime only matters while the work is still open; an
+  // intentionally closed responsibility is not an outstanding obligation.
+  if (compromised && !closed) state = 'needs_attention';
+  else if (decision !== null) state = decision;
+  else if (reviewRequested) state = 'awaiting_review';
+  else if (!closed && !hasReceipt(turns, receipts, prospective)) state = 'no_receipt';
+  else state = 'not_requested';
+  return { state, decision_at: decision !== null ? decisionAt : null, tracked: true };
 }
+function hasReceipt(turns, receipts, prospective) {
+  if (turns.some(t => prospective(t.finished_at ?? t.started_at))) return true;
+  return receipts.some(r => prospective(r.finished_at ?? r.started_at));
+}
+// The instant prospective tracking began, or null for a binding that predates
+// the metadata field (type present but no timestamp). A null start means "all
+// recorded turns count", never a fabricated retroactive review.
+function trackedStart(meta) {
+  return typeof meta?.tracking_started_at === 'string' && !Number.isNaN(Date.parse(meta.tracking_started_at))
+    ? Date.parse(meta.tracking_started_at) : null;
+}
+function emptyReviewCounts() {
+  const counts = {};
+  for (const state of REVIEW_STATES) counts[state] = 0;
+  return counts;
+}
+// A bounded, source-only review view for the list projection. No text: only the
+// derived state, tracking flag, and the timestamp of the current decision.
+function reviewSummaryFor({ meta, effective, turns, receipts, closed, nowMs }) {
+  const derived = reviewStateOf({ meta, effective, turns, receipts, closed, nowMs });
+  const tracked = derived.state !== 'legacy_untracked';
+  return {
+    state: derived.state,
+    tracked,
+    decision: derived.state === 'accepted' || derived.state === 'taken_over' || derived.state === 'changes_requested' ? derived.state : null,
+    decision_at: derived.decision_at,
+  };
+}
+export { reviewStateOf as deriveReviewState };
 function usageForProjection(usageState) {
   if (!usageState.covered || usageState.total === null) return { input: null, output: null, thought: null, total: null };
   return {
@@ -838,4 +984,39 @@ function buildTimeline({ binding, turns, history, closed, limit, nowMs }) {
 
 function projectParent(parent) {
   return isPlainObject(parent) ? { thread_id: safeOpaque(parent.thread_id), session_id: safeOpaque(parent.session_id), observed_at: isoOrNull(parent.observed_at) } : null;
+}
+
+// ---------------------------------------------------------------------------
+// Actionable review backlog (`pending`)
+// ---------------------------------------------------------------------------
+/**
+ * Read-only, aggregate-safe list of ACTIONABLE review records only, returned
+ * ON DEMAND — it is never a mandatory backlog for ordinary completion. Only
+ * responsibilities with an explicit review request (`awaiting_review`), an
+ * unreturned correction (`changes_requested`), or a compromised open runtime
+ * (`needs_attention`) appear; ordinary completion or closure without a review
+ * annotation is not an obligation and never appears. Only safe opaque ids, the
+ * derived state, closed flag, latest runtime status and the bound title are
+ * returned — never work-order text, output or paths. No adapter is loaded.
+ */
+export async function listPendingSessions(stateDir, { now = Date.now() } = {}) {
+  const projection = await createProjectionReader(stateDir).read({ now });
+  const records = projection.sessions
+    .filter(s => ACTIONABLE_REVIEW_STATES.includes(s.review_state))
+    .sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))
+    .map(s => ({
+      session_id: s.id,
+      review_state: s.review_state,
+      closed: s.closed === true,
+      status: s.runtime_status,
+      title: s.title,
+      updated_at: s.updated_at,
+    }));
+  return {
+    schema: 'cwr.dispatch.pending/1',
+    observed_at: projection.observed_at,
+    count: records.length,
+    records,
+    warnings: projection.warnings,
+  };
 }

@@ -14,6 +14,12 @@ plugin and its optional main-session context integration.
   or infer acceptance, rework, provider identity or quota savings from completion.
   Validate accounting/privacy/shutdown with the ACP suite and exercise the actual
   dashboard in desktop and narrow browser viewports after UI changes.
+- `integrations/acpx/src/brand.mjs` owns the cat logo. The plugin asset
+  `plugins/worker-routing/assets/cat.svg` is derived; regenerate it with
+  `npm run brand:sync` from `integrations/acpx/` after changing the mark.
+- `integrations/acpx/src/themes.mjs` owns the named theme palettes; the adjacent
+  `mascots.mjs` owns their companion artwork. The folded-ear cat and sage/blush default are the Canon identity:
+  preserve the cat vector and colours when adding adjacent family themes.
 - Keep provider IDs and personal preferences in operator-owned configuration.
 - Never place personal instructions, chats, memory, tokens, real request captures,
   machine paths, or private continuity in this repository, including fixtures.

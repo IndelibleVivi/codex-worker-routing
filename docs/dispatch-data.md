@@ -17,7 +17,10 @@ terminal receipts and explicit coordinator annotations. It never loads the adapt
 
 Titles are optional, at most 160 characters. Categories are `investigation`,
 `implementation`, `review`, or `other`. Continuation preserves the bound metadata;
-legacy records are not classified from output. Available `CODEX_THREAD_ID` and
+`dispatch.type` (`dispatched` or `continued`) is the prospective-tracking marker, and
+`dispatch.tracking_started_at` records the instant a legacy continuation adopted
+tracking. Existing `dispatch.type='dispatched'` bindings already count as tracked.
+Legacy records are not classified from output. Available `CODEX_THREAD_ID` and
 `CODEX_SESSION_ID` are captured before the adapter environment is scrubbed. A parent
 first observed during a legacy continuation carries `observed_at`; it is not proof
 of a historical association. These identifiers remain local.
@@ -38,7 +41,7 @@ Unknown fields are rejected; the command supplies `at` at recording time.
 | `schema` | Exactly `cwr.dispatch.event/1`. |
 | `event_id` | UUID, used as the idempotency key for this action. |
 | `session_id` | Existing integration UUID, matching `--session`. |
-| `kind` | `submitted`, `revision_requested`, `accepted`, `taken_over`, or `note`. |
+| `kind` | `submitted`, `revision_requested`, `accepted`, `taken_over`, or `note`. Only `accepted`/`taken_over`/`revision_requested`/`submitted` are review evidence. |
 | `request_id` | Optional opaque request identifier belonging to a receipt in this session. |
 | `reason` | Required for revision/takeover; otherwise absent/null. |
 | `summary` | Optional plain text, at most 1,000 characters. |
@@ -83,8 +86,73 @@ submission, revision, or recorded runtime turn invalidates an earlier acceptance
 Other responsibilities remain `unverified`; absence of a marker is not a failure.
 The projection describes recorded turns, not live process health.
 
+## Review state
+
+Statistics are LIGHT and OBSERVATIONAL. Runtime facts are derived automatically from
+existing receipts; ordinary completion or close without any annotation is normal and is
+NOT an outstanding review obligation. No stamp is required after a delegation. Every
+projected responsibility carries one mutually exclusive `review_state`, and the
+projection's `summary.review` object holds a count per state (all present, including
+zeros). The accepted values are:
+
+| `review_state` | Meaning |
+| --- | --- |
+| `not_requested` | The ordinary default: tracked, with runtime facts, and no current explicit review request or decision (including intentionally closed work). |
+| `accepted` | A current explicit `accepted` decision stands. |
+| `taken_over` | A current explicit `taken_over` decision stands. |
+| `awaiting_review` | An explicit `submitted` event requests review and no later decision supersedes it. |
+| `changes_requested` | An explicit `revision_requested` stands, with no later successful returned turn. |
+| `needs_attention` | The latest terminal turn on OPEN tracked work failed or was cancelled, or its cleanup is unconfirmed. |
+| `no_receipt` | Open and tracked but no receipt yet. Not proof of a running process. |
+| `legacy_untracked` | A binding with no Dispatch tracking and no explicit review event; quietly historical. |
+
+Only source evidence derives the state, from a single chronological walk over the
+effective events and terminal turns. An explicit `submitted`, `revision_requested`,
+`accepted`, or `taken_over` event establishes tracking even on a legacy binding that
+predates the metadata; a plain `note` never establishes tracking, requests review, or
+invents a decision. `accepted`/`taken_over` set the current decision;
+`revision_requested` sets `changes_requested`; `submitted` is an explicit review request
+that invalidates a standing decision and puts the record in `awaiting_review`. A later
+successful (`completed`) turn clears an outstanding correction or review request back to
+`not_requested` and invalidates a standing acceptance, because the rework came back and
+nobody re-requested review. A later failed/cancelled/unconfirmed turn on open work marks
+the record `needs_attention`. Runtime `completed` is never acceptance by itself.
+Future-dated observations are ignored. A legacy binding with no tracking and no explicit
+review event is `legacy_untracked` — historical context, never active review work. A
+legacy continuation that becomes tracked records `tracking_started_at`, so its earlier
+turns are never retroactively marked reviewed.
+
+`session.acceptance` remains the compatible view: it is the current review decision
+when one is still standing, otherwise `unverified`, derived from the same evidence so
+the two can never disagree. `session.review_state`, `session.review`
+(`{state, tracked, decision, decision_at}`), and `summary.review` are the review
+interface the dashboard consumes.
+
+### Actionable view
+
+`pending --config FILE` is an on-demand, read-only view (`cwr.dispatch.pending/1`) of
+only actionable records — `awaiting_review`, `changes_requested`, and
+`needs_attention` — newest first. It is not a backlog you must clear: ordinary
+completion and closure without an explicit outstanding request never appear. It excludes `legacy_untracked` history
+and current decisions. Each record contains only `session_id`, `review_state`, `closed`,
+`status`, `title`, and `updated_at`; it never includes work-order text, output, or a
+filesystem path. `pending` loads no adapter.
+
+### Optional revision shortcut (`continue --revision-reason`)
+
+`continue --revision-reason REASON` is an OPTIONAL shortcut for a real correction: it
+appends one `revision_requested` event (using the documented reason enum, with an
+internal event UUID and null request id, because no receipt exists yet) before the prompt, so the rework is attributed without a
+separate JSON file. It is never required for an ordinary continuation, and a plain
+`continue` never records a revision. The reason is validated during normal continuation
+preflight, so an invalid value starts no adapter turn. If the annotation cannot be
+recorded, the authorized task still runs exactly once and the interruption is surfaced
+through the existing additive `dispatch_warning` path (`REVIEW_NOT_RECORDED`, preserving
+any prior warning). For a deliberate deep review, the standalone `record` command
+remains available; it is not required in the ordinary flow.
+
 Home is the aggregate view: period totals, execution/new-responsibility activity,
-acceptance composition, route distribution and explicit revision reasons. Its activity
+execution results / optional review notes, route distribution and explicit revision reasons. Its activity
 chart covers the complete selected window, merging adjacent UTC days when needed.
 The new-responsibility chart counts creation timestamps inside the window, which can
 be fewer than the headline's active responsibilities. Individual trails are under
@@ -120,10 +188,16 @@ The list/stats projection permits local route names, titles, opaque parent/sessi
 identifiers, event summaries and source-tagged evidence. Work orders and bounded
 worker output excerpts are loaded only in responsibility detail. Filesystem paths,
 raw diagnostics, adapter handles and full transcripts are not projected.
+`pending` uses the same allowlist and additionally omits event and evidence text.
 
 `cwr.dispatch.share/1` is a separate allowlist: normalized dates, aggregate counts,
-known token totals or null, usage coverage, and warning count. It contains no routes,
-titles, event/evidence text, work orders, output, paths or internal ids. Its SVG/PNG
-renderer uses fixed project attribution and aggregate acceptance composition. Preview
-and download use the same frozen snapshot, independent of list filters. Export is a
-local download; nothing is uploaded.
+known token totals or null, usage coverage, review-state counts, and warning count. It contains no routes,
+titles, event/evidence text, work orders, output, paths or internal ids. It carries no theme,
+colour, style or CSS field: the renderer's palette is chosen only from a bounded local
+registry in `themes.mjs` (`getTheme(id)`, four ids, unknown ids falling back to `sage`) and never read out
+of export data. Each theme selects a companion from `mascots.mjs`; the header always uses the
+Canon cat from `brand.mjs`. Neither artwork nor colour values are accepted from data. Its SVG/PNG renderer uses a fixed repository address, runtime-completion
+progress and deliberately recorded review counts, with language and theme as independent
+parameters and a `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext` filename. Chinese and
+English exports are independently selectable. Preview and download use the same frozen
+snapshot, independent of list filters. Export is a local download; nothing is uploaded.

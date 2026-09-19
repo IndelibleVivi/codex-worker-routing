@@ -15,13 +15,25 @@ server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 
 ## Dispatch
 
-Home opens with aggregate statistics: activity over time, acceptance composition, route distribution and revision reasons. Individual replays live in Records.
+Home opens with aggregate statistics: activity over time, execution results and optional review notes, route distribution and revision reasons. Individual replays live in Records.
 
 Give everyday collaboration a visible trail: inspect ACP workload by period, replay one
 worker's continuations, submissions, revisions, acceptance and takeovers, and distinguish
-coordinator verification from worker-reported evidence. The white, sage, pink and plum local dashboard
-also exports landscape / portrait SVG and PNG share cards through an aggregate-only allowlist:
-no work orders, private route names, paths or internal IDs.
+coordinator verification from worker-reported evidence. The local dashboard ships four themes, each pairing a
+paper palette with a sibling animal: the default "Sage cat / 鼠尾草猫" (the folded-ear cat is that Canon
+identity), plus "Oat bunny / 燕麦玫瑰兔", "Mist puppy / 雾蓝奶油狗" and "Lilac bear / 薰衣草杏熊".
+The palette recolours the dashboard and its charts, while the companion appears on the overview sticker and the
+share seal. The choice is remembered in same-origin `localStorage` and restored on refresh; the export dialog
+opens with the dashboard's theme each time and lets you pick a different one for the artifact alone.
+Chinese / English and landscape / portrait stay independent. Exports keep to an
+aggregate-only allowlist and are named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`: no work orders, private
+route names, paths or internal IDs. The Canon identity is the folded-ear cat together with the default sage
+palette: the header mark, favicon and the share header keep that one vector and those colours in every theme,
+and the standalone logo download is always that cat.
+
+Statistics read execution receipts automatically. Ordinary completion needs no review stamp and creates
+no to-do. `continue --revision-reason` optionally records a real correction; on-demand `pending`
+lists execution issues and explicitly requested follow-up.
 
 ```sh
 node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json

@@ -1,6 +1,6 @@
 {
   "name": "worker-routing",
-  "version": "0.1.0+codex.20260915120000",
+  "version": "0.1.0+codex.20260919231213",
   "description": "Instruction-only routing for bounded work delegated to native Codex or explicitly configured ACP workers.",
   "author": {
     "name": "Faye"
@@ -16,6 +16,9 @@
       "Instruction-only task routing",
       "Optional external ACP worker routing"
     ],
-    "defaultPrompt": "Route this task between the main agent and configured workers."
+    "defaultPrompt": "Route this task between the main agent and configured workers.",
+    "brandColor": "#51415F",
+    "composerIcon": "./assets/cat.svg",
+    "logo": "./assets/cat.svg"
   }
 }
