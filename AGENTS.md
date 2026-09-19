@@ -17,6 +17,7 @@ plugin and its optional main-session context integration.
 - `integrations/acpx/src/brand.mjs` owns the cat logo. The plugin asset
   `plugins/worker-routing/assets/cat.svg` is derived; regenerate it with
   `npm run brand:sync` from `integrations/acpx/` after changing the mark.
+  Its `.gitattributes` LF rule preserves exact renderer parity on Windows too.
 - `integrations/acpx/src/themes.mjs` owns the named theme palettes; the adjacent
   `mascots.mjs` owns their companion artwork. The folded-ear cat and sage/blush default are the Canon identity:
   preserve the cat vector and colours when adding adjacent family themes.

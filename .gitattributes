@@ -1,0 +1,2 @@
+# Keep the generated brand asset byte-identical to renderLogoSVG on every OS.
+plugins/worker-routing/assets/cat.svg text eol=lf
