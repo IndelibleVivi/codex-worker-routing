@@ -8,7 +8,11 @@ plugin and its optional main-session context integration.
 - Edit `integrations/acpx/` for the optional ACP transport. Keep route names,
   provider/model priorities, account state, worker homes, and route config outside Git.
 - Dispatch source lives in `integrations/acpx/src/dispatch.mjs`, `dashboard.mjs`,
-  `share.mjs` and `dashboard/`. Receipts own runtime truth; append-only review
+  `share.mjs` and `dashboard/`. `time.mjs` owns shared calendar bucketing;
+  `workspaces.mjs` resolves private local Git/folder identity; `observations.mjs`
+  retains only structured runtime evidence. `preferences.mjs` permits only theme,
+  language and timezone writes outside Git. Project paths and runtime notes never
+  cross the public share allowlist. Receipts own runtime truth; append-only review
   events own attributed collaboration annotations; projections are rebuildable.
   Keep HTTP loopback-only and exports aggregate-only. Never publish real state
   or infer acceptance, rework, provider identity or quota savings from completion.
@@ -16,8 +20,11 @@ plugin and its optional main-session context integration.
   dashboard in desktop and narrow browser viewports after UI changes.
 - `integrations/acpx/src/brand.mjs` owns the cat logo. The plugin asset
   `plugins/worker-routing/assets/cat.svg` is derived; regenerate it with
-  `npm run brand:sync` from `integrations/acpx/` after changing the mark.
+  `npm run brand:sync` from `integrations/acpx/` after changing the cat artwork.
   Its `.gitattributes` LF rule preserves exact renderer parity on Windows too.
+- `integrations/acpx/src/mark.mjs` owns the fixed line product mark used in the
+  page header, favicon and share header. It does not replace the Canon cat artwork
+  or plugin icon.
 - `integrations/acpx/src/themes.mjs` owns the named theme palettes; the adjacent
   `mascots.mjs` owns their companion artwork. The folded-ear cat and sage/blush default are the Canon identity:
   preserve the cat vector and colours when adding adjacent family themes.

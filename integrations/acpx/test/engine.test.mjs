@@ -143,3 +143,69 @@ test('matching advertised model allows execution without claiming provider verif
 test('private diagnostics retain error detail but receipts do not expose raw error text',async t=>{
  const f=await setup(t,{cleanupError:true});const r=await run(f);assert.ok(r.diagnostic_path);assert.ok(!JSON.stringify(r).includes('synthetic cleanup failure'));assert.equal((await readJSON(r.diagnostic_path,{privateFile:true})).message,'synthetic cleanup failure');
 });
+
+// ---------------------------------------------------------------------------
+// v3: observations + active-turn evidence (collector is additive, non-blocking)
+// ---------------------------------------------------------------------------
+test('a structured runtime failure is captured as a bounded observation on the receipt',async t=>{
+ const f=await setup(t,{terminal:{status:'failed',error:{code:'RUNTIME',detailCode:'AUTH_REQUIRED',retryable:true}}});
+ const r=await run(f);
+ assert.equal(r.runtime_status,'failed');
+ assert.equal(r.error_code,'RUNTIME');
+ assert.equal(r.observations.coverage,'runtime_codes_only');
+ assert.equal(r.observations.events.length,1);
+ const observation=r.observations.events[0];
+ assert.ok(!Number.isNaN(Date.parse(observation.at)));
+ assert.deepEqual({...observation,at:undefined},{at:undefined,source:'acpx.runtime',kind:'runtime_code',request_id:r.request_id,code:'RUNTIME',detail_code:'AUTH_REQUIRED',retryable:true});
+ assert.equal(r.observations.omitted,0);
+});
+test('a successful turn records no observation and never fabricates an HTTP status',async t=>{
+ const f=await setup(t,{events:[{type:'text_delta',stream:'output',text:'HTTP 429 rate limit exceeded'}]});
+ const r=await run(f);
+ assert.equal(r.runtime_status,'completed');
+ assert.equal(r.observations.coverage,'none');
+ assert.deepEqual(r.observations.events,[]);
+ assert.ok(!JSON.stringify(r.observations).includes('429'));
+});
+test('the collector cannot mask an eventual successful result',async t=>{
+ // A failing stream still yields the canonical failed terminal, unaffected by the collector.
+ const f=await setup(t,{streamError:true});
+ const r=await run(f);
+ assert.equal(r.runtime_status,'failed');
+ assert.equal(r.error_code,'STREAM_ERROR');
+ // STREAM_ERROR is not an acpx runtime output code, so no observation is invented.
+ assert.equal(r.observations.coverage,'none');
+});
+test('a started turn writes an active-turn marker that is cleared on terminal',async t=>{
+ const {deferred}=await import('./helpers.mjs');
+ const gate=deferred();
+ const f=await setup(t,{firstTurnGate:gate.promise});
+ const bindingPath=paths(f.config.stateDir,f.binding.id).binding;
+ let seenDuringTurn=null;
+ const pending=run(f,{observer:async()=>{ if(seenDuringTurn===null){ const {readJSON}=await import('../src/state.mjs'); const b=await readJSON(bindingPath,{privateFile:true}); seenDuringTurn=b.active_turn??null; } }});
+ // The turn is gated open; poll the binding until the marker is durably written.
+ const {readJSON}=await import('../src/state.mjs');
+ for(let i=0;i<100&&!seenDuringTurn;i++){ await new Promise(r=>setTimeout(r,5)); try{ seenDuringTurn=(await readJSON(bindingPath,{privateFile:true})).active_turn??null; }catch{} }
+ gate.resolve();
+ const r=await pending;
+ assert.equal(seenDuringTurn?.request_id,r.request_id);
+ const after=await readJSON(bindingPath,{privateFile:true});
+ assert.equal(after.active_turn,undefined);
+});
+test('a cancelled turn leaves no active-turn marker behind',async t=>{
+ const {deferred}=await import('./helpers.mjs');
+ const gate=deferred();
+ const f=await setup(t,{firstTurnGate:gate.promise});
+ const c=new AbortController();
+ const pending=run(f,{signal:c.signal});
+ // Wait until the turn has actually started, then cancel while it is in flight.
+ const bindingPath=paths(f.config.stateDir,f.binding.id).binding;
+ const {readJSON}=await import('../src/state.mjs');
+ for(let i=0;i<100;i++){ await new Promise(r=>setTimeout(r,5)); try{ if((await readJSON(bindingPath,{privateFile:true})).active_turn){ break; } }catch{} }
+ c.abort();
+ gate.resolve();
+ const r=await pending;
+ assert.equal(r.runtime_status,'cancelled');
+ const stored=await readJSON(bindingPath,{privateFile:true});
+ assert.equal(stored.active_turn,undefined);
+});

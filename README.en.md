@@ -15,7 +15,8 @@ server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 
 ## Dispatch
 
-Home opens with aggregate statistics: activity over time, execution results and optional review notes, route distribution and revision reasons. Individual replays live in Records.
+Home opens with aggregate statistics: activity over time, an exact-proportion status strip, route workload, explicit revisions and runtime notes. Individual replays live in Sessions.
+Search projects by actual working directory: Git repositories group linked worktrees, with a further folder filter. These are not saved Codex project names. The browser defaults to device time; bars, drill-through and shares stay in the same zone.
 
 Give everyday collaboration a visible trail: inspect ACP workload by period, replay one
 worker's continuations, submissions, revisions, acceptance and takeovers, and distinguish
@@ -23,13 +24,12 @@ coordinator verification from worker-reported evidence. The local dashboard ship
 paper palette with a sibling animal: the default "Sage cat / 鼠尾草猫" (the folded-ear cat is that Canon
 identity), plus "Oat bunny / 燕麦玫瑰兔", "Mist puppy / 雾蓝奶油狗" and "Lilac bear / 薰衣草杏熊".
 The palette recolours the dashboard and its charts, while the companion appears on the overview sticker and the
-share seal. The choice is remembered in same-origin `localStorage` and restored on refresh; the export dialog
+share seal. Theme, language and timezone persist locally outside Git across restarts and port changes; the export dialog
 opens with the dashboard's theme each time and lets you pick a different one for the artifact alone.
 Chinese / English and landscape / portrait stay independent. Exports keep to an
 aggregate-only allowlist and are named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`: no work orders, private
 route names, paths or internal IDs. The Canon identity is the folded-ear cat together with the default sage
-palette: the header mark, favicon and the share header keep that one vector and those colours in every theme,
-and the standalone logo download is always that cat.
+palette: the original cat remains the default companion and plugin icon. Page, favicon and share headers use a fixed line product mark. Both SVGs are downloadable, and image captions copy the same safe aggregate.
 
 Statistics read execution receipts automatically. Ordinary completion needs no review stamp and creates
 no to-do. `continue --revision-reason` optionally records a real correction; on-demand `pending`
@@ -40,7 +40,7 @@ node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.j
 node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
 ```
 
-It is read-only, loopback-only and on demand, with no analytics or additional frontend
+Business data stays read-only; only three local display preferences can be saved. It is loopback-only and on demand, with no analytics or additional frontend
 dependency. Cumulative tokens are deduplicated with explicit coverage; missing data stays
 unknown. Runtime completion is not acceptance, and observed workload is not an estimate of
 Codex quota saved. Coverage is explicitly ACP-only. See the [Dispatch guide](docs/dispatch.en.md).

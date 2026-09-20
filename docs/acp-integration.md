@@ -127,14 +127,17 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
 
 ## 本地 Dispatch 投影
 
-`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 只读面板，`record` 按需追加
+`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 面板（业务数据只读，三个本地展示偏好可保存），`record` 按需追加
 来源明确的送验、修正、接受和接管事件，`pending` 按需列出仍可行动的复查记录。
 runtime receipts 仍是执行真源，协作事件不修改回执中的 `task_acceptance: unverified`。
 统计是轻量、观察性的：runtime 事实自动从既有回执派生，普通完成或正常关闭**不需要**
 任何标注，也不是待办复查义务。新派工可提供 title/category；可用的主会话 ID 在环境
 清理前仅留存于本机 private state，不传入 worker。新增 run / continue 工单也留在
 private state，按需供本地回放；它们不进入公开分享。读取历史与协作事件不要求 adapter、
-worker home 或原 workspace 仍然可用。`stats`、`record`、`pending` 只读本机 private
+worker home 或原 workspace 仍然可用。项目入口按 binding.cwd 查本机 Git / 文件夹，
+目录不可用时显示保存的路径与限制；不声称 Codex project 身份。日期按选中时区分组；
+CLI 可传 `stats --time-zone IANA_ZONE`。当前 acpx 只暴露 runtime 错误码，不能确认
+provider HTTP 429 或内部重试，详情提供同源结构化经过。`stats`、`record`、`pending` 只读本机 private
 state，不加载 adapter。投影为每个责任派生互斥的 `review_state`（`summary.review`
 给出各状态计数）；未登记的 legacy 责任为 `legacy_untracked`，只是安静的历史记录。
 完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.md)。
@@ -190,7 +193,7 @@ additive `dispatch_warning` 暴露，不会重复调用模型。日常只需 run
 
 ## 状态、上下文与安全边界
 
-stateDir 保存 binding/回执、Dispatch 的本地协作事件与工单，以及 acpx 的私有 store。目录 0700、文件 0600；写入使用
+stateDir 保存 binding/回执、Dispatch 的本地协作事件与工单，三个展示偏好（`dashboard-preferences.json`），以及 acpx 的私有 store。目录 0700、文件 0600；写入使用
 同目录临时文件、fsync 和 atomic rename。输入拒绝 symlink、hardlink、FIFO 等特殊文件。
 workerHome/stateDir 根可使用系统祖先目录的规范路径，但根自身和受管后代不接受 symlink。
 目录 0700/文件 0600 的断言只在暴露 POSIX mode 的平台成立；Windows 上 mode 不是隐私证据，
@@ -245,12 +248,12 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 
 ## 验收门
 
-2026-09-20 的 Dispatch follow-up 在 canonical macOS 主机重新运行
+2026-09-20 的 Dispatch v3 项目入口与展示整合 在 canonical macOS 主机重新运行
 `npm ci --ignore-scripts`、`npm run check` 与 `npm run test:acpx`：接入层检查共
-175 项，171 pass、4 项 Windows-only skip；真实 acpx + synthetic ACP server
+223 项，219 pass、4 项 Windows-only skip；真实 acpx + synthetic ACP server
 联调共 6 项，4 pass、2 项 Windows-only skip。它们覆盖本地状态/路径边界、
 同会话续做、权限握手、取消和清理，以及 Dispatch 的计量、主动复盘状态、可选
-返修注记失败不阻断、持锁后 binding 复查、loopback/privacy、双语分享白名单与四套动物主题。
+返修注记失败不阻断、持锁后 binding 复查、loopback/privacy、双语分享白名单、四套动物主题、跨时区分桶、真实目录归组与偏好持久化。
 Dashboard 另在桌面和窄屏真实浏览器验证统计首页、筛选、详情、主题切换、键盘焦点，
 以及四主题 × 双语 × 横竖版 × SVG/PNG 的 32 种实际下载组合。
 

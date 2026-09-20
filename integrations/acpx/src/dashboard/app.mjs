@@ -1,274 +1,173 @@
 // SPDX-License-Identifier: SUL-1.0
-import {renderShareSVG} from '/share.mjs';
+import {productMark} from '/mark.mjs';
+import {mascotMark} from '/mascots.mjs';
 import {THEMES,getTheme} from '/themes.mjs';
-import {renderMascotSVG} from '/mascots.mjs';
-const $ = selector => document.querySelector(selector);
-const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const zh = new Map([...document.querySelectorAll('[data-i18n]')].map(el=>[el.dataset.i18n,el.innerHTML]));
-const en = {
-  themeLabel:'Paper & companions',runtimeView:'Execution',reviewView:'Review notes',legacy:'Early records',logoDownload:'Cat logo ↓',home:'Overview',records:'Records',browse:'Explore the collaboration records ↗',chartTurns:'Worker turns',chartTasks:'New responsibilities',revisionTitle:'Room to get it right',revisionNote:'Only explicit revisions count. Continuing is not rework.',local:'Local only',export:'Export a little proof',eyebrow:'A LITTLE WORK. ROOM TO BLOOM.',heading:'Good work comes back<span class="blue">.</span>',intro:'The work delegated, the turns taken, the results brought back.',period:'OBSERVATION WINDOW',week:'7 days',month:'30 days',all:'All time',responsibilities:'Responsibilities delegated',turns:'Worker execution turns',turnsNote:'Every turn has a real execution receipt.',tokens:'Observed external workload',scope:'ACP receipts only · Adapter-reported tokens are not Codex quota savings.',trail:'The collaboration trail',allRecords:'All records',attention:'Needs follow-up',execution:'Execution',revision:'Revision',acceptance:'Accepted',legendNote:'One line per responsibility. Continuing is not rework.',loading:'Opening the local records…',more:'A few more records ↓',rhythm:'A little help. A lot gets done.',routes:'Who carried the work',routesNote:'Share of execution turns. Timings describe each route’s tasks, not model speed rankings.',quality:'Where the work stands',qualityNote:'Receipts describe execution; explicit coordinator records describe review.',footer:'Delegate the work. Keep hold of the thread.',refresh:'Refresh',stop:'Close dashboard',replay:'RESPONSIBILITY / COLLABORATION REPLAY',shareTitle:'Take the good work home.',shareNote:'Preview contains ACP aggregates for the selected period. No work orders, route names, paths or internal IDs. List filters do not affect export.',banner:'Landscape · 1600 × 900',poster:'Portrait · 1080 × 1350',
-};
-let language = localStorage.getItem('dispatch-language') === 'en' ? 'en' : 'zh';
-const t = (a,b) => language === 'zh' ? a : b;
-const fragments = new URLSearchParams(location.hash.slice(1));
-if(fragments.get('token')) sessionStorage.setItem('dispatch-token',fragments.get('token'));
-const token = sessionStorage.getItem('dispatch-token') ?? '';
-let period = fragments.get('since') ?? 'all';
+import {dayKey,resolveTimeZone} from '/time.mjs';
+import {renderShareSVG,renderShareCaption} from '/share.mjs';
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fragment=new URLSearchParams(location.hash.slice(1));
+if(fragment.get('token'))sessionStorage.setItem('dispatch-token',fragment.get('token'));
+const token=sessionStorage.getItem('dispatch-token')??'';
 history.replaceState(null,'',location.pathname);
-let theme=getTheme(localStorage.getItem('dispatch-theme'));
-let shareTheme=theme;
-let view='home', measure='turns', outcome='runtime';
-let snapshot, filter='all', search='', limit=12, inflight=false, version='', stopped=false;
-let shareData, format='banner', shareLanguage=language, previewUrl, detailTrigger;
-const number = value => typeof value==='number' ? value.toLocaleString(language==='zh'?'zh-CN':'en-US') : '—';
-const compact = value => value === null || value === undefined ? '—' : value>=1e6 ? `${(value/1e6).toFixed(2)}M` : value>=1e3 ? `${(value/1e3).toFixed(1)}K` : number(value);
-const date = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(language==='zh'?'zh-CN':'en-GB',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-const shortDate = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString().slice(0,10) : '—';
-const elapsed = value => value === null || value === undefined ? '—' : value < 60000 ? `${Math.round(value/1000)}s` : `${(value/60000).toFixed(1)}m`;
-const kinds = {
-  responsibility_started:['派出工单','Dispatched'],responsibility_closed:['关闭责任','Responsibility closed'],turn_started:['开始执行','Execution started'],turn_completed:['运行完成','Runtime completed'],turn_failed:['运行失败','Runtime failed'],turn_cancelled:['运行取消','Runtime cancelled'],
-  dispatch:['派出工单','Dispatched'],dispatched:['派出工单','Dispatched'],continued:['同一 worker 续做','Same worker continued'],
-  runtime_started:['开始执行','Execution started'],runtime_completed:['运行完成','Runtime completed'],runtime_failed:['运行失败','Runtime failed'],runtime_cancelled:['运行取消','Runtime cancelled'],
-  completed:['运行完成','Runtime completed'],failed:['运行失败','Runtime failed'],cancelled:['运行取消','Runtime cancelled'],
-  submitted:['提交验收','Submitted for review'],revision_requested:['提出修正','Revision requested'],accepted:['主机已接受','Coordinator accepted'],taken_over:['主机接管','Coordinator takeover'],note:['补充记录','Annotation'],closed:['关闭责任','Responsibility closed'],
-};
-const reasons = {requirement_missed:['遗漏要求','Requirement missed'],validation_failed:['验证失败','Validation failed'],scope_changed:['范围变化','Scope changed'],constraint_added:['补充约束','Constraint added'],environment_blocked:['环境阻塞','Environment blocked'],uncertain:['原因不确定','Uncertain reason']};
-const labelKind = kind => kinds[kind] ? t(...kinds[kind]) : kind;
-const labelCategory = kind => ({investigation:t('调查','Investigation'),implementation:t('实施','Implementation'),review:t('审查','Review'),other:t('其他','Other')})[kind] ?? t('未分类','Unclassified');
-const reviewLabels = {
-  accepted:['主机已接受','Accepted'],taken_over:['主机已接管','Taken over'],awaiting_review:['待验收','Awaiting review'],changes_requested:['需要修正','Changes requested'],needs_attention:['执行需处理','Execution needs attention'],not_requested:['无需复查记录','No review requested'],no_receipt:['等待回执','Awaiting receipt'],legacy_untracked:['早期记录','Early record'],
-};
-const pendingStates=['awaiting_review','changes_requested','needs_attention'];
-const attention = session => pendingStates.includes(session.review_state);
-const reviewLabel = session => reviewLabels[session.review_state] ? t(...reviewLabels[session.review_state]) : t('早期记录','Early record');
-
-
-async function api(path,options={}) {
-  const response = await fetch(path,{...options,headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
-  if(!response.ok) throw new Error(response.status === 401 ? t('请使用 CLI 输出的私人链接打开面板。','Open the private URL printed by the CLI.') : t('本地记录读取失败；请检查 CLI，或点击刷新重试。','Unable to read local records. Check the CLI, or refresh to retry.'));
-  return response.json();
+const machineZone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
+let lang='zh',theme=getTheme('sage'),zonePreference='local',zone=machineZone();
+let workspaceSearch='';
+let view='overview',period=fragment.get('since')??'all',measure='turns',filter={},limit=12,snapshot,bins=[];
+let shareState,previewUrl,toastTimer,stopped=false,requestSequence=0,returnY=0,detailId=null,saveQueue=Promise.resolve();
+const dialogTriggers=new Map();
+const T=(a,b)=>lang==='zh'?a:b;
+const compact=v=>v===null||v===undefined?'—':v>=1e6?`${(v/1e6).toFixed(2)}M`:v>=1e3?`${(v/1e3).toFixed(1)}K`:v.toLocaleString(lang==='zh'?'zh-CN':'en');
+const num=v=>Number(v??0).toLocaleString(lang==='zh'?'zh-CN':'en');
+const short=d=>d?.slice(5).replace('-','.')??'—';
+const dateTime=at=>at?new Intl.DateTimeFormat(lang==='zh'?'zh-CN':'en-GB',{timeZone:zone,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(at)):'—';
+const svg=(id='cat')=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true">${mascotMark(id)}</svg>`;
+const arrow='<svg class="button-arrow" width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 15L15 5M5 5h10v10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const title=s=>s.title||T(`${dateTime(s.created_at)} 的协作`,`Collaboration · ${dateTime(s.created_at)}`);
+const status=s=>s.active_turn?'unknown':['completed','failed','cancelled'].includes(s.runtime_status)?s.runtime_status:'unknown';
+const kindLabel=k=>({all:T('全部','All'),completed:T('运行完成','Completed'),failed:T('执行中断','Ended in error'),cancelled:T('已取消','Cancelled'),unknown:T('无终态回执','No terminal receipt'),revision:T('明确返修','Explicit revisions'),takeover:T('主机接管','Takeovers'),multi:T('本窗口多轮','Multiple turns'),runtime:T('运行记录','Runtime notes')})[k]??k;
+const eventLabel=k=>({dispatch:T('派出工单','Task dispatched'),runtime_started:T('开始执行','Execution started'),runtime_completed:T('运行完成 · 自动回执','Completed · Automatic receipt'),runtime_failed:T('执行结束：失败','Execution ended in error'),runtime_cancelled:T('执行结束：取消','Execution cancelled'),runtime_unknown:T('终态未知','Unknown terminal outcome'),dispatched:T('派出工单','Task dispatched'),responsibility_started:T('派出工单','Task dispatched'),continued:T('同一任务续做','Continued responsibility'),completed:T('运行完成 · 自动回执','Completed · Automatic receipt'),failed:T('执行结束：失败','Execution ended in error'),cancelled:T('执行结束：取消','Execution cancelled'),closed:T('会话已关闭','Session closed'),submitted:T('主动送验记录','Explicit review request'),revision_requested:T('明确请求返修','Explicit revision request'),accepted:T('主机接受记录','Acceptance recorded'),taken_over:T('主机接管记录','Takeover recorded'),note:T('协作备注','Collaboration note')})[k]??k;
+const reasons={requirement_missed:['遗漏要求','Requirement missed'],validation_failed:['验证失败','Validation failed'],scope_changed:['范围变化','Scope changed'],constraint_added:['补充约束','Constraint added'],environment_blocked:['环境阻塞','Environment blocked'],uncertain:['原因不确定','Uncertain reason']};
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{Authorization:`Bearer ${token}`,...options.headers},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?T('请使用 CLI 打印的私人链接打开。','Open the private link printed by the CLI.'):T('本地读取或保存未完成，请重试。','Local read or save did not complete. Please retry.'));return r.json();}
+const query=()=>new URLSearchParams({since:period,timeZone:zone}).toString();
+function notice(message){$('#notice').textContent=message;$('#notice').hidden=!message;}
+function notify(message){clearTimeout(toastTimer);const host=$('dialog[open]')??document.body;host.append($('#toast'));$('#toast').textContent=message;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,3500);}
+function focusKey(el){if(!el)return null;if(el.id)return '#'+CSS.escape(el.id);const attr=[...el.attributes??[]].find(a=>a.name.startsWith('data-'));return attr?`button[${attr.name}="${CSS.escape(attr.value)}"]`:null;}
+function showDialog(id,trigger=focusKey(document.activeElement)){dialogTriggers.set(id,trigger);$(id).showModal();}
+function buttons(items,attr,selected){return items.map(([id,label])=>`<button ${attr}="${esc(id)}" class="${id===selected?'active':''}" aria-pressed="${id===selected}">${esc(label)}</button>`).join('');}
+function savePreferences(){const data={theme:theme.id,language:lang,timeZone:zonePreference};saveQueue=saveQueue.then(()=>api('/api/preferences',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})).catch(()=>notify(T('本次显示已更新，但偏好未保存。','Display updated; preferences could not be saved.')));}
+function applyTheme(){const c=theme.colors;const vars={paper:c.paper,surface:c.surface,mat:c.mat,ink:c.ink,soft:c.primarySoft,line:c.line,seam:c.primaryLine,accent:c.primary,blush:c.secondarySoft,chart:c.chartInk,text:c.textSecondary,compare:'#647884',focus:c.focusRing};for(const [k,v]of Object.entries(vars))document.documentElement.style.setProperty('--'+k,v);document.documentElement.dataset.theme=theme.id;}
+function renderStatic(){
+ document.documentElement.lang=lang==='zh'?'zh-CN':'en';
+ const content={
+ '#skip':T('跳到内容','Skip to content'),'#brand-edition':T('DISPATCH / 协作手记','DISPATCH / FIELD NOTES'),'#nav-overview':T('协作总览','Overview'),'#nav-records':'Sessions','#language':lang==='zh'?'EN':'中',
+ '#heading':T('工作有去有回。','Good work comes back.'),'#intro-text':T('看看任务怎样走完，也看看途中发生了什么。','See how the work unfolded, including the detours.'),
+ '#hero-title':T('这个窗口里的协作','COLLABORATION IN THIS WINDOW'),'#task-unit':T('份委派任务','delegated tasks'),'#task-note':T('同一任务续做，只计一份。','Continued work stays one task.'),'#turn-label':T('轮执行','worker turns'),'#turn-note':T('来自运行记录，无需另写回执。','Captured from execution. No extra receipt.'),'#seal-caption':T('今天也有好帮手','A little company.'),
+ '#outcome-heading':T('Sessions · 运行状态','Sessions · Runtime state'),'#outcome-note':T('照常结束，不另走盖章流程。','Ordinary completion needs no extra annotation.'),'#activity-title':T('协作节奏','Activity over time'),'#chart-hint':T('点柱形，查看对应记录 ↗','Select a bar to see its records ↗'),'#chart-note':T('按所选时区的自然日分组；较长窗口合并相邻日期。','Calendar days in the selected zone; long windows combine adjacent dates.'),
+ '#routes-title':T('这次由谁接住','Who carried the work'),'#routes-note':T('按执行轮次分配；不是模型能力或速度排名。','Share of execution turns, not a model capability or speed ranking.'),'#review-title':T('协作中的调整','Changes along the way'),'#review-description':T('只看明确的返修与接管记录。普通续做不算返修，也不要求事后补记。','Explicit revision and takeover records only. Continuation is not rework; no retrospective paperwork.'),
+ '#browse-description':T('数字背后，每份任务都有自己的回执。','Behind the numbers, each task has its own receipt trail.'),'#footer-scope':T('仅 ACP 回执 · 不估算节省的 Codex 额度。','ACP receipts only · No estimate of Codex quota savings.'),'#footer-note':T('本机查看，分享只带走汇总。','Inspect locally. Share aggregates only.'),
+ '#records-heading':T('协作记录','Collaboration records'),'#workspace-title':T('按项目找到协作','Find work by project'),'#workspace-note':T('按本机 Git 仓库或工作文件夹归组；不是 Codex 保存的项目名称。','Grouped by local Git repository or working folder, not saved Codex project names.'),'#folder-label':T('工作目录','Folder'),
+ '#theme-title':T('纸张与伙伴','Paper & companions'),'#theme-note':T('鼠尾草猫是默认伙伴。四只布艺原稿不变，页首线条标识保持固定。','Sage cat is the default companion. Original artwork and the fixed line mark keep their identities.'),'#data-title':T('这些数字，怎样读？','How to read these numbers'),
+ '#share-title':T('把协作留成一张小卡。','A little record to keep.'),'#format-legend':T('版式','Format'),'#lang-legend':T('分享语言','Card language'),'#share-theme-legend':T('这张卡的纸张与伙伴','This card’s paper & companion'),'#caption-summary':T('查看文字说明 / 手动复制','View caption / copy manually'),
+ '#recent-title':T('最近的协作','Recent sessions'),'#recent-note':T('按发生时间展开，自然收尾。','A recent trail, not a to-do list.'),'#transport-title':T('沿途的情况','Along the way'),'#transport-note':T('只看已捕获的运行证据。没有记录，不等于没有发生。','Visible runtime evidence only. No observation is not proof of absence.'),'#runtime-caption':T('本机只读 · 不改派工策略','Local inspection · No routing changes'),
+ '#refresh':T('刷新','Refresh'),'#stop':T('关闭面板','Close dashboard'),'#mark-download':T('线条 logo SVG ↓','Product mark SVG ↓'),'#cat-download':T('Canon 猫 SVG ↓','Canon cat SVG ↓')};
+ for(const [selector,value]of Object.entries(content))$(selector).textContent=value;
+ $('#local-info').textContent=T('本机记录 · 仅 ACP','Local records · ACP only');
+ $('#timezone-label').textContent=T('时间','Time zone');const choices=[['local',T('跟随机器','This device')],['Asia/Shanghai',T('上海','Shanghai')],['UTC','UTC'],['America/New_York','New York']];if(!choices.some(x=>x[0]===zonePreference))choices.push([zonePreference,zonePreference]);
+ $('#timezone').innerHTML=choices.map(([v,l])=>`<option value="${esc(v)}" ${zonePreference===v?'selected':''}>${esc(l)}</option>`).join('');$('#timezone').setAttribute('aria-label',T('显示及分组时区','Display and grouping time zone'));
+ $('#share-open').innerHTML=T('分享小卡','Share card')+arrow;$('#browse-records').textContent=T('展开协作记录 ↗','Explore the records ↗');$('#back-overview').textContent=T('← 返回总览','← Back to overview');$('#data-open').textContent=T('统计口径 ↗','About the data ↗');
+ $('#theme-open').innerHTML=`${svg(theme.mascot)}<span>${esc(theme.name[lang])}</span><span aria-hidden="true">⌄</span>`;$('#theme-open').setAttribute('aria-label',T('选择纸张与伙伴','Choose paper and companion'));
+ $('#record-search').placeholder=T('查找任务、路由或文件夹','Find a task, route or folder');$('#record-search').setAttribute('aria-label',$('#record-search').placeholder);
+ $('#period-options').innerHTML=buttons([['all',T('全部','All')],['7d',T('近 7 天','Last 7 days')],['30d',T('近 30 天','Last 30 days')]],'data-period',period);
+ $('#measure-options').innerHTML=buttons([['turns',T('执行轮次','Turns')],['created',T('新派任务','New tasks')]],'data-measure',measure);
+ $('#theme-choices').innerHTML=THEMES.map(p=>`<button data-theme="${p.id}" class="theme-choice ${p.id===theme.id?'active':''}" aria-pressed="${p.id===theme.id}">${svg(p.mascot)}<span>${esc(p.name[lang])}</span><small>${p.id==='sage'?'CANON':p.name.en.toUpperCase()}</small></button>`).join('');
+ document.querySelector('nav').setAttribute('aria-label',T('视图','Views'));document.querySelectorAll('[data-close]').forEach(el=>el.setAttribute('aria-label',T('关闭','Close')));
 }
-function notice(message) {$('#notice').textContent=message;$('#notice').hidden=!message;}
-function coverageNotice() {
-  const n=snapshot.warnings.reduce((sum,w)=>sum+w.count,0);
-  notice(n?t(`有 ${n} 条数据提示。部分用量或记录不可用；未知值不计作零。`,`There are ${n} data notices. Some usage or records are unavailable; unknown values are not zero.`):'');
+function buildBins(){
+ const source=snapshot.activity??[];if(!source.length)return [];
+ const start=dayKey(snapshot.period.since??source[0].date+'T12:00:00Z',zone);const first=snapshot.period.since?start:source[0].date;const last=dayKey(snapshot.period.until,zone);
+ // Arithmetic advances date labels, not local-midnight instants; DST days retain their real receipt dates.
+ const dayMs=86400000,days=Math.max(1,Math.round((Date.parse(last+'T12:00Z')-Date.parse(first+'T12:00Z'))/dayMs)+1),size=Math.max(1,Math.ceil(days/(innerWidth<760?7:12))),out=[];
+ for(let i=0;i<days;i+=size){const from=new Date(Date.parse(first+'T12:00Z')+i*dayMs).toISOString().slice(0,10),to=new Date(Date.parse(first+'T12:00Z')+Math.min(days-1,i+size-1)*dayMs).toISOString().slice(0,10);const rows=source.filter(x=>x.date>=from&&x.date<=to);out.push({from,to,turns:rows.reduce((n,x)=>n+x.turns,0),created:rows.reduce((n,x)=>n+x.created_session_ids.length,0)});}return out;
 }
-function setLanguage() {
-  document.documentElement.lang = language==='zh'?'zh-CN':'en';
-  document.querySelectorAll('[data-i18n]').forEach(el=>{el.innerHTML=language==='en' ? en[el.dataset.i18n] ?? zh.get(el.dataset.i18n) : zh.get(el.dataset.i18n);});
-  $('#language').textContent=language==='zh'?'EN':'中';
-  $('#search').placeholder=t('查找责任或 route','Find a responsibility or route');
-  $('#search').setAttribute('aria-label',$('#search').placeholder);
-  renderThemePickers();
-  if(snapshot) {render();coverageNotice();}
+function renderOverview(){
+ const s=snapshot.summary;$('#task-number').textContent=num(s.responsibilities);$('#turn-number').textContent=num(s.worker_turns);$('#token-number').textContent=compact(s.external_tokens);$('#companion-seal').innerHTML=svg(theme.mascot);
+ $('#coverage-pill').textContent=s.usage_sessions===s.usage_total_sessions?T('用量口径 ↗','Usage scope ↗'):T('部分用量 ↗','Partial usage ↗');$('#coverage-note').textContent=T(`已观测外部用量 · ${s.usage_total_sessions} 份有回执任务中 ${s.usage_sessions} 份可归属`,`Observed usage · ${s.usage_sessions} / ${s.usage_total_sessions} receipted tasks attributable`);
+ const counts={completed:0,failed:0,cancelled:0,unknown:0};snapshot.sessions.forEach(x=>counts[status(x)]++);
+ $('#status-track').innerHTML=Object.entries(counts).map(([k,n])=>`<span class="status-segment ${k}"></span>`).join('');
+ $('#status-track').querySelectorAll('.status-segment').forEach((el,i)=>{el.style.width=`${s.responsibilities?Object.values(counts)[i]/s.responsibilities*100:0}%`;});
+ $('#status-buttons').innerHTML=Object.entries(counts).filter(([k,n])=>n||k==='completed').map(([k,n])=>`<button data-status="${k}" aria-label="${esc(kindLabel(k)+' '+n)}"><i class="swatch ${k}" aria-hidden="true"></i><span>${kindLabel(k)}</span><strong>${num(n)}</strong><span aria-hidden="true">↗</span></button>`).join('');
+ bins=buildBins();const total=bins.reduce((n,b)=>n+b[measure],0),max=Math.max(1,...bins.map(b=>b[measure])),top=Math.max(5,Math.ceil(max/5)*5);
+ $('#chart-total').textContent=num(total);$('#chart-unit').textContent=measure==='turns'?T('轮执行','worker turns'):T('份新派任务','new tasks');
+ $('#activity').innerHTML=bins.length?`<div class="y-axis" aria-hidden="true"><span>${num(top)}</span><span>${num(top/2)}</span><span>0</span></div><div class="columns">${bins.map((b,i)=>`<button class="bin ${b[measure]===max?'peak':''}" data-bin="${i}" aria-label="${esc(`${b.from}${b.to!==b.from?' — '+b.to:''}: ${b[measure]} ${measure==='turns'?T('轮执行','turns'):T('份新派','new tasks')}`)}"><i class="bar ${b[measure]===0?'zero':''}"><span class="bar-value">${num(b[measure])}</span></i><span class="bin-label">${short(b.from)}</span></button>`).join('')}</div>`:`<div class="empty">${T('这个窗口还没有执行回执。','No execution receipts in this window yet.')}</div>`;
+ $('#activity').querySelectorAll('.bar').forEach((el,i)=>{el.style.height=`${bins[i][measure]/top*100}%`;});
+ $('#route-rows').innerHTML=snapshot.routes.map(r=>`<button class="route-row" data-route="${esc(r.name)}"><span class="route-title"><strong>${esc(r.name)}</strong><span>${num(r.worker_turns)} ${T('轮','turns')} · ${s.worker_turns?Math.round(r.worker_turns/s.worker_turns*100):0}%</span></span><span class="route-bar" aria-hidden="true"><i></i></span><span class="route-meta"><span>${num(r.responsibilities)} ${T('份任务','tasks')}</span><span>${T('查看记录','View records')} ↗</span></span></button>`).join('')||`<p class="chart-note">${T('这个窗口还没有路由记录。','No routes recorded in this window.')}</p>`;
+ $('#route-rows').querySelectorAll('.route-bar i').forEach((el,i)=>{el.style.width=`${s.worker_turns?snapshot.routes[i].worker_turns/s.worker_turns*100:0}%`;});
+ $('#review-actions').innerHTML=`<button data-review="revision"><strong>${num(s.revisions)}</strong>${T('次明确返修','explicit revisions')} ↗</button><button data-review="takeover"><strong>${num(s.taken_over)}</strong>${T('份主机接管','taken-over tasks')} ↗</button>`;
+ $('#recent-list').innerHTML=snapshot.sessions.slice(0,4).map(s=>`<button class="recent-row" data-task="${s.id}"><i class="recent-dot" aria-hidden="true"></i><span><strong>${esc(title(s))}</strong><small>${esc(s.workspace?.name??'')} · ${esc(s.route)} · ${dateTime(s.updated_at)} · ${num(s.turns)} ${T('轮','turns')}</small></span><span class="recent-state">${kindLabel(status(s))} ↗</span></button>`).join('')||`<div class="empty">${T('派出第一份任务后，回执会自然出现在这里。','Receipts will appear after your first delegated task.')}</div>`;
+ renderRuntime();
 }
-function renderThemePickers() {
-  const focused=document.activeElement;
-  const focusAttribute=focused?.hasAttribute('data-theme')?'data-theme':focused?.hasAttribute('data-share-theme')?'data-share-theme':null;
-  const focusId=focusAttribute?focused.getAttribute(focusAttribute):null;
-  for(const [selector,selected,attribute] of [['#theme-picker',theme,'data-theme'],['#share-theme-picker',shareTheme,'data-share-theme']]) {
-    const host=$(selector);
-    host.innerHTML=THEMES.map(item=>`<button class="theme-choice${item.id===selected.id?' selected':''}" ${attribute}="${item.id}" aria-pressed="${item.id===selected.id}"><span class="theme-colours" aria-hidden="true"><img alt="" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(renderMascotSVG(item.mascot))}"></span><span>${escape(item.name[language])}${item.id==='sage'?'<small>Canon</small>':''}</span></button>`).join('');
-    [...host.children].forEach((button,i)=>button.style.setProperty('--choice-paper',THEMES[i].colors.primarySoft));
-  }
-  if(focusAttribute)document.querySelector(`button[${focusAttribute}="${focusId}"]`)?.focus({preventScroll:true});
+function renderRuntime(){const notes=snapshot.runtime_notes??{coverage:'unavailable',events:[],session_count:0,http_429_count:0,omitted:0};const events=snapshot.sessions.flatMap(s=>(s.observations?.events??[]).map(e=>({...e,session_id:s.id}))).sort((a,b)=>a.at.localeCompare(b.at));
+ $('#transport-summary').innerHTML=`<strong>${num(notes.session_count)}</strong>${T('份任务有运行记录','tasks with runtime notes')}<p class="quiet-note">${T('当前接入仅暴露 runtime 错误码，未提供 provider HTTP / 重试观测。','This integration exposes runtime codes, not provider HTTP or retry observations.')}</p>`;
+ $('#transport-list').innerHTML=events.slice(-4).reverse().map(e=>`<button class="transport-row" data-task="${esc(e.session_id)}"><span><span>${esc(e.code??e.kind)}</span><span>↗</span></span><small>${dateTime(e.at)} · ${esc(e.source??'acpx.runtime')} · ${T('错误码不等于 HTTP 状态','Not an HTTP status')}</small></button>`).join('');
+ if(notes.omitted)$('#transport-list').insertAdjacentHTML('beforeend',`<p class="quiet-note">${T(`另有 ${notes.omitted} 条因数量上限未展示。`,`${notes.omitted} additional observations omitted by the size limit.`)}</p>`);
 }
-function applyTheme() {
-  document.documentElement.dataset.theme=theme.id;
-  for(const [key,value] of Object.entries(theme.colors))document.documentElement.style.setProperty('--'+key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase()),value);
-  $('.metric-cat').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(renderMascotSVG(theme.mascot));
-  renderThemePickers();
-  if(snapshot)render();
+function matchingRows(){let rows=snapshot.sessions;
+ if(filter.workspace)rows=rows.filter(s=>(s.workspace?.id??'unknown')===filter.workspace);
+ if(filter.folder)rows=rows.filter(s=>s.workspace?.cwd===filter.folder);
+ if(filter.route)rows=rows.filter(s=>s.route===filter.route);
+ if(filter.from){const selected=new Set(snapshot.activity.filter(a=>a.date>=filter.from&&a.date<=filter.to).flatMap(a=>filter.measure==='created'?a.created_session_ids:a.session_ids));rows=rows.filter(s=>selected.has(s.id));}
+ if(filter.kind){const k=filter.kind;rows=rows.filter(s=>k==='revision'?s.revisions>0:k==='takeover'?s.acceptance==='taken_over':k==='multi'?s.turns>1:k==='runtime'?(s.observations?.events?.length??0)>0:status(s)===k);}
+ if(filter.search){const q=filter.search.toLocaleLowerCase();rows=rows.filter(s=>[title(s),s.route,s.id,s.workspace?.name,s.workspace?.cwd].some(v=>v?.toLocaleLowerCase().includes(q)));}return rows;
 }
-const titleFor = s => s.title || t(`${date(s.created_at)} 的协作`, `Collaboration · ${date(s.created_at)}`);
-function statusFor(s) {
-  if(['not_requested','legacy_untracked'].includes(s.review_state)) return [({completed:t('运行完成','Runtime completed'),failed:t('运行失败','Runtime failed'),cancelled:t('已取消','Cancelled')})[s.runtime_status] ?? t('暂无终态回执','No terminal receipt'),''];
-  return [reviewLabel(s),s.review_state==='accepted'?'accepted':attention(s)?'attention':''];
+function renderWorkspaces(){const all=snapshot.workspaces??[],q=workspaceSearch.toLocaleLowerCase(),groups=all.filter(w=>[w.name,w.root].some(v=>v?.toLocaleLowerCase().includes(q))||!q);$('#workspace-count').textContent=T(`${all.length} 个归组`,`${all.length} groups`);$('#workspace-search').placeholder=T('查找项目或文件夹','Find a project or folder');$('#workspace-search').setAttribute('aria-label',T('查找项目或文件夹','Find a project or folder'));
+ $('#workspace-list').innerHTML=`<button class="workspace-choice ${!filter.workspace?'active':''}" data-workspace="all" aria-pressed="${!filter.workspace}"><span class="workspace-kind">ALL WORK</span><strong>${T('全部项目','All projects')}</strong><small>${num(snapshot.summary.responsibilities)} ${T('份任务','tasks')} · ${num(snapshot.summary.worker_turns)} ${T('轮执行','turns')}</small></button>`+groups.map(w=>`<button class="workspace-choice ${filter.workspace===(w.id??'unknown')?'active':''}" data-workspace="${esc(w.id??'unknown')}" aria-pressed="${filter.workspace===(w.id??'unknown')}"><span class="workspace-kind">${w.kind==='git'?'GIT REPOSITORY':w.kind==='folder'?'WORKING FOLDER':'UNRECORDED'}</span><strong>${esc(w.name||T('未记录目录','Unrecorded folder'))}</strong><small>${num(w.responsibilities)} ${T('份任务','tasks')} · ${num(w.worker_turns)} ${T('轮执行','turns')}</small><small>${esc(w.root??'')}</small>${w.limitation==='path_missing'?`<small>${T('原目录已不可访问 · 按记录路径归组','Original folder unavailable · grouped by recorded path')}</small>`:''}</button>`).join('');
+ const folders=[...new Set(snapshot.sessions.filter(s=>(s.workspace?.id??'unknown')===filter.workspace).map(s=>s.workspace?.cwd).filter(Boolean))];$('#folder-filter').hidden=!filter.workspace||folders.length<2;
+ $('#folder-select').innerHTML=`<option value="">${T('全部工作目录','All working folders')}</option>`+folders.map(f=>`<option value="${esc(f)}" ${filter.folder===f?'selected':''}>${esc(f)}</option>`).join('');
 }
-function miniTrack(s) {
-  // Follow observed chronology. Compress a long middle, never rearrange review
-  // and correction events into an invented happy path.
-  const labels = {
-    dispatch:['','派出','Out'],dispatched:['','派出','Out'],responsibility_started:['','派出','Out'],
-    turn_completed:['terminal','回执','Run'],runtime_completed:['terminal','回执','Run'],
-    turn_failed:['revision','失败','Fail'],runtime_failed:['revision','失败','Fail'],
-    turn_cancelled:['revision','取消','Stop'],runtime_cancelled:['revision','取消','Stop'],
-    submitted:['','送验','Review'],revision_requested:['revision','修正','Fix'],
-    accepted:['accepted','接受','OK'],taken_over:['taken_over','接管','Main'],
-  };
-  let points=(s.timeline??[]).filter(e=>labels[e.kind]).map(e=>({
-    class:labels[e.kind][0],label:t(labels[e.kind][1],labels[e.kind][2]),title:`${labelKind(e.kind)} · ${date(e.at)}`,
-  }));
-  if(points.length>7) points=[...points.slice(0,3),{class:'',label:`+${points.length-6}`,title:t('展开查看完整轨迹','Open for the full trail')},...points.slice(-3)];
-  if(!points.length) return `<span class="small muted">${t('暂无可展示事件','No recorded events')}</span>`;
-  return `<span class="mini-track" aria-hidden="true">${points.map(p=>`<span class="mini-node ${p.class}" title="${escape(p.title)}"><i></i><span>${escape(p.label)}</span></span>`).join('')}</span>`;
+function renderRecords(){renderWorkspaces();const rows=matchingRows(),chips=[];if(filter.from)chips.push(['day',`${short(filter.from)}${filter.to!==filter.from?'–'+short(filter.to):''} · ${filter.measure==='created'?T('新派','created'):T('执行','executed')}`]);if(filter.workspace)chips.push(['workspace',snapshot.workspaces.find(w=>(w.id??'unknown')===filter.workspace)?.name??T('项目','Project')]);if(filter.folder)chips.push(['folder',filter.folder]);if(filter.route)chips.push(['route',filter.route]);if(filter.kind)chips.push(['kind',kindLabel(filter.kind)]);
+ $('#filter-summary').innerHTML=`<span>${num(rows.length)} ${T('份任务','tasks')}</span><div>${chips.map(([k,v])=>`<button data-clear="${k}" class="filter-chip">${esc(v)} ×</button>`).join('')}${chips.length||filter.search?`<button class="text-link" data-reset>${T('清除筛选','Clear filters')}</button>`:''}</div>`;
+ $('#record-list').innerHTML=rows.length?rows.slice(0,limit).map(s=>`<button class="record-row" data-task="${s.id}"><span class="record-title"><strong>${esc(title(s))}</strong><small>${esc(s.workspace?.name??T('未记录目录','Unrecorded folder'))} · ${esc(s.route)} · ${dateTime(s.created_at)} ${T('新派','created')}</small></span><span class="record-history">${num(s.turns)} ${T('轮执行回执','receipts in window')}${s.revisions?`<span>${num(s.revisions)} ${T('次明确返修','explicit revisions')}</span>`:''}${s.acceptance==='taken_over'?`<span>${T('有主机接管记录','Takeover recorded')}</span>`:''}</span><span class="record-state"><i class="swatch ${status(s)}" aria-hidden="true"></i>${kindLabel(status(s))}</span><span class="record-arrow" aria-hidden="true">↗</span></button>`).join(''):`<div class="empty"><h3>${T('这页暂时空着。','Nothing here yet.')}</h3><p>${T('这个窗口没有符合条件的记录。','No records match these filters in this window.')}</p></div>`;
+ $('#more-records').hidden=rows.length<=limit;$('#more-records').textContent=T(`再看 ${Math.min(12,Math.max(0,rows.length-limit))} 份记录 ↓`,`Show ${Math.min(12,Math.max(0,rows.length-limit))} more ↓`);
+ $('#record-options').innerHTML=buttons(['all','revision','multi','takeover','runtime'].map(k=>[k,kindLabel(k)]),'data-kind',filter.kind??'all');
 }
-
-function switchView(next) {
-  view=next;
-  $('#home-view').hidden=view!=='home';$('#records-view').hidden=view!=='records';
-  document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
+function render(){const focused=focusKey(document.activeElement);applyTheme();renderStatic();if(snapshot){renderOverview();renderRecords();const start=snapshot.period.since?dayKey(snapshot.period.since,zone):null;$('#range-label').textContent=`${start?short(start):T('全部已记录时间','All recorded time')} — ${short(dayKey(snapshot.period.until,zone))} · ${zone}`;$('#local-info').textContent=T(`本机记录 · 观察于 ${dateTime(snapshot.observed_at)}`,`Local records · Observed ${dateTime(snapshot.observed_at)}`);}
+ $('#overview-view').hidden=view!=='overview';$('#records-view').hidden=view!=='records';document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);el.setAttribute('aria-current',active?'page':'false');});if(focused)$(focused)?.focus({preventScroll:true});}
+function switchView(next){if(view==='overview'&&next==='records')returnY=scrollY;view=next;render();if(next==='records'){$('#records-view').scrollIntoView({block:'start'});$('#records-heading').tabIndex=-1;$('#records-heading').focus({preventScroll:true});}else scrollTo(0,returnY);}
+function drill(next){filter=next;limit=12;$('#record-search').value='';switchView('records');}
+async function refresh(){if(stopped)return;const seq=++requestSequence;try{const next=await api('/api/snapshot?'+query());if(seq!==requestSequence)return;snapshot=next;notice('');render();$('#share-open').disabled=false;}catch(e){if(seq===requestSequence)notice(e.message);}finally{if(!snapshot){$('#share-open').disabled=true;$('#task-number').textContent='—';$('#turn-number').textContent='—';$('#token-number').textContent='—';}}}
+function renderData(){if(!snapshot)return;const s=snapshot.summary,missing=s.usage_total_sessions-s.usage_sessions;
+ $('#data-content').innerHTML=`<div class="data-callout"><h3>${T('运行事实，自然留下。','Execution leaves its own record.')}</h3><p>${T('普通派工、续做和收尾不会为了统计多一道手续。这里读取已有 ACP 回执；不从输出猜测验收，也不读取 Codex 账号额度。','Ordinary delegation, continuation and completion need no extra step for statistics. This view reads ACP receipts; it does not infer acceptance or read Codex account quotas.')}</p></div><dl class="definitions"><dt>${T(`${s.responsibilities} 份任务，${s.usage_total_sessions} 份进入用量分母`,`${s.responsibilities} tasks; ${s.usage_total_sessions} in the usage denominator`)}</dt><dd>${T(`只有窗口内有执行回执的任务进入用量分母。另有 ${Math.max(0,s.responsibilities-s.usage_total_sessions)} 份在窗口内只有创建或协作事件。续做仍属于原任务。`,`Only tasks with execution receipts in the window enter the usage denominator. Another ${Math.max(0,s.responsibilities-s.usage_total_sessions)} have only creation or collaboration events in the window. Continuation remains the same task.`)}</dd><dt>${T(`用量可归属：${s.usage_sessions} / ${s.usage_total_sessions}`,`Attributable usage: ${s.usage_sessions} / ${s.usage_total_sessions}`)}</dt><dd>${T(`${missing} 份缺少可归属用量。${compact(s.external_tokens)} 是已知部分，不是完整总量、费用或额度节省。累计量去重；跨窗口缺基线、计数重置或末次缺失保持未知。`,`${missing} tasks lack attributable usage. ${compact(s.external_tokens)} is the known portion, not complete usage, billing or quota savings. Cumulative snapshots are deduplicated; absent baselines, resets and missing endpoints remain unknown.`)}</dd><dt>${T('时间窗口与自然日','Windows and calendar days')}</dt><dd>${T(`近 7 / 30 天是截至观察时刻的滚动窗口；日期柱、下钻与回放都按 ${zone} 显示。原始 UTC 时间戳不变。`,`Last 7 / 30 days are rolling windows ending at the observation time. Bars, drill-through and replay use ${zone}. Source UTC instants remain unchanged.`)}</dd><dt>${T('运行完成与工程验收','Execution and engineering acceptance')}</dt><dd>${T('完成回执不等于验收结论。缺少接受标记不等于失败，也不会生成待办。后续已开始而没有终态回执的轮次单独显示；可继续的持久会话不等于任务未完成。','Completion is not an acceptance verdict. Missing acceptance notes do not mean failure or create a to-do. An observed later start without a terminal receipt is shown separately; a resumable session alone is not unfinished work.')}</dd><dt>${T('返修、接管与错误码','Revisions, takeovers and runtime codes')}</dt><dd>${T('返修只计明确事件，接管保留已记录的判断；多轮续做不自动变成返工。当前 acpx 不提供 provider HTTP 状态或内部重试事件，因此不能把 runtime 错误码、输出中的 429 或没有记录解释为已确认的限流结论。','Revisions require explicit events and takeovers retain attributed decisions. Multiple turns do not imply rework. Current acpx does not expose provider HTTP status or internal retries: runtime codes, text mentioning 429, or missing observations cannot establish rate-limiting conclusions.')}</dd><dt>${T('项目归属','Project grouping')}</dt><dd>${T('从任务实际工作目录识别本机 Git 仓库；同 repo 的 worktree 合并，再按具体目录筛选。不存在的目录使用保存的路径归组。不是从 Codex 项目名或聊天正文猜测。项目与目录不会进入分享图。','Local Git identity comes from the actual working directory. Worktrees group together and remain filterable by folder. Unavailable directories use the saved path. This is not inferred from Codex project names or chat text. Projects and paths never enter share cards.')}</dd></dl>${snapshot.warnings.length?`<details class="workspace-detail"><summary>${T('数据说明','Data notes')} · ${snapshot.warnings.reduce((n,w)=>n+w.count,0)}</summary><dl>${snapshot.warnings.map(w=>`<dt>${esc(w.code)}</dt><dd>${num(w.count)} ${T('条；未知值保持未知。','observations; unknown values stay unknown.')}</dd>`).join('')}</dl>`:''}`;
 }
-const chartPalette=()=>{const c=theme.colors;return [c.primary,c.secondary,c.tertiary,c.fourth,c.fifth,c.sixth];};
-function renderHome() {
-  renderActivity();
-  const c=theme.colors,chartColors=chartPalette();
-  const s=snapshot.summary,total=s.responsibilities;
-  const review=s.review;
-  const reviewKeys=['accepted','taken_over','awaiting_review','changes_requested'];
-  const reviewed=reviewKeys.reduce((n,k)=>n+review[k],0);
-  const parts=outcome==='runtime' ? [
-    {label:t('运行完成','Runtime completed'),value:s.runtime_completed,color:c.primary},
-    {label:t('运行失败','Runtime failed'),value:s.failed,color:c.secondary},
-    {label:t('已取消','Cancelled'),value:s.cancelled,color:c.tertiary},
-    {label:t('尚无终态回执','No terminal receipt'),value:Math.max(0,total-s.runtime_completed-s.failed-s.cancelled),color:c.track},
-  ] : Object.entries(reviewLabels).filter(([key])=>reviewKeys.includes(key)).map(([key,label],i)=>({label:t(...label),value:review[key],color:chartColors[i]}));
-  const chartTotal=outcome==='runtime'?total:reviewed;
-  let offset=0;
-  const arcs=parts.filter(p=>p.value).map(p=>{const length=p.value/Math.max(1,chartTotal)*100;const result=`<circle cx="120" cy="120" r="91" pathLength="100" fill="none" stroke="${p.color}" stroke-width="25" stroke-dasharray="${Math.max(0,length-0.8)} ${100-Math.max(0,length-0.8)}" stroke-dashoffset="${-offset}" transform="rotate(-90 120 120)"/>`;offset+=length;return result;}).join('');
-  $('#acceptance-chart').innerHTML=`<div class="donut-wrap"><svg viewBox="0 0 240 240" role="img" aria-label="${escape(parts.map(p=>`${p.label}: ${p.value}`).join('; '))}"><circle cx="120" cy="120" r="91" fill="none" stroke="${c.track}" stroke-width="25"/>${arcs}</svg><div class="donut-label"><strong>${number(chartTotal)}</strong><span>${outcome==='runtime'?t('份责任','responsibilities'):t('份主动复盘','review notes')}</span></div></div><div class="donut-legend">${parts.filter(p=>p.value||['运行完成','Runtime completed','主机已接受','Accepted'].includes(p.label)).map(p=>`<div><span><i data-color="${p.color}"></i>${escape(p.label)}</span><strong>${number(p.value)}</strong></div>`).join('')}</div>${outcome==='review'?`<p class="chart-note">${escape(t('仅展示主动记录的复盘；普通完成不要求另作标记。','Only deliberate review notes appear here. Ordinary completion needs no extra annotation.'))}</p>`:''}`;
-  document.querySelectorAll('[data-outcome]').forEach(el=>{const active=el.dataset.outcome===outcome;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-  const pending=pendingStates.reduce((n,k)=>n+review[k],0);
-  $('#review-inbox').hidden=pending===0;
-  $('#review-inbox').innerHTML=`<div><strong>${t(`${number(pending)} 份协作需要留意`,`${number(pending)} responsibilities need a look`)}</strong><p>${t('执行异常或明确提出的复查；普通完成不会变成待办。','Execution issues or explicit review requests. Ordinary completion adds no to-do.')}</p></div><button class="text-button" data-review-filter="attention">${t('查看记录 ↗','View records ↗')}</button>`;
-  $('#review-inbox').querySelector('[data-review-filter]').addEventListener('click',()=>{filter='attention';search='';$('#search').value='';limit=12;renderSessions();switchView('records');$('#records-view').scrollIntoView({behavior:'instant'});});
-  const routes=snapshot.routes,totalTurns=routes.reduce((n,r)=>n+r.worker_turns,0);
-  $('#route-count').textContent=t(`${routes.length} 条 route`,`${routes.length} routes`);
-  $('#route-ribbon').innerHTML=routes.map((r,i)=>`<span data-width="${r.worker_turns/Math.max(1,totalTurns)*100}" data-color="${chartColors[i%chartColors.length]}"></span>`).join('');
-  $('#routes').innerHTML=routes.length?routes.map((r,i)=>`<button class="route-item" data-route="${escape(r.name)}" aria-label="${escape(t(`查看 ${r.name} 的记录`,`View records for ${r.name}`))}"><span class="route-title"><i data-color="${chartColors[i%chartColors.length]}"></i><strong>${escape(r.name)}</strong><span>${number(r.worker_turns)} ${t('轮','turns')} <b>${Math.round(r.worker_turns/Math.max(1,totalTurns)*100)}%</b></span></span><span class="route-meta"><span>${number(r.responsibilities)} ${t('份责任','responsibilities')} · ${t('中位','median')} ${elapsed(r.median_elapsed_ms)}</span><span>${compact(r.external_tokens)} tokens · ${t('用量覆盖','coverage')} ${r.usage_sessions}/${r.usage_total_sessions??r.responsibilities} ↗</span></span></button>`).join(''):`<p class="chart-note">${t('还没有 route 留下回执。','No route receipts yet.')}</p>`;
-  $('#quality').innerHTML=[[s.submissions,t('次送验','submissions')],[s.revisions,t('次明确修正','explicit revisions')],[snapshot.sessions.filter(x=>x.evidence_count>0).length,t('份含主机证据','with coordinator evidence')]].map(([n,l])=>`<div><strong>${number(n)}</strong><span>${l}</span></div>`).join('');
-  const reasonCounts=new Map();
-  for(const session of snapshot.sessions)for(const e of session.timeline??[])if(e.kind==='revision_requested')reasonCounts.set(e.reason??'uncertain',(reasonCounts.get(e.reason??'uncertain')??0)+1);
-  const max=Math.max(1,...reasonCounts.values());
-  $('#revision-reasons').innerHTML=reasonCounts.size?[...reasonCounts].sort((a,b)=>b[1]-a[1]).map(([r,n])=>`<div class="reason-row"><span>${escape(reasons[r]?t(...reasons[r]):t('未分类','Unclassified'))}</span><div><i data-width="${n/max*100}"></i></div><strong>${number(n)}</strong></div>`).join(''):`<div class="no-revisions"><span aria-hidden="true">✳</span><p>${t('这段时间，没有明确记录的修正。','No explicit revisions recorded in this period.')}</p></div>`;
-  document.querySelectorAll('[data-width]').forEach(el=>el.style.width=`${el.dataset.width}%`);
-  document.querySelectorAll('[data-color]').forEach(el=>el.style.backgroundColor=el.dataset.color);
+function evidenceMarkup(list=[]){return list.map(e=>`<div class="evidence">${e.source==='coordinator'?T('主机记录','Coordinator evidence'):T('Worker 自述','Worker-reported')} · ${esc(e.kind)}<br>${esc(e.summary)}</div>`).join('');}
+const inSelectedDay=at=>filter.from&&at&&dayKey(at,zone)>=filter.from&&dayKey(at,zone)<=filter.to;
+async function openDetail(id){detailId=id;$('#detail-content').innerHTML=`<h2 id="detail-title" class="detail-title">${T('正在打开协作回放…','Opening the replay…')}</h2>`;showDialog('#detail-dialog');
+ try{const d=await api(`/api/detail/${encodeURIComponent(id)}?timeZone=${encodeURIComponent(zone)}`);if(detailId!==id)return;const s=d.session,w=s.workspace;const observations=s.observations?.events??[];
+ const source={schema:'cwr.dispatch.inspection/1',time_zone:zone,session:s,events:d.events,turns:d.turns.map(r=>({request_id:r.request_id,started_at:r.started_at,finished_at:r.finished_at,runtime_status:r.runtime_status,error_code:r.error_code,cleanup:r.cleanup,observations:r.observations}))};
+ $('#detail-content').innerHTML=`<h2 id="detail-title" class="detail-title">${esc(title(s))}</h2><p class="detail-meta">${esc(s.route)} · ${esc(s.id)}<br>${T('创建于','Created')} ${dateTime(s.created_at)} · ${esc(zone)}</p><div class="detail-stats"><div><strong>${num(s.turns)}</strong><span>${T('总执行轮次','total turns')}</span></div><div><strong>${num(s.revisions)}</strong><span>${T('明确返修记录','explicit revisions')}</span></div><div><strong>${kindLabel(status(s))}</strong><span>${T('已观察的运行状态','observed runtime state')}</span></div></div>${s.active_turn?`<p class="detail-explainer">${T(`已观察到 ${dateTime(s.active_turn.started_at)} 开始的新一轮，尚无对应终态回执；不能仅凭此确认进程仍在运行。`,`A later turn started at ${dateTime(s.active_turn.started_at)} without a terminal receipt. This alone does not establish a live process.`)}</p>`:''}<p class="detail-explainer">${T('完整协作经过；高亮的是从图表选中的日期。工单与输出只在本机查看，不进入分享。','Full collaboration trail; highlighted events match the selected chart dates. Work orders and outputs stay local and never enter sharing.')}</p><details class="workspace-detail"><summary>${T('项目、工作目录与来源','Project, working folder and provenance')}</summary><dl><dt>${T('归组','Group')}</dt><dd>${esc(w?.name??T('未记录','Unrecorded'))} · ${esc(w?.kind??'unknown')}</dd><dt>${T('仓库或目录根','Repository / folder root')}</dt><dd>${esc(w?.root??'—')}</dd><dt>${T('实际工作目录','Working directory')}</dt><dd>${esc(w?.cwd??'—')}</dd><dt>${T('关联主会话','Linked parent')}</dt><dd>${esc(s.parent?.thread_id??s.parent?.session_id??T('历史记录未保存','Not recorded'))}</dd></dl></details><ol class="timeline">${s.timeline.map(e=>`<li class="${inSelectedDay(e.at)?'selected-day':''}"><strong>${esc(eventLabel(e.kind))}</strong><time>${dateTime(e.at)}</time>${e.reason?`<p>${esc(reasons[e.reason]?T(...reasons[e.reason]):e.reason)}</p>`:''}${e.summary?`<p>${esc(e.summary)}</p>`:''}${evidenceMarkup(e.evidence)}</li>`).join('')}</ol>${observations.length?`<h3>${T('自动捕获的运行记录','Automatically captured runtime notes')}</h3><ol class="timeline">${observations.map(e=>`<li class="${inSelectedDay(e.at)?'selected-day':''}"><strong>${esc(e.code??e.kind)}</strong><time>${dateTime(e.at)} · ${esc(e.source)}</time><p>${T('这是 runtime 错误码，不是确认的 HTTP 状态。','A runtime code, not a confirmed HTTP status.')}</p></li>`).join('')}</ol>`:''}${d.turns.map((r,i)=>`<details class="receipt-detail"><summary>${T(`第 ${i+1} 轮`,`Turn ${i+1}`)} · ${esc(eventLabel(r.runtime_status))} · ${dateTime(r.finished_at??r.started_at)}<br><span class="quiet-note">${T('清理','Cleanup')}: ${esc(r.cleanup)}${r.error_code?' · '+esc(r.error_code):''}</span></summary><h3>${T('原始工单','Work order')}</h3><pre>${esc(r.work_order??T('旧记录未保存独立工单。','No separately retained historical work order.'))}</pre><h3>${T('Worker 输出节选','Worker output excerpt')}</h3><pre>${esc(r.output_excerpt??T('没有保留输出。','No retained output.'))}</pre></details>`).join('')}<details class="machine-evidence"><summary>${T('给人和机看的同一份结构化经过','The same structured trail for people and agents')}</summary><textarea readonly aria-label="Structured local evidence">${esc(JSON.stringify(source,null,2))}</textarea></details>`;
+ }catch(e){$('#detail-content').innerHTML=`<h2 id="detail-title">${T('未能读取这份记录','Record unavailable')}</h2><p class="dialog-note">${esc(e.message)}</p>`;}}
+async function openShare(){if(!snapshot)return;$('#share-open').disabled=true;try{const data=await api('/api/share?'+query());shareState={data,theme:theme.id,lang,format:'poster'};renderShare();showDialog('#share-dialog','#share-open');}catch(e){notice(e.message);}finally{$('#share-open').disabled=false;}}
+function renderShare(){if(!shareState)return;const focus=focusKey(document.activeElement),state=shareState;
+ if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(new Blob([renderShareSVG(state.data,state.format,state.lang,state.theme)],{type:'image/svg+xml'}));$('#share-preview').innerHTML=`<img src="${previewUrl}" alt="${T('分享卡预览','Share card preview')}">`;
+ $('#share-scope').textContent=T(`已冻结整个时间窗口的 ACP 汇总与 ${state.data.time_zone} 时区。列表筛选不改变分享数字。`,`Frozen ACP totals for the entire window in ${state.data.time_zone}. List filters do not alter the card.`);
+ $('#share-formats').innerHTML=buttons([['poster',T('竖版','Portrait')],['banner',T('横版','Landscape')]],'data-format',state.format);
+ $('#share-languages').innerHTML=buttons([['zh','中文'],['en','English']],'data-share-lang',state.lang);
+ $('#share-themes').innerHTML=THEMES.map(p=>`<button data-share-theme="${p.id}" class="${state.theme===p.id?'active':''}" aria-pressed="${state.theme===p.id}" aria-label="${esc(p.name[lang])}">${svg(p.mascot)}<span>${esc(p.name[lang])}</span></button>`).join('');
+ $('#copy-caption').textContent=T('复制图片说明','Copy image caption');$('#caption-text').value=renderShareCaption(state.data,state.lang);$('#export-note').textContent=T('本机下载，不含任务、项目、route 名称、路径或内部 ID。','Local download. No task or project names, routes, paths or internal IDs.');if(focus)$(focus)?.focus({preventScroll:true});
 }
-function renderActivity() {
-  const DAY=86400000, end=new Date(snapshot.period.until);end.setUTCHours(0,0,0,0);
-  const points=new Map();
-  if(measure==='turns')for(const a of snapshot.activity)points.set(a.date,a.turns);
-  else for(const s of snapshot.sessions){const at=Date.parse(s.created_at);if(Number.isFinite(at)&&at<=Date.parse(snapshot.period.until)&&(!snapshot.period.since||at>=Date.parse(snapshot.period.since))){const key=new Date(at).toISOString().slice(0,10);points.set(key,(points.get(key)??0)+1);}}
-  const first=snapshot.period.since?new Date(snapshot.period.since):points.size?new Date([...points.keys()].sort()[0]):new Date(end-6*DAY);first.setUTCHours(0,0,0,0);
-  const dayCount=Math.max(1,Math.floor((end-first)/DAY)+1),maxBars=matchMedia('(max-width:760px)').matches?21:35,span=Math.max(1,Math.ceil(dayCount/maxBars));
-  const bins=Array.from({length:Math.ceil(dayCount/span)},(_,i)=>({start:new Date(+first+i*span*DAY).toISOString().slice(0,10),end:new Date(Math.min(+end,+first+((i+1)*span-1)*DAY)).toISOString().slice(0,10),value:0}));
-  for(const [day,n] of points){const i=Math.floor((Date.parse(day)-first)/(span*DAY));if(bins[i])bins[i].value+=n;}
-  const total=bins.reduce((n,b)=>n+b.value,0),peak=Math.max(1,...bins.map(b=>b.value));
-  $('#chart-total').textContent=number(total);$('#chart-unit').textContent=measure==='turns'?t('轮执行','worker turns'):t('份新责任','new responsibilities');
-  const label=b=>`${b.start}${b.start===b.end?'':` → ${b.end}`} · ${number(b.value)} ${measure==='turns'?t('轮执行','turns'):t('份新责任','new responsibilities')}`;
-  $('#chart-detail').textContent=t('轻触柱形，查看这一段的数字','Touch a bar to see the numbers');
-  $('#activity').innerHTML=`<div class="plot-axis" aria-hidden="true"><span>${number(peak)}</span><span>${number(Math.round(peak/2))}</span><span>0</span></div><div class="plot-columns">${bins.map((b,i)=>`<button class="plot-bin${b.value===peak?' peak':''}" data-bin="${i}" aria-label="${escape(label(b))}"><i data-height="${b.value/peak*100}"></i><span class="bin-value">${number(b.value)}</span></button>`).join('')}</div>`;
-  $('#activity').querySelectorAll('[data-height]').forEach(el=>{el.style.height=`${el.dataset.height}%`;if(Number(el.dataset.height)===0)el.classList.add('zero');});
-  $('#activity').querySelectorAll('[data-bin]').forEach(el=>{const select=()=>{const b=bins[Number(el.dataset.bin)];$('#chart-detail').textContent=label(b);$('#activity').querySelectorAll('.selected').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');};el.addEventListener('pointerenter',select);el.addEventListener('focus',select);el.addEventListener('click',select);});
-  $('#activity-range').innerHTML=`<span>${bins[0].start}</span><span>${bins.at(-1).end}</span>`;
-  $('#activity-note').textContent=t(`${span===1?'每柱 1 天':`每柱最多 ${span} 天`} · UTC · 覆盖整个所选窗口${total?'':' · 暂无这类回执'}`,`${span===1?'Daily bars':`Up to ${span} days per bar`} · UTC · Entire selected window${total?'':' · No recorded activity'}`);
-  document.querySelectorAll('[data-measure]').forEach(el=>{const active=el.dataset.measure===measure;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-}
-function renderSessions() {
-  const visible = snapshot.sessions.filter(s=>(filter==='all'||filter==='attention'&&attention(s)||filter==='legacy'&&s.review_state==='legacy_untracked') && `${s.title} ${s.route} ${s.category} ${s.id}`.toLowerCase().includes(search.toLowerCase()));
-  document.querySelectorAll('[data-filter]').forEach(el=>{const active=el.dataset.filter===filter;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-  $('#session-count').textContent=t(`${visible.length} 份记录`,`${visible.length} records`);
-  const focused = document.activeElement?.dataset.session;
-  $('#sessions').innerHTML=visible.length ? visible.slice(0,limit).map((s,index)=>{
-    const [status,state]=statusFor(s);
-    const title=titleFor(s);
-    const summary=t(`${s.turns} 轮执行，${s.submissions} 次送验，${s.revisions} 次修正`,`${s.turns} turns, ${s.submissions} submissions, ${s.revisions} revisions`);
-    return `<button class="session-row" data-session="${escape(s.id)}" aria-label="${escape(`${title} · ${summary} · ${status}`)}"><span class="row-title"><span class="row-kicker">${String(index+1).padStart(2,'0')} / ${escape(labelCategory(s.category))}</span><strong>${escape(title)}</strong><span class="row-meta">${escape(s.route)} · ${escape(date(s.updated_at))}</span></span>${miniTrack(s)}<span class="row-state"><span class="status ${state}">${escape(status)}</span><span>${escape(s.evidence_count?t(`${s.evidence_count} 项主机证据`,`${s.evidence_count} coordinator checks`):t(`${s.turns} 轮回执`,`${s.turns} execution receipts`))}</span></span><span class="row-arrow" aria-hidden="true">↗</span></button>`;
-  }).join('') : `<div class="empty"><svg viewBox="0 0 80 70" aria-hidden="true"><path d="M10 51h17c8 0 10-5 10-12V15l10 8 10-8v27c0 12 17 12 17 2 0-7-7-7-8-2M42 36h1m8 0h1"/></svg>${escape(snapshot.sessions.length?t('没有匹配的记录。试试另一个筛选。','No matching records. Try another filter.'):t('这里还很安静。照常派活，回执会自己长成轨迹。','Quiet for now. Delegate as usual; receipts will leave a trail.'))}</div>`;
-  $('#more').hidden=visible.length<=limit;
-  if(focused) [...document.querySelectorAll('[data-session]')].find(el=>el.dataset.session===focused)?.focus({preventScroll:true});
-}
-function render() {
-  const s=snapshot.summary;
-  document.querySelectorAll('[data-period]').forEach(el=>{const active=el.dataset.period===period;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-  $('#period-caption').textContent=`${snapshot.period.since?shortDate(snapshot.period.since):t('所有已记录时间','All recorded time')} → ${shortDate(snapshot.period.until)} UTC`;
-  $('#responsibilities').textContent=number(s.responsibilities);$('#worker-turns').textContent=number(s.worker_turns);$('#external-tokens').textContent=compact(s.external_tokens);
-  $('#completed-note').textContent=t(`${number(s.runtime_completed)} 份运行完成`,`${number(s.runtime_completed)} runtime completed`);
-  $('#usage-note').textContent=t(`tokens · 可归属用量 ${s.usage_sessions} / ${s.usage_total_sessions}`,`tokens · attributable usage ${s.usage_sessions} / ${s.usage_total_sessions}`);
-  renderSessions();
-  renderHome();
-  $('#export').disabled=false;
-  $('#observed').textContent=t(`最后观察 ${date(snapshot.observed_at)}`,`Observed ${date(snapshot.observed_at)}`);
-}
-async function refresh(force=false) {
-  if(inflight||stopped)return;inflight=true;
-  const requestedPeriod=period;
-  try {
-    const next=await api(`/api/snapshot?since=${encodeURIComponent(requestedPeriod)}`);
-    if(requestedPeriod!==period)return;
-    // Observation time advances without replacing the focused UI on unchanged data.
-    const signature=JSON.stringify({...next,observed_at:null,period:{since:next.period.since?.slice(0,10),until:next.period.until?.slice(0,10)}});
-    snapshot=next;
-    if(force||signature!==version){version=signature;render();}
-    $('#observed').textContent=t(`最后观察 ${date(next.observed_at)}`,`Observed ${date(next.observed_at)}`);
-    coverageNotice();
-  } catch(e){notice(e.message);} finally{inflight=false;if(requestedPeriod!==period)void refresh(true);}
-}
-function evidenceMarkup(evidence=[]) {
-  return evidence.map(e=>`<div class="evidence">${escape(e.source==='coordinator'?t('主机记录','Coordinator evidence'):t('Worker 自述','Worker-reported'))} · ${escape(e.kind)}<br>${escape(e.summary)}</div>`).join('');
-}
-async function openDetail(id,trigger) {
-  detailTrigger=trigger;$('#detail-content').innerHTML=`<h2 id="detail-title" class="detail-heading">${t('正在打开协作回放…','Opening the replay…')}</h2>`;$('#detail-dialog').showModal();
-  try {
-    const d=await api(`/api/detail/${encodeURIComponent(id)}`),s=d.session;
-    const parent=s.parent?.thread_id||s.parent?.session_id;
-    $('#detail-content').innerHTML=`<h2 id="detail-title" class="detail-heading">${escape(titleFor(s))}</h2><div class="detail-subtitle">${!s.title?escape(t('旧记录未保存标题，按发起时间显示。','No historical title was saved; showing the dispatch time.'))+'<br>':''}${escape(s.route)} · ${escape(labelCategory(s.category))} · ${escape(s.id)}<br>${escape(parent?t(`已关联主会话 ${parent}${s.parent.observed_at?' · 关联始于 '+date(s.parent.observed_at):''}`,`Linked parent ${parent}${s.parent.observed_at?' · observed since '+date(s.parent.observed_at):''}`):t('历史记录未关联主会话；独立展示。','No recorded parent link; shown independently.'))}</div><div class="detail-stats"><span><strong>${number(s.turns)}</strong>${t('轮执行','turns')}</span><span><strong>${number(s.submissions)}</strong>${t('次送验','submissions')}</span><span><strong>${number(s.revisions)}</strong>${t('次修正','revisions')}</span><span><strong>${number(s.evidence_count)}</strong>${t('项主机证据','coordinator checks')}</span></div><div class="detail-grid"><section><h3>${t('这份责任怎样走完','How this responsibility unfolded')}</h3><ol class="timeline">${s.timeline.map(e=>`<li class="${escape(e.kind)}"><strong>${escape(labelKind(e.kind))}</strong><time>${escape(date(e.at))}</time>${e.reason?`<span class="reason">${escape(reasons[e.reason]?t(...reasons[e.reason]):e.reason)}</span>`:''}${e.summary?`<p>${escape(e.summary)}</p>`:''}${evidenceMarkup(e.evidence)}</li>`).join('')}</ol></section><section><h3>${t('工单与对应回执','Work orders & receipts')}</h3><p class="privacy-note">${t('以下内容仅在本机查看，不进入分享图。测试自述保留其来源，不自动升级为主机验证。','These details remain local and never enter share exports. Worker-reported tests are not independent coordinator verification.')}</p>${d.turns.map((r,i)=>`<details class="receipt-detail"><summary>${t(`第 ${i+1} 轮`,`Turn ${i+1}`)} · ${escape(labelKind(r.runtime_status))}<br><span class="muted small">${escape(date(r.finished_at))} · ${t('清理','cleanup')}: ${escape(r.cleanup)}</span></summary><div class="receipt-body"><h4>${t('原始工单','WORK ORDER')}</h4><pre>${escape(r.work_order??t('旧记录未保存独立工单。','No separately saved work order in this legacy record.'))}</pre><h4>${t('WORKER 回执节选','WORKER OUTPUT EXCERPT')}</h4><pre>${escape(r.output_excerpt??t('没有回执节选。','No output excerpt.'))}</pre></div></details>`).join('')}${!d.turns.length?`<p class="aside-note">${t('尚无终态回执。','No terminal receipt yet.')}</p>`:''}</section></div>${d.events?.some(e=>e.supersedes)?`<details class="history-note"><summary>${t('查看原始标记与修订历史','View original annotations & corrections')}</summary>${d.events.map(e=>`<p>${escape(labelKind(e.kind))} · ${escape(date(e.at))}${e.supersedes?' · '+t('修订先前记录','Corrects an earlier annotation'):''}<br>${escape(e.summary)}</p>`).join('')}</details>`:''}`;
-  }catch(e){$('#detail-content').innerHTML=`<h2 id="detail-title">${t('未能读取这份记录','Record unavailable')}</h2><p class="privacy-note">${escape(e.message)}</p>`;}
-}
-function updatePreview(){
-  if(!shareData)return;
-  if(previewUrl)URL.revokeObjectURL(previewUrl);
-  previewUrl=URL.createObjectURL(new Blob([renderShareSVG(shareData,format,shareLanguage,shareTheme.id)],{type:'image/svg+xml'}));
-  $('#share-preview').src=previewUrl;
-  document.querySelectorAll('[data-share-language]').forEach(el=>{const active=el.dataset.shareLanguage===shareLanguage;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-  document.querySelectorAll('[data-format]').forEach(el=>{const active=el.dataset.format===format;el.classList.toggle('selected',active);el.setAttribute('aria-pressed',String(active));});
-}
-function download(blob,ext) {
-  const url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=`worker-routing-${shareTheme.id}-${shareLanguage}-${format}-${shortDate(shareData.period.until)}.${ext}`;a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);
-}
-document.querySelectorAll('[data-period]').forEach(el=>el.addEventListener('click',()=>{period=el.dataset.period;limit=12;void refresh(true);}));
-document.querySelectorAll('[data-filter]').forEach(el=>el.addEventListener('click',()=>{filter=el.dataset.filter;limit=12;document.querySelectorAll('[data-filter]').forEach(b=>{const active=b===el;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active));});if(snapshot)renderSessions();}));
-$('#search').addEventListener('input',e=>{search=e.target.value;limit=12;if(snapshot)renderSessions();});
-$('#more').addEventListener('click',()=>{limit+=12;renderSessions();});
-$('#refresh').addEventListener('click',()=>void refresh(true));
-$('#language').addEventListener('click',()=>{language=language==='zh'?'en':'zh';localStorage.setItem('dispatch-language',language);setLanguage();});
-$('#sessions').addEventListener('click',e=>{const button=e.target.closest('[data-session]');if(button)void openDetail(button.dataset.session,button);});
-document.querySelectorAll('[data-view]').forEach(el=>el.addEventListener('click',()=>switchView(el.dataset.view)));
-document.querySelectorAll('[data-open-records]').forEach(el=>el.addEventListener('click',()=>switchView('records')));
-document.querySelectorAll('[data-measure]').forEach(el=>el.addEventListener('click',()=>{measure=el.dataset.measure;if(snapshot)renderActivity();}));
-$('#routes').addEventListener('click',e=>{const button=e.target.closest('[data-route]');if(!button)return;search=button.dataset.route;filter='all';$('#search').value=search;document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('selected',b.dataset.filter==='all'));renderSessions();switchView('records');});
-document.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',()=>document.getElementById(el.dataset.close).close()));
-$('#detail-dialog').addEventListener('close',()=>{if(detailTrigger?.isConnected)detailTrigger.focus();else $('[data-session]')?.focus();});
-$('#share-dialog').addEventListener('close',()=>$('#export').focus());
-$('#export').addEventListener('click',async()=>{
-  $('#export').disabled=true;
-  try{shareData=await api(`/api/share?since=${encodeURIComponent(period)}`);shareTheme=theme;renderThemePickers();updatePreview();$('#export-status').textContent='';$('#share-dialog').showModal();}catch(e){notice(e.message);}finally{$('#export').disabled=false;}
+function download(blob,ext){const a=document.createElement('a'),url=URL.createObjectURL(blob),s=shareState;a.href=url;a.download=`worker-routing-${s.theme}-${s.lang}-${s.format}-${dayKey(s.data.period.until,s.data.time_zone)}.${ext}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
+async function savePNG(){const controls=[...$('#share-dialog').querySelectorAll('button')];controls.forEach(b=>b.disabled=true);try{const image=$('#share-preview img');await image.decode();const canvas=document.createElement('canvas');canvas.width=shareState.format==='poster'?1080:1600;canvas.height=shareState.format==='poster'?1350:900;canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNG');download(blob,'png');notify(T('PNG 好了，可以叼走。','PNG is ready to take home.'));}catch{notify(T('PNG 未能生成，仍可下载 SVG。','PNG did not complete; SVG is still available.'));}finally{controls.forEach(b=>b.disabled=false);}}
+async function copyCaption(){const text=renderShareCaption(shareState.data,shareState.lang);try{await navigator.clipboard.writeText(text);notify(T('图片说明已复制。','Caption copied.'));}catch{$('.caption-fallback').open=true;$('#caption-text').focus();$('#caption-text').select();notify(T('请从已选中的文字手动复制。','Copy the selected caption manually.'));}}
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.close){$('#'+b.dataset.close).close();return;}
+ if(b.dataset.view){switchView(b.dataset.view);return;}
+ if(b.dataset.period){period=b.dataset.period;filter={};limit=12;$('#record-search').value='';renderStatic();void refresh();return;}
+ if(b.dataset.measure){measure=b.dataset.measure;render();return;}
+ if(b.hasAttribute('data-bin')){const bin=bins[Number(b.dataset.bin)];if(bin)drill({from:bin.from,to:bin.to,measure});return;}
+ if(b.dataset.route){drill({route:b.dataset.route});return;}
+ if(b.dataset.status){drill({kind:b.dataset.status});return;}
+ if(b.dataset.review){drill({kind:b.dataset.review});return;}
+ if(b.dataset.workspace){if(b.dataset.workspace==='all')delete filter.workspace;else filter.workspace=b.dataset.workspace;delete filter.folder;limit=12;renderRecords();document.querySelector(`button[data-workspace="${CSS.escape(b.dataset.workspace)}"]`)?.focus({preventScroll:true});return;}
+ if(b.dataset.kind){if(b.dataset.kind==='all')delete filter.kind;else filter.kind=b.dataset.kind;limit=12;renderRecords();document.querySelector(`button[data-kind="${b.dataset.kind}"]`)?.focus({preventScroll:true});return;}
+ if(b.hasAttribute('data-reset')){filter={};limit=12;$('#record-search').value='';renderRecords();$('#record-search').focus();return;}
+ if(b.dataset.clear){const key=b.dataset.clear;if(key==='day'){delete filter.from;delete filter.to;delete filter.measure;}else{delete filter[key];if(key==='workspace')delete filter.folder;}renderRecords();$('#record-search').focus();return;}
+ if(b.dataset.task){void openDetail(b.dataset.task);return;}
+ if(b.dataset.theme){theme=getTheme(b.dataset.theme);savePreferences();render();$('#theme-dialog').close();return;}
+ if(b.dataset.format){shareState.format=b.dataset.format;renderShare();return;}
+ if(b.dataset.shareLang){shareState.lang=b.dataset.shareLang;renderShare();return;}
+ if(b.dataset.shareTheme){shareState.theme=b.dataset.shareTheme;renderShare();return;}
 });
-document.querySelectorAll('[data-format]').forEach(el=>el.addEventListener('click',()=>{format=el.dataset.format;updatePreview();}));
-$('#download-svg').addEventListener('click',()=>{download(new Blob([renderShareSVG(shareData,format,shareLanguage,shareTheme.id)],{type:'image/svg+xml'}),'svg');$('#export-status').textContent=t('SVG 已生成，可以直接编辑或分享。','SVG ready to edit or share.');});
-$('#download-png').addEventListener('click',async()=>{
-  $('#download-png').disabled=true;
-  document.querySelectorAll('[data-format],[data-share-language],[data-share-theme]').forEach(el=>el.disabled=true);
-  try{
-    await $('#share-preview').decode();
-    const canvas=document.createElement('canvas');canvas.width=format==='poster'?1080:1600;canvas.height=format==='poster'?1350:900;
-    canvas.getContext('2d').drawImage($('#share-preview'),0,0,canvas.width,canvas.height);
-    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
-    if(!blob)throw new Error('Export failed');download(blob,'png');$('#export-status').textContent=t('PNG 已生成。猫可以叼走了。','PNG ready. Take a little proof home.');
-  }catch{$('#export-status').textContent=t('PNG 生成失败，仍可下载 SVG。','PNG export failed; SVG is still available.');}finally{$('#download-png').disabled=false;document.querySelectorAll('[data-format],[data-share-language],[data-share-theme]').forEach(el=>el.disabled=false);}
-});
-$('#stop').addEventListener('click',async()=>{try{await api('/api/close',{method:'POST'});stopped=true;notice(t('面板已关闭，本地预览进程已释放。重新运行 dashboard 命令可再打开。','Dashboard closed. Run the dashboard command to open it again.'));document.querySelectorAll('button,input').forEach(el=>el.disabled=true);}catch(e){notice(e.message);}});
-matchMedia('(max-width:760px)').addEventListener('change',()=>{if(snapshot)renderHome();});
-applyTheme();setLanguage();switchView(view);void refresh();
-setInterval(()=>{if(document.visibilityState==='visible')void refresh();},10000);
-setInterval(()=>{if(!stopped)void api('/api/ping').catch(()=>{});},20000);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refresh();});
-
-document.querySelectorAll('[data-outcome]').forEach(el=>el.addEventListener('click',()=>{outcome=el.dataset.outcome;if(snapshot)renderHome();}));
-
-document.querySelectorAll('[data-share-language]').forEach(el=>el.addEventListener('click',()=>{shareLanguage=el.dataset.shareLanguage;updatePreview();}));
-
-$('#theme-picker').addEventListener('click',e=>{const button=e.target.closest('button[data-theme]');if(!button)return;theme=getTheme(button.dataset.theme);localStorage.setItem('dispatch-theme',theme.id);applyTheme();});
-$('#share-theme-picker').addEventListener('click',e=>{const button=e.target.closest('button[data-share-theme]');if(!button)return;shareTheme=getTheme(button.dataset.shareTheme);renderThemePickers();updatePreview();});
+$('#canon').innerHTML=productMark();$('#home-link').addEventListener('click',e=>{e.preventDefault();switchView('overview');scrollTo(0,0);});
+$('#timezone').addEventListener('change',()=>{zonePreference=$('#timezone').value;zone=zonePreference==='local'?machineZone():resolveTimeZone(zonePreference);delete filter.from;delete filter.to;delete filter.measure;savePreferences();void refresh();});
+$('#language').addEventListener('click',()=>{lang=lang==='zh'?'en':'zh';savePreferences();render();});$('#theme-open').addEventListener('click',()=>showDialog('#theme-dialog'));
+for(const sel of ['#data-open','#local-info','#coverage-pill'])$(sel).addEventListener('click',()=>{renderData();showDialog('#data-dialog');});
+$('#browse-records').addEventListener('click',()=>drill({}));$('#back-overview').addEventListener('click',()=>switchView('overview'));$('#workspace-search').addEventListener('input',()=>{workspaceSearch=$('#workspace-search').value;renderWorkspaces();});$('#record-search').addEventListener('input',()=>{filter.search=$('#record-search').value;limit=12;renderRecords();});$('#folder-select').addEventListener('change',()=>{filter.folder=$('#folder-select').value;limit=12;renderRecords();$('#folder-select').focus();});$('#more-records').addEventListener('click',()=>{limit+=12;renderRecords();});
+$('#share-open').addEventListener('click',openShare);$('#save-svg').addEventListener('click',()=>download(new Blob([renderShareSVG(shareState.data,shareState.format,shareState.lang,shareState.theme)],{type:'image/svg+xml'}),'svg'));$('#save-png').addEventListener('click',savePNG);$('#copy-caption').addEventListener('click',copyCaption);
+for(const d of document.querySelectorAll('dialog'))d.addEventListener('close',()=>{$('#toast').hidden=true;const key=dialogTriggers.get('#'+d.id);if(key)$(key)?.focus({preventScroll:true});});
+$('#refresh').addEventListener('click',()=>void refresh());$('#stop').addEventListener('click',async()=>{try{await api('/api/close',{method:'POST'});stopped=true;clearInterval(refreshTimer);clearInterval(heartbeatTimer);notice(T('面板已关闭。回执仍保留在本机。','Dashboard closed. Receipts remain on this machine.'));$('#stop').disabled=true;$('#refresh').disabled=true;$('#share-open').disabled=true;}catch(e){notice(e.message);}});
+let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(snapshot)renderOverview();},150);});
+render();notice(T('正在读取本机协作记录…','Reading local collaboration records…'));
+try{const p=await api('/api/preferences');lang=p.language;theme=getTheme(p.theme);zonePreference=p.timeZone;zone=zonePreference==='local'?machineZone():resolveTimeZone(zonePreference);}catch{notify(T('显示偏好未能读取，暂用默认值。','Preferences could not be read; using defaults.'));}
+await refresh();$('#share-open').disabled=!snapshot;
+const refreshTimer=setInterval(()=>{if(!document.hidden)void refresh();},15000);
+const heartbeatTimer=setInterval(()=>{if(!stopped)void api('/api/ping').catch(()=>{});},20000);

@@ -1,57 +1,47 @@
 <!doctype html>
-<!-- SPDX-License-Identifier: SUL-1.0 -->
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light"><title>Dispatch · Worker Routing</title>
-  <link rel="icon" href="/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.mjs"></script>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="referrer" content="no-referrer">
+<link rel="icon" href="/mark.svg" type="image/svg+xml">
+<title>Worker Routing · Dispatch</title>
+<!-- SPDX-License-Identifier: SUL-1.0 -->
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="masthead">
-      <a class="wordmark" href="/" aria-label="Worker Routing 首页"><img src="/logo.svg" alt="" width="48" height="48"><span>worker routing<span class="edition">DISPATCH / 派工台</span></span></a>
-      <nav class="view-tabs" aria-label="Dashboard view"><button data-view="home" class="selected" data-i18n="home">统计总览</button><button data-view="records" data-i18n="records">记录</button></nav><div class="top-actions"><span class="local-label"><i></i><span data-i18n="local">只在本机</span></span><button id="language" class="text-button" aria-label="Switch language">EN</button><button id="export" class="export-button" disabled><span data-i18n="export">导出分享图</span> <span aria-hidden="true">↗</span></button></div>
-    </header>
-    <main>
-      <section class="intro">
-        <div><p class="eyebrow" data-i18n="eyebrow">A LITTLE WORK. ROOM TO BLOOM.</p><h1 data-i18n="heading">工作有去有回<span class="blue">。</span></h1><p class="intro-copy" data-i18n="intro">派了多少，做了多少，又带回了多少成果。</p></div>
-        <div class="period-panel"><span class="eyebrow" data-i18n="period">观察窗口</span><div class="segments" role="group" aria-label="Time range"><button data-period="7d" data-i18n="week">近 7 天</button><button data-period="30d" data-i18n="month">近 30 天</button><button data-period="all" data-i18n="all">全部</button></div><p id="period-caption" class="muted">—</p></div>
-      </section>
-      <div class="theme-toolbar"><span class="theme-caption" data-i18n="themeLabel">纸张与伙伴</span><div id="theme-picker" class="theme-picker" role="group" aria-label="Dashboard theme"></div></div>
-      <div id="notice" class="notice" role="status" hidden></div>
-      <section id="home-view" class="overview">
-        <section class="metrics" aria-label="Observed totals">
-          <div class="metric"><span class="metric-label" data-i18n="responsibilities">交出去的责任</span><strong id="responsibilities">—</strong><span id="completed-note" class="metric-note">—</span><span class="metric-mark" aria-hidden="true">↗</span></div>
-          <div class="metric"><span class="metric-label" data-i18n="turns">Worker 执行轮次</span><strong id="worker-turns">—</strong><span class="metric-note" data-i18n="turnsNote">每一轮，都是实际留下的回执</span><svg class="metric-flower" viewBox="0 0 80 80" aria-hidden="true"><path d="M40 10c22-20 39 14 17 30 22 16 5 50-17 30-22 20-39-14-17-30C1 24 18-10 40 10Z"/></svg></div>
-          <div class="metric token-metric"><span class="metric-label" data-i18n="tokens">观测到的外部工作量</span><strong id="external-tokens">—</strong><span id="usage-note" class="metric-note">—</span><img class="metric-cat" src="/logo.svg" alt="" aria-hidden="true"></div>
-        </section>
-        <div class="chart-grid">
-          <section class="activity-panel chart-panel">
-            <div class="chart-heading"><div><p class="eyebrow">01 / THE WORK ADDS UP</p><h2 data-i18n="rhythm">一点一点，做了这么多。</h2></div><div class="segments" aria-label="Activity measure"><button data-measure="turns" class="selected" data-i18n="chartTurns">执行轮次</button><button data-measure="responsibilities" data-i18n="chartTasks">新派责任</button></div></div>
-            <div class="chart-readout"><strong id="chart-total">—</strong><span id="chart-unit"></span><span id="chart-detail" aria-live="polite"></span></div>
-            <div id="activity" class="activity-plot" aria-label="Activity over time"></div>
-            <div id="activity-range" class="axis"></div><p id="activity-note" class="chart-note"></p>
-          </section>
-          <section class="acceptance-panel chart-panel"><div class="chart-heading"><div><p class="eyebrow">02 / WHAT CAME BACK</p><h2 data-i18n="quality">成果，走到哪一步了？</h2></div><div class="segments" aria-label="Outcome measure"><button data-outcome="runtime" class="selected" data-i18n="runtimeView">执行</button><button data-outcome="review" data-i18n="reviewView">复盘</button></div></div><div id="acceptance-chart"></div><p class="chart-note" data-i18n="qualityNote">执行结果来自回执；验收结果来自主机明确记录。</p></section>
-          <section class="route-panel chart-panel"><div class="chart-heading"><div><p class="eyebrow">03 / SHARING THE WORK</p><h2 data-i18n="routes">工作量，分给了谁。</h2></div><span id="route-count" class="small muted"></span></div><div id="route-ribbon" class="route-ribbon" aria-hidden="true"></div><div id="routes"></div><p class="chart-note" data-i18n="routesNote">按执行轮次分布；时长来自各自任务，不是模型速度排名。</p></section>
-          <section class="revision-panel chart-panel"><div class="chart-heading"><div><p class="eyebrow">04 / GETTING IT RIGHT</p><h2 data-i18n="revisionTitle">磨合，也留下刻度。</h2></div></div><div id="quality" class="review-totals"></div><div id="revision-reasons"></div><p class="chart-note" data-i18n="revisionNote">只统计明确提出的修正；普通续做不计返工。</p></section>
-        </div>
-        <section id="review-inbox" class="review-inbox" aria-label="Follow-up when needed"></section>
-        <div class="overview-foot"><p class="scope-note" data-i18n="scope">仅统计 ACP 回执 · tokens 由 adapter 报告，不代表节省的 Codex 额度。</p><button class="text-button" data-open-records data-i18n="browse">展开每一份协作记录 ↗</button></div>
-      </section>
-      <div id="records-view" class="workspace" hidden>
-        <section class="trail-section">
-          <div class="section-heading"><div><span class="index">01 /</span><h2 data-i18n="trail">协作轨迹</h2></div><span id="session-count" class="small muted">—</span></div>
-          <div class="filters"><div class="filter-tabs" role="group" aria-label="Attention filter"><button data-filter="all" class="selected" data-i18n="allRecords">全部记录</button><button data-filter="attention" data-i18n="attention">待处理</button><button data-filter="legacy" data-i18n="legacy">早期记录</button></div><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="查找责任或 route" aria-label="查找责任或 route"></label></div>
-          <div class="legend"><span><i class="dot blue-dot"></i><span data-i18n="execution">执行</span></span><span><i class="dot orange-dot"></i><span data-i18n="revision">修正</span></span><span><i class="dot green-dot"></i><span data-i18n="acceptance">已接受</span></span><span class="muted" data-i18n="legendNote">每条线是一份责任；续做不等于返工。</span></div>
-          <div id="sessions" class="sessions"><p class="empty" data-i18n="loading">正在翻开本地记录…</p></div>
-          <button id="more" class="more-button" hidden data-i18n="more">再看一些记录 ↓</button>
-        </section>
-
-      </div>
-    </main>
-    <footer><span><span class="footer-brand">WR</span> <span data-i18n="footer">责任分出去，主线留在你手里。</span></span><div><span id="observed" class="small muted" aria-live="off">—</span><button id="refresh" class="text-button" data-i18n="refresh">刷新</button><button id="stop" class="text-button" data-i18n="stop">关闭面板</button></div></footer>
+<a href="#main" class="skip" id="skip">跳到内容</a>
+<div class="shell">
+<header class="masthead">
+ <a class="brand" href="#" id="home-link" aria-label="Worker Routing 首页"><span class="brand-mark" id="canon"></span><span><strong>worker routing</strong><small id="brand-edition">DISPATCH / 协作手记</small></span></a>
+ <nav class="nav-tabs" aria-label="视图"><button data-view="overview" id="nav-overview"></button><button data-view="records" id="nav-records"></button></nav>
+ <div class="head-actions"><button id="language" class="language" aria-label="Switch language">EN</button><button id="share-open" class="primary"></button></div>
+</header>
+<div class="context-row"><button class="local-tag" id="local-info"></button><button class="theme-open" id="theme-open"></button></div>
+<main id="main" tabindex="-1"><p id="notice" class="notice" role="status" hidden></p>
+ <section class="intro"><div><p class="eyebrow">A LITTLE HELP. ROOM TO BLOOM.</p><h1 id="heading"></h1><p class="lede" id="intro-text"></p></div><div class="window-controls"><div class="segments" id="period-options"></div><p id="range-label" class="range-label"></p><label class="timezone-control"><span id="timezone-label"></span><select id="timezone"></select></label></div></section>
+ <div id="overview-view">
+  <section class="hero" aria-labelledby="hero-title">
+   <div class="hero-main"><p class="label" id="hero-title"></p><div class="hero-number"><strong id="task-number"></strong><span id="task-unit"></span></div><p class="hero-note" id="task-note"></p></div>
+   <figure class="companion"><div class="seal" id="companion-seal"></div><figcaption id="seal-caption"></figcaption></figure>
+   <div class="hero-bottom"><div class="secondary-stat"><div><strong id="turn-number"></strong><span id="turn-label"></span></div><p id="turn-note"></p></div><div class="secondary-stat tokens"><div><strong id="token-number"></strong><span>tokens</span><button id="coverage-pill" class="coverage-pill"></button></div><p id="coverage-note"></p></div></div>
+  </section>
+  <section class="outcomes" aria-labelledby="outcome-heading"><div class="outcome-top"><h2 id="outcome-heading"></h2><p id="outcome-note"></p></div><div id="status-track" class="status-track" aria-hidden="true"></div><div id="status-buttons" class="status-buttons"></div></section>
+  <div class="analysis-grid">
+   <section class="panel activity-panel" aria-labelledby="activity-title"><header class="panel-heading"><div><p class="eyebrow">01 / THE WORK ADDS UP</p><h2 id="activity-title"></h2></div><div class="segments compact-segments" id="measure-options"></div></header><div class="chart-readout"><div><strong id="chart-total"></strong><span id="chart-unit"></span></div><span id="chart-hint"></span></div><div class="plot" id="activity"></div><p class="chart-note" id="chart-note"></p></section>
+   <aside class="side-stack"><section class="panel route-panel" aria-labelledby="routes-title"><header class="panel-heading"><div><p class="eyebrow">02 / IN GOOD COMPANY</p><h2 id="routes-title"></h2></div></header><div id="route-rows"></div><p class="chart-note" id="routes-note"></p></section><section class="review-note"><div class="review-head"><span class="thread-icon" aria-hidden="true">↳</span><h2 id="review-title"></h2></div><div id="review-actions"></div><p id="review-description"></p></section></aside>
   </div>
-  <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-head"><span class="eyebrow" data-i18n="replay">RESPONSIBILITY / 协作回放</span><button class="close-button" data-close="detail-dialog" aria-label="Close">×</button></div><div id="detail-content"></div></dialog>
-  <dialog id="share-dialog" aria-labelledby="share-title"><div class="dialog-head"><div><span class="eyebrow">TAKE A LITTLE PROOF HOME</span><h2 id="share-title" data-i18n="shareTitle">把成果带走。</h2></div><button class="close-button" data-close="share-dialog" aria-label="Close">×</button></div><p class="share-note" data-i18n="shareNote">预览只包含所选时段的 ACP 汇总；不包含工单、route 名、路径和内部 ID。列表筛选不影响导出。</p><div class="segments export-languages" role="group" aria-label="Export language"><button data-share-language="zh" class="selected" lang="zh-CN">中文版</button><button data-share-language="en" lang="en">English</button></div><div class="segments export-formats" role="group" aria-label="Export format"><button data-format="banner" class="selected" data-i18n="banner">横版 · 1600 × 900</button><button data-format="poster" data-i18n="poster">竖版 · 1080 × 1350</button></div><div id="share-theme-picker" class="theme-picker share-themes" role="group" aria-label="Share theme"></div><div class="preview-wrap"><img id="share-preview" alt="公开分享内容预览"></div><div class="download-actions"><a class="text-button logo-download" href="/logo.svg" download="worker-routing-cat.svg" data-i18n="logoDownload">猫猫 logo ↓</a><button id="download-svg" class="outline-button">SVG ↓</button><button id="download-png" class="export-button">PNG ↓</button></div><p id="export-status" class="small muted" role="status"></p></dialog>
-</body></html>
+  <div class="trail-grid"><section class="recent-panel" aria-labelledby="recent-title"><header class="panel-heading"><div><p class="eyebrow">03 / SESSIONS</p><h2 id="recent-title"></h2></div><span class="quiet-note" id="recent-note"></span></header><div id="recent-list"></div></section><section class="transport-panel" aria-labelledby="transport-title"><header class="panel-heading"><div><p class="eyebrow">04 / RUNTIME NOTES</p><h2 id="transport-title"></h2></div><span class="runtime-symbol" aria-hidden="true">↝</span></header><div id="transport-summary"></div><div id="transport-list"></div><p class="chart-note" id="transport-note"></p><small id="runtime-caption"></small></section></div><div class="browse-strip"><p id="browse-description"></p><button class="text-link" id="browse-records"></button></div>
+ </div>
+ <section id="records-view" hidden aria-labelledby="records-heading"><div class="records-head"><div><p class="eyebrow">THE COLLABORATION TRAIL</p><h2 id="records-heading"></h2></div><button id="back-overview" class="text-link"></button></div><div class="workspace-browser"><div class="workspace-heading"><h3 id="workspace-title"></h3><span id="workspace-count"></span><input type="search" id="workspace-search" autocomplete="off"></div><div id="workspace-list" class="workspace-list"></div><p id="workspace-note" class="quiet-note"></p></div><div class="record-tools"><div id="record-options" class="record-options"></div><label class="search-box"><span aria-hidden="true">⌕</span><input type="search" id="record-search" autocomplete="off"></label></div><label class="folder-filter" id="folder-filter" hidden><span id="folder-label"></span><select id="folder-select"></select></label><div id="filter-summary" class="filter-summary" aria-live="polite"></div><div id="record-list"></div><button id="more-records" class="secondary more"></button></section>
+</main>
+<footer class="footer"><div><strong id="footer-scope"></strong><p id="footer-note"></p></div><div class="footer-actions"><button id="refresh" class="text-link"></button><button id="data-open" class="text-link"></button><button id="stop" class="text-link"></button></div></footer>
+</div>
+<dialog id="theme-dialog" aria-labelledby="theme-title"><div class="dialog-head"><div><p class="eyebrow">PAPER & COMPANIONS</p><h2 id="theme-title"></h2></div><button class="close" data-close="theme-dialog" aria-label="Close">×</button></div><div id="theme-choices" class="theme-choices"></div><p class="dialog-note" id="theme-note"></p></dialog>
+<dialog id="data-dialog" aria-labelledby="data-title"><div class="dialog-head"><div><p class="eyebrow">ABOUT THESE NUMBERS</p><h2 id="data-title"></h2></div><button class="close" data-close="data-dialog" aria-label="Close">×</button></div><div id="data-content"></div></dialog>
+<dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"><div class="dialog-head"><span class="eyebrow">COLLABORATION / REPLAY</span><button class="close" data-close="detail-dialog" aria-label="Close">×</button></div><div id="detail-content"></div></dialog>
+<dialog id="share-dialog" class="share-dialog" aria-labelledby="share-title"><div class="dialog-head"><div><p class="eyebrow">A LITTLE RECORD TO KEEP</p><h2 id="share-title"></h2></div><button class="close" data-close="share-dialog" aria-label="Close">×</button></div><div class="share-layout"><div class="share-preview" id="share-preview"></div><div class="share-controls"><p id="share-scope"></p><fieldset><legend id="format-legend"></legend><div id="share-formats" class="segments"></div></fieldset><fieldset><legend id="lang-legend"></legend><div id="share-languages" class="segments"></div></fieldset><fieldset><legend id="share-theme-legend"></legend><div id="share-themes" class="share-theme-choices"></div></fieldset><div class="download-actions"><button id="save-png" class="primary">PNG ↓</button><button id="save-svg" class="secondary">SVG ↓</button></div><button id="copy-caption" class="secondary full"></button><p class="export-note" id="export-note"></p><div class="logo-downloads"><a href="/mark.svg" download="worker-routing-mark.svg" id="mark-download"></a><a href="/logo.svg" download="worker-routing-cat.svg" id="cat-download"></a></div><details class="caption-fallback"><summary id="caption-summary"></summary><textarea id="caption-text" readonly rows="6"></textarea></details></div></div></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<noscript>Dispatch 需要 JavaScript 才能显示本地 ACP 回执。</noscript>
+<script type="module" src="/app.mjs"></script>
+</body>
+</html>

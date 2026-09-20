@@ -18,6 +18,8 @@ Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统�
 已有 ACP runtime 的 operator 可以直接运行 canonical CLI 的 `stats` / `pending` / `dashboard`；
 读取历史无需启动 adapter。新增协作事件的自然记录说明位于 `acp-worker` skill，
 连同内置猫头 icon 一起按上述 Plugin 流程刷新 installed copy；只有修改 source 不会改变旧 session 已加载的说明。
+面板首次使用默认为机器时区；主题、语言、时区保存在 Git 外 stateDir 的
+`dashboard-preferences.json`，换端口后保留。仅这些展示偏好可由面板写入，业务数据仍只读。
 完整命令、私有数据边界、导出与退出行为见[派工台](dispatch.md)。
 
 ## 主 session 自动加载

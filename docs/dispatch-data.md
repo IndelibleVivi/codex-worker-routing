@@ -10,9 +10,10 @@ terminal receipts and explicit coordinator annotations. It never loads the adapt
 
 | Source, relative to private `stateDir` | Meaning |
 | --- | --- |
-| `bindings/<session>/binding.json` | Existing responsibility identity and lifecycle. Optional `dispatch` metadata binds a short title and category. |
-| `bindings/<session>/receipts/<request>.json` | Runtime outcome, timestamps, cleanup and adapter-reported cumulative session usage. Diagnostic files are excluded. |
+| `bindings/<session>/binding.json` | Existing responsibility identity and lifecycle; optional `active_turn` records a started request without a terminal receipt. Optional `dispatch` metadata binds a short title and category. |
+| `bindings/<session>/receipts/<request>.json` | Runtime outcome, timestamps, cleanup and adapter-reported cumulative session usage. Additive `observations` retain structured runtime codes. Diagnostic files are excluded. |
 | `requests/<session>/<request>.order.txt` | JSON envelope `cwr.dispatch.order/1` with the submitted work-order `text`. Retained locally for new run/continue commands; never added to an export. |
+| `dashboard-preferences.json` | Only `{theme, language, timeZone}` display preferences; authenticated local PUT, 1 KiB input limit. |
 | `events/<session>/<event>.json` | Append-only coordinator annotation `cwr.dispatch.event/1`. |
 
 Titles are optional, at most 160 characters. Categories are `investigation`,
@@ -70,14 +71,14 @@ write must not cause the worker task to be rerun.
 
 `--since` accepts `all`, a positive number followed by `h`, `d`, `w`, or `m` (30 days),
 an ISO date, or an ISO timestamp with timezone. Relative windows are rolling durations;
-calendar display and chart buckets use UTC. Bounds are inclusive. Receipts belong to
+calendar buckets use the selected `time_zone` (CLI defaults to UTC; browser defaults to device time). Bounds are inclusive. Receipts belong to
 the period containing their finish timestamp, falling back to start when absent.
 Future receipts are excluded.
 
 A responsibility appears if it was created, produced a receipt, received an effective
-annotation, or closed in the selected period. `worker_turns` counts terminal receipts;
+annotation, started a turn, or closed in the selected period. `worker_turns` counts terminal receipts;
 `runtime_completed`, `failed`, and `cancelled` count the latest in-period outcome once
-per responsibility. They do not imply acceptance. Submissions and revisions count
+per responsibility. A later started turn without a terminal receipt has no terminal outcome yet; an open persistent session alone does not change completion. They do not imply acceptance. Submissions and revisions count
 effective in-period events, not sessions; continuing is never inferred to be rework.
 
 Acceptance is the latest effective decision as of the observation time. A later
@@ -126,7 +127,7 @@ turns are never retroactively marked reviewed.
 when one is still standing, otherwise `unverified`, derived from the same evidence so
 the two can never disagree. `session.review_state`, `session.review`
 (`{state, tracked, decision, decision_at}`), and `summary.review` are the review
-interface the dashboard consumes.
+compatible review interface for local tools; the dashboard highlights explicit revisions/takeovers without a review-completeness score.
 
 ### Actionable view
 
@@ -152,11 +153,11 @@ any prior warning). For a deliberate deep review, the standalone `record` comman
 remains available; it is not required in the ordinary flow.
 
 Home is the aggregate view: period totals, execution/new-responsibility activity,
-execution results / optional review notes, route distribution and explicit revision reasons. Its activity
-chart covers the complete selected window, merging adjacent UTC days when needed.
+an exact-proportion status strip, route distribution, explicit revisions/takeovers and runtime notes. Its activity
+chart covers the complete selected window, merging adjacent selected-zone days when needed.
 The new-responsibility chart counts creation timestamps inside the window, which can
 be fewer than the headline's active responsibilities. Individual trails are under
-**Records**. Route timing is the median elapsed time of valid in-period receipt pairs;
+**Sessions**. Route timing is the median elapsed time of valid in-period receipt pairs;
 these are unmatched tasks, so the display is not a model-performance ranking.
 
 ## Cumulative usage accounting
@@ -186,18 +187,35 @@ is introduced.
 
 The list/stats projection permits local route names, titles, opaque parent/session
 identifiers, event summaries and source-tagged evidence. Work orders and bounded
-worker output excerpts are loaded only in responsibility detail. Filesystem paths,
-raw diagnostics, adapter handles and full transcripts are not projected.
+worker output excerpts are loaded only in responsibility detail. `session.workspace` and `workspaces` expose local paths for project grouping; raw diagnostics, adapter handles and full transcripts are not projected.
 `pending` uses the same allowlist and additionally omits event and evidence text.
 
-`cwr.dispatch.share/1` is a separate allowlist: normalized dates, aggregate counts,
+`cwr.dispatch.share/1` is a separate allowlist: normalized dates, IANA timezone, aggregate counts,
 known token totals or null, usage coverage, review-state counts, and warning count. It contains no routes,
 titles, event/evidence text, work orders, output, paths or internal ids. It carries no theme,
 colour, style or CSS field: the renderer's palette is chosen only from a bounded local
 registry in `themes.mjs` (`getTheme(id)`, four ids, unknown ids falling back to `sage`) and never read out
-of export data. Each theme selects a companion from `mascots.mjs`; the header always uses the
-Canon cat from `brand.mjs`. Neither artwork nor colour values are accepted from data. Its SVG/PNG renderer uses a fixed repository address, runtime-completion
-progress and deliberately recorded review counts, with language and theme as independent
+of export data. Each theme selects a companion from `mascots.mjs`; the header uses the fixed line mark from `mark.mjs`; the default seal retains the Canon cat from `brand.mjs`. Neither artwork nor colour values are accepted from data. Its SVG/PNG renderer uses a fixed repository address, task totals, runtime outcomes and usage coverage, with language and theme as independent
 parameters and a `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext` filename. Chinese and
 English exports are independently selectable. Preview and download use the same frozen
-snapshot, independent of list filters. Export is a local download; nothing is uploaded.
+snapshot and timezone, independent of list filters. Image captions use that same allowlist. Export is a local download; nothing is uploaded.
+
+## Workspace and runtime evidence
+
+`session.workspace` carries `{id,name,kind,root,cwd,limitation}`; `kind` is `git`, `folder` or
+`unknown`. Local Git common-directory identity merges linked worktrees; there are no remote
+lookups. Missing paths retain the recorded folder; missing cwd forms one unknown bucket.
+This is directory provenance, not a saved Codex project identity. Workspace probes are cached
+per reader. `activity` carries `date`, turn count, unique active responsibility count,
+`session_ids` and `created_session_ids`; creation ids are in-window only. Date drill-through
+consumes those exact ids.
+
+New receipts may carry `observations: {coverage,events,omitted}`. Current acpx 0.15.1 only
+exposes typed runtime error codes (`code`, `detail_code`, `retryable`) with source, request
+and UTC time; coverage is `runtime_codes_only` or `none`. No provider HTTP status or retry
+event is available. Neither numeric JSON-RPC codes nor prose are promoted to HTTP 429.
+Unsupported HTTP/retry fields are excluded from normalization. Snapshot `runtime_notes`
+counts in-window observations and sessions; its zero `http_429_count` is a capability limit,
+never evidence of no rate limiting. Detail retains the complete local trail. Observation
+collection is synchronous, bounded per turn and saved with the existing terminal receipt;
+it does not call providers, write per event, infer review, or schedule retry work.

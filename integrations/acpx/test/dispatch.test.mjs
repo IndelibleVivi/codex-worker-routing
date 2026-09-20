@@ -1143,3 +1143,238 @@ test('a later failed result cannot revive an old acceptance after closing',()=>{
   assert.equal(deriveReviewState({meta,effective,turns,closed:true}).state,'not_requested');
   assert.equal(deriveReviewState({meta,effective:[],turns:[],closed:true}).state,'not_requested');
 });
+
+// ---------------------------------------------------------------------------
+// v3: time zone, workspace grouping, activity arrays, observations, active turn
+// ---------------------------------------------------------------------------
+test('read exposes time_zone, defaults to UTC and rejects an invalid explicit zone', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1'));
+  const reader = createProjectionReader(stateDir);
+  assert.equal((await reader.read()).time_zone, 'UTC');
+  assert.equal((await reader.read({ timeZone: 'Asia/Singapore' })).time_zone, 'Asia/Singapore');
+  await assert.rejects(reader.read({ timeZone: 'Not/AZone' }), { code: 'BAD_TIME_ZONE' });
+  await assert.rejects(reader.detail(id, { timeZone: 'Not/AZone' }), { code: 'BAD_TIME_ZONE' });
+});
+
+test('changing the display zone regroups activity without redefining the rolling window', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { createdAt: '2026-09-19T20:00:00.000Z' }));
+  // 20:00Z on the 19th is the 20th in +08.
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: '2026-09-19T19:00:00.000Z', finished_at: '2026-09-19T20:30:00.000Z' }));
+  const now = Date.parse('2026-09-20T12:00:00Z');
+  const utc = await createProjectionReader(stateDir).read({ since: '3d', now });
+  const sg = await createProjectionReader(stateDir).read({ since: '3d', now, timeZone: 'Asia/Singapore' });
+  // Same UTC period boundary regardless of display zone.
+  assert.equal(utc.period.since, sg.period.since);
+  const utcRow = utc.activity.find(r => r.date === '2026-09-19');
+  const sgRow = sg.activity.find(r => r.date === '2026-09-20');
+  assert.equal(utcRow.turns, 1);
+  assert.equal(sgRow.turns, 1);
+  assert.deepEqual(sgRow.session_ids, [id]);
+  assert.deepEqual(sgRow.created_session_ids, [id]);
+  assert.equal(sgRow.responsibilities, 1);
+});
+
+test('a created-in-window day with zero turns still appears and carries its created ids', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const created = randomUUID(), continued = randomUUID();
+  await writeBinding(stateDir, bindingFor(created, { createdAt: '2026-09-10T08:00:00.000Z' }));
+  // No receipt for `created` yet: its creation day must still show with turns 0.
+  await writeBinding(stateDir, bindingFor(continued, { createdAt: '2026-09-01T08:00:00.000Z' }));
+  await writeReceipt(stateDir, continued, receiptFor(continued, 'req-2', { started_at: '2026-09-11T09:00:00.000Z', finished_at: '2026-09-11T10:00:00.000Z' }));
+  const read = await createProjectionReader(stateDir).read();
+  const byDate = Object.fromEntries(read.activity.map(r => [r.date, r]));
+  assert.equal(byDate['2026-09-10'].turns, 0);
+  assert.deepEqual(byDate['2026-09-10'].created_session_ids, [created]);
+  // An existing-session continuation day records the session id even though the
+  // session was created on a different day.
+  assert.deepEqual(byDate['2026-09-11'].session_ids, [continued]);
+  assert.deepEqual(byDate['2026-09-11'].created_session_ids, []);
+});
+
+test('session activity_dates and creation_date match the selected zone exactly', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { createdAt: '2026-09-19T20:00:00.000Z' }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { started_at: '2026-09-19T20:00:00.000Z', finished_at: '2026-09-19T20:30:00.000Z' }));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-2', { started_at: '2026-09-21T01:00:00.000Z', finished_at: '2026-09-21T02:00:00.000Z' }));
+  const read = await createProjectionReader(stateDir).read({ timeZone: 'Asia/Singapore', now: Date.parse('2026-09-22T00:00:00Z') });
+  const session = read.sessions.find(s => s.id === id);
+  assert.equal(session.creation_date, '2026-09-20');
+  assert.deepEqual(session.activity_dates, ['2026-09-20', '2026-09-21']);
+  // The drill-through arrays are exactly what the activity rows carry.
+  const row = read.activity.find(r => r.date === '2026-09-21');
+  for (const date of session.activity_dates) assert.ok(row === undefined || date !== '2026-09-21' || row.session_ids.includes(id));
+});
+
+test('session workspace groups git subdirectories and is exposed on session and snapshot', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const a = randomUUID(), b = randomUUID();
+  const sharedCwd = '/synthetic/shared-repo';
+  await writeBinding(stateDir, bindingFor(a, { cwd: sharedCwd }));
+  await writeBinding(stateDir, bindingFor(b, { cwd: sharedCwd }));
+  await writeReceipt(stateDir, a, receiptFor(a, 'req-1'));
+  const read = await createProjectionReader(stateDir).read();
+  const sessionA = read.sessions.find(s => s.id === a);
+  assert.equal(sessionA.workspace.kind, 'folder');
+  // Two responsibilities on the same path collapse into ONE workspace bucket.
+  const workspace = read.workspaces.find(w => w.id === sessionA.workspace.id);
+  assert.equal(workspace.responsibilities, 2);
+  assert.equal(workspace.worker_turns, 1);
+});
+
+test('read never exposes work-order text even with a workspace attached; paths stay in the private projection', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { cwd: '/synthetic/leaky-repo' }));
+  await writeRequestOrder(stateDir, id, 'req-1', 'WORK_ORDER_SECRET');
+  const read = await createProjectionReader(stateDir).read();
+  assert.ok(!JSON.stringify(read).includes('WORK_ORDER_SECRET'));
+});
+
+// ---------------------------------------------------------------------------
+// v3: truthful runtime observations
+// ---------------------------------------------------------------------------
+test('a structured runtime code is normalized on the session and aggregated truthfully', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id));
+  await writeReceipt(stateDir, id, {
+    ...receiptFor(id, 'req-1', { runtime_status: 'failed' }),
+    observations: { coverage: 'runtime_codes_only', events: [{ at: T, source: 'acpx.runtime', kind: 'runtime_code', request_id: 'req-1', code: 'RUNTIME', detail_code: 'AUTH_REQUIRED', retryable: true }], omitted: 0 },
+  });
+  const read = await createProjectionReader(stateDir).read();
+  const session = read.sessions.find(s => s.id === id);
+  assert.equal(session.observations.coverage, 'runtime_codes_only');
+  assert.equal(session.observations.events.length, 1);
+  assert.equal(session.observations.events[0].code, 'RUNTIME');
+  assert.deepEqual(read.runtime_notes, { coverage: 'runtime_codes_only', events: 1, session_count: 1, http_429_count: 0, omitted: 0 });
+});
+
+test('a receipt with no structured observation never fabricates one and reports absent coverage', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id));
+  await writeReceipt(stateDir, id, receiptFor(id, 'req-1'));
+  const read = await createProjectionReader(stateDir).read();
+  const session = read.sessions.find(s => s.id === id);
+  assert.equal(session.observations.coverage, 'none');
+  assert.deepEqual(session.observations.events, []);
+  assert.deepEqual(read.runtime_notes, { coverage: 'none', events: 0, session_count: 0, http_429_count: 0, omitted: 0 });
+});
+
+test('a text 429 in a receipt message never becomes a structured observation', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id));
+  // A hand-edited / forward file that contains prose and a fake status string.
+  await writeReceipt(stateDir, id, {
+    ...receiptFor(id, 'req-1', { runtime_status: 'failed' }),
+    error_code: 'RUNTIME',
+    observations: { coverage: 'runtime_codes_only', events: [{ at: T, kind: 'runtime_code', message: 'HTTP 429 rate limit', http_status: '429' }] },
+    output_excerpt: 'HTTP 429 rate limit exceeded',
+  });
+  const read = await createProjectionReader(stateDir).read();
+  const serialized = JSON.stringify(read);
+  const session = read.sessions.find(s => s.id === id);
+  // The stray message and string status were dropped; only the typed code survived.
+  assert.equal(session.observations.events.length, 1);
+  assert.equal(session.observations.events[0].http_status, undefined);
+  assert.equal(session.observations.events[0].code, undefined);
+  assert.equal(read.runtime_notes.http_429_count, 0);
+  assert.ok(!serialized.includes('rate limit'));
+});
+
+test('detail exposes normalized observations with session id and request id', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id));
+  await writeReceipt(stateDir, id, {
+    ...receiptFor(id, 'req-1', { runtime_status: 'failed' }),
+    observations: { coverage: 'runtime_codes_only', events: [{ at: T, kind: 'runtime_code', request_id: 'req-1', code: 'TIMEOUT' }], omitted: 0 },
+  });
+  const detail = await createProjectionReader(stateDir).detail(id);
+  assert.equal(detail.session.observations.events[0].request_id, 'req-1');
+  assert.equal(detail.turns[0].observations.events[0].code, 'TIMEOUT');
+  // Historic error_code stays inspectable as a runtime code.
+  assert.equal(typeof detail.turns[0].runtime_status, 'string');
+});
+
+// ---------------------------------------------------------------------------
+// v3: active-turn evidence (no 'running' inference)
+// ---------------------------------------------------------------------------
+test('a started turn with no terminal receipt is distinguishable from completed', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const started = randomUUID(), finished = randomUUID();
+  await writeBinding(stateDir, bindingFor(started, { dispatch: dispatchedMeta(), active_turn: { request_id: 'req-open', started_at: '2026-09-19T10:00:00.000Z' } }));
+  await writeBinding(stateDir, bindingFor(finished, { dispatch: dispatchedMeta() }));
+  await writeReceipt(stateDir, finished, receiptFor(finished, 'req-1'));
+  const read = await createProjectionReader(stateDir).read();
+  const byId = Object.fromEntries(read.sessions.map(s => [s.id, s]));
+  assert.deepEqual(byId[started].active_turn, { request_id: 'req-open', started_at: '2026-09-19T10:00:00.000Z' });
+  assert.equal(byId[started].runtime_status, null);
+  assert.equal(byId[finished].active_turn, null);
+  // No 'running' field is ever produced.
+  assert.ok(!JSON.stringify(read).includes('"running"'));
+});
+
+test('detail reflects an active-turn marker and clears it once a receipt exists', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  await writeBinding(stateDir, bindingFor(id, { active_turn: { request_id: 'req-open', started_at: '2026-09-19T10:00:00.000Z' } }));
+  let detail = await createProjectionReader(stateDir).detail(id);
+  assert.equal(detail.session.active_turn.request_id, 'req-open');
+  await writeBinding(stateDir, bindingFor(id)); // marker cleared by the engine on terminal
+  detail = await createProjectionReader(stateDir).detail(id);
+  assert.equal(detail.session.active_turn, null);
+});
+
+test('an open persistent session with no marker is never reported as an active turn', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const id = randomUUID();
+  // Binding open, real handle, but no started-turn marker: not an unfinished turn.
+  await writeBinding(stateDir, bindingFor(id, { handle: { backend: 'acpx', acpxRecordId: 'r', backendSessionId: 's', runtimeSessionName: 'x' } }));
+  const read = await createProjectionReader(stateDir).read();
+  assert.equal(read.sessions.find(s => s.id === id).active_turn, null);
+});
+
+test('activity counts every continuation and only in-window creations; runtime notes follow the same window',async t=>{
+  const {stateDir,cleanup}=await syntheticState();t.after(cleanup);const id=randomUUID();
+  await writeBinding(stateDir,bindingFor(id,{createdAt:'2026-09-01T00:00:00Z'}));
+  for(const [i,finished] of ['2026-09-01T01:00:00Z','2026-09-19T18:00:00Z','2026-09-19T19:00:00Z'].entries()){
+    const receipt=receiptFor(id,'turn-'+i,{started_at:finished,finished_at:finished});
+    if(i===0)receipt.observations={coverage:'runtime_codes_only',events:[{at:finished,kind:'runtime_code',code:'RUNTIME'}],omitted:0};
+    await writeReceipt(stateDir,id,receipt);
+  }
+  const reader=createProjectionReader(stateDir),s=await reader.read({since:'7d',now:Date.parse('2026-09-20T12:00:00Z'),timeZone:'Asia/Shanghai'});
+  assert.equal(s.summary.worker_turns,2);assert.equal(s.activity.reduce((n,d)=>n+d.turns,0),2);
+  assert.deepEqual(s.activity,[{date:'2026-09-20',turns:2,responsibilities:1,session_ids:[id],created_session_ids:[]}]);
+  assert.equal(s.runtime_notes.events,0);assert.equal(s.sessions[0].observations.events.length,0);
+});
+
+test('an active continuation enters its current window without counting the old completion again',async t=>{
+  const {stateDir,cleanup}=await syntheticState();t.after(cleanup);const id=randomUUID();
+  await writeBinding(stateDir,bindingFor(id,{createdAt:'2026-09-01T00:00:00Z',active_turn:{request_id:'current-turn',started_at:'2026-09-20T10:00:00Z'}}));
+  await writeReceipt(stateDir,id,receiptFor(id,'old-turn',{finished_at:'2026-09-19T10:00:00Z'}));
+  const reader=createProjectionReader(stateDir),s=await reader.read({since:'7d',now:Date.parse('2026-09-20T12:00:00Z')});
+  assert.equal(s.summary.runtime_completed,0);assert.equal(s.sessions[0].runtime_status,null);assert.equal(s.sessions[0].active_turn.request_id,'current-turn');
+  const narrow=await reader.read({since:'2026-09-20T00:00:00Z',now:Date.parse('2026-09-20T12:00:00Z')});assert.equal(narrow.sessions.length,1);assert.equal(narrow.summary.worker_turns,0);
+});
+
+test('a terminal receipt wins over a stale started marker after an interrupted binding write',async t=>{
+  const {stateDir,cleanup}=await syntheticState();t.after(cleanup);const id=randomUUID();
+  await writeBinding(stateDir,bindingFor(id,{createdAt:'2026-09-01T00:00:00Z',active_turn:{request_id:'done',started_at:'2026-09-20T10:00:00Z'}}));
+  await writeReceipt(stateDir,id,receiptFor(id,'done',{started_at:'2026-09-20T10:00:00Z',finished_at:'2026-09-20T11:00:00Z'}));
+  const reader=createProjectionReader(stateDir),s=await reader.read({now:Date.parse('2026-09-20T12:00:00Z')});
+  assert.equal(s.sessions[0].active_turn,null);assert.equal(s.summary.runtime_completed,1);assert.equal((await reader.detail(id)).session.active_turn,null);
+});
+
+test('missing working directories form one explicitly unknown group',async t=>{
+  const {stateDir,cleanup}=await syntheticState();t.after(cleanup);
+  for(let i=0;i<2;i++){const id=randomUUID();await writeBinding(stateDir,bindingFor(id,{cwd:null}));}
+  const s=await createProjectionReader(stateDir).read();assert.equal(s.workspaces.length,1);assert.equal(s.workspaces[0].kind,'unknown');assert.equal(s.workspaces[0].responsibilities,2);
+});

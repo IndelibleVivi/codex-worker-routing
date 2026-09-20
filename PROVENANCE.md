@@ -13,6 +13,9 @@ runtime 或外部 adapter 实现。`acpx` 及其传递依赖保持各自的第�
 `integrations/acpx/src/brand.mjs` 的矢量实现；概念图不属于运行依赖。相邻主题中的兔、狗、熊为本项目原生 SVG 绘制，
 由 `integrations/acpx/src/mascots.mjs` 维护，保留同一家族的造型语言。
 
+Dispatch 的紧凑工作台、线条产品标识与独立分享排版由本项目提供的 v3 设计候选演进；
+候选的合成数据与模拟 runtime 情况没有迁入生产数据路径。实际统计由私有 receipts 投影。
+
 接口参考 OpenAI 的 [Hooks](https://learn.chatgpt.com/docs/hooks) 和
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档，
 并用本机 binary 独立观察。本项目不是 OpenAI 官方产品或其维护的 fork。

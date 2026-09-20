@@ -23,7 +23,7 @@ const VALUES = Object.freeze({
   status: ['config', 'session'],
   cancel: ['config', 'session'],
   close: ['config', 'session'],
-  stats: ['config', 'since'],
+  stats: ['config', 'since', 'time-zone'],
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config', 'since', 'port'],
@@ -51,7 +51,7 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   close    --config FILE --session UUID
   record   --config FILE --session UUID --file EVENT_JSON
   pending  --config FILE
-  stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--json]
+  stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--time-zone IANA_ZONE] [--json]
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
@@ -60,8 +60,8 @@ claim the worker has stopped. No automatic route fallback or background wakeup.
 
 stats, record and pending read the private state root only; they never load,
 import or scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
-All are read-only projections except record, which appends one collaboration event
-and never rewrites a runtime receipt.
+record appends one collaboration event and never rewrites a runtime receipt.
+Dashboard data is read-only; theme, language and time zone are local display preferences.
 
 continue --revision-reason REASON is an OPTIONAL shortcut for a genuine
 correction: it appends a revision_requested event (using the documented reason
@@ -161,7 +161,7 @@ export async function main(args, deps = {}) {
   assertSupportedPlatform();
   if (opt.command === 'stats') {
     const config = await loadControlConfig(opt.config);
-    const projection = await createProjectionReader(config.stateDir).read({ since: opt.since ?? 'all' });
+    const projection = await createProjectionReader(config.stateDir).read({ since: opt.since ?? 'all', timeZone:opt['time-zone'] ?? 'UTC' });
     if (opt.json) output(projection); else text(renderStatsText(projection));
     return 0;
   }

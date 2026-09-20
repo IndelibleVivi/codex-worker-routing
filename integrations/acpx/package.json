@@ -12,9 +12,9 @@
     "cwr-acp": "./src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test test/cli.test.mjs test/config-state.test.mjs test/engine.test.mjs test/fixture.test.mjs test/dispatch.test.mjs test/dashboard.test.mjs",
+    "test": "node --test test/cli.test.mjs test/config-state.test.mjs test/engine.test.mjs test/fixture.test.mjs test/dispatch.test.mjs test/dashboard.test.mjs test/time.test.mjs test/workspaces.test.mjs test/observations.test.mjs",
     "test:acpx": "node --test test/real-acpx.integration.mjs",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/config.mjs && node --check src/state.mjs && node --check src/dispatch.mjs && node --check src/dashboard.mjs && node --check src/share.mjs && node --check src/brand.mjs && node --check src/themes.mjs && node --check src/mascots.mjs && node --check src/dashboard/app.mjs && npm test",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/config.mjs && node --check src/state.mjs && node --check src/dispatch.mjs && node --check src/dashboard.mjs && node --check src/share.mjs && node --check src/brand.mjs && node --check src/themes.mjs && node --check src/mascots.mjs && node --check src/dashboard/app.mjs && node --check src/mark.mjs && node --check src/preferences.mjs && node --check src/time.mjs && node --check src/workspaces.mjs && node --check src/observations.mjs && npm test",
     "brand:sync": "node scripts/sync-brand.mjs"
   },
   "dependencies": {

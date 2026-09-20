@@ -2,7 +2,7 @@
 
 [中文](dispatch.md) | English
 
-Delegate as usual; receipts leave a trail. Dispatch is a local, read-only view of ACP
+Delegate as usual; receipts leave a trail. Dispatch is a local view of read-only ACP
 receipts and deliberate coordinator review notes. It does not schedule work or introduce a second job database. Native Codex
 activity has no connected data source here; every metric is explicitly ACP-only.
 
@@ -17,7 +17,7 @@ node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.j
 Open the private loopback URL printed by the command. The default port is ephemeral;
 use `--port 4317` to choose one. `--since 7d`, `--since 30d` and an ISO date such as
 `--since 2026-01-01` are supported; the default is `all`. The UI offers period selection,
-search, follow-up and early-record filters, responsibility replay and Chinese / English labels.
+project/folder grouping, search, explicit revision/takeover filters, replay and Chinese / English labels.
 
 The command stays in the foreground and installs no service. “Close dashboard” or Ctrl+C
 releases the process. After the last page stops sending heartbeats, it exits in about two
@@ -35,13 +35,31 @@ The JSON projection is private: it includes route names, titles and session asso
 Do not publish it as a share report. These commands do not load adapters, call models,
 read account allowances or scan Codex rollouts.
 
-## Home and Records
+## Home and Sessions
 
-Home shows aggregate statistics: period totals, activity across the entire selected window,
-execution results / optional review notes, route workload and explicit revision reasons. Bars switch between
-execution turns and newly created responsibilities; hover, focus or tap reveals each bucket.
-New responsibilities count creation inside the window, unlike the headline which includes
-existing sessions active in it. Clicking a route opens its filtered records. Individual replays live in Records.
+Home is a compact working dashboard: tasks, turns, observed tokens, an exact-proportion
+status strip, full-window activity, route workload, explicit revisions / takeovers and runtime notes.
+Errors use neutral slate. Switch bars between turns and newly created tasks: every continuation
+counts as a turn, while creation counts once inside the window. Date, status and route clicks
+open filtered Sessions. Replays retain the full trail and highlight the selected dates.
+
+Sessions has a searchable project entrypoint. The stored working directory (`cwd`) identifies
+local Git repositories; subdirectories and linked worktrees group under one repository, with
+an additional working-folder filter. Non-Git directories group by folder. Unavailable paths
+retain their recorded location and disclose the limitation; absent directories form an unknown
+bucket. These are not saved Codex project names, and no chat text is used to infer identity.
+Projects, paths, work orders, receipts and structured trails stay in local inspection.
+
+The browser defaults to the device's IANA timezone, with Shanghai, UTC and New York overrides.
+Calendar buckets, drill-through, replay, share dates and captions use the same zone. Stored
+instants remain UTC; rolling 7/30-day windows and inclusive bounds are unchanged. CLI JSON
+defaults to UTC and accepts `--time-zone Asia/Shanghai`.
+
+Runtime notes automatically retain structured acpx error codes with source and time. Current
+acpx exposes neither provider HTTP status nor internal retries. Text mentioning 429 or a
+JSON-RPC code is not confirmed HTTP 429; missing observations do not mean no rate limiting.
+A started turn without a terminal receipt is shown separately; an open persistent session
+alone does not mean work is still running.
 
 ## Themes: four palettes and sibling animals
 
@@ -57,23 +75,20 @@ There are exactly four themes, with two authoritative sources:
 | `mist` | Mist puppy / 雾蓝奶油狗 | Mist & cream / 雾蓝奶油 | Dog |
 | `lavender` | Lilac bear / 薰衣草杏熊 | Lilac & apricot / 薰衣草杏 | Bear |
 
-The "Paper & companions" picker at the top of the overview applies that theme's palette to the whole
-dashboard and its charts, and puts that theme's companion on the overview sticker and the share seal.
-The choice is remembered in `localStorage` for the same dashboard address and restored on
-refresh; an unremembered or unavailable id falls back to `sage`. An unknown or hostile theme id only falls
-back — it never injects colours or markup.
+The "Paper & companions" picker changes the dashboard, charts and companion seal.
+Theme, language and timezone persist in `stateDir/dashboard-preferences.json` outside Git,
+including across restarts and port changes. Only these three display fields can be written;
+route configuration, receipts and work are unchanged. Unknown theme ids render as `sage`.
 
-The Canon identity is the folded-ear cat together with the default sage palette: the cat vector lives in
-[`brand.mjs`](../integrations/acpx/src/brand.mjs), and the header mark, favicon, share header and standalone
-logo download all use it in every theme. `mascots.mjs` uses it only as its default and fallback; it never
-copies or recolours it. Switching theme changes the paper, the charts, the seal background and the companion
-inside the seal.
+Canon remains the folded-ear cat plus the default sage palette. [`brand.mjs`](../integrations/acpx/src/brand.mjs)
+owns that vector; `mascots.mjs` references it as the default and fallback without copying or
+recolouring it. Page / favicon / share headers use the fixed line product mark from
+[`mark.mjs`](../integrations/acpx/src/mark.mjs). The default companion and plugin icon remain
+the Canon cat. Both marks have independent SVG downloads.
 
-Execution covers every responsibility. The review view includes only explicit acceptance,
-takeover, submission and revision notes. There is no review-completeness score. Ordinary
-completion creates no review obligation. Home shows a follow-up link only when there is an
-execution issue or an explicitly requested review. Older records without titles display their
-dispatch time, with that source explained in detail rather than inferred from output prose.
+Untitled historical tasks show their dispatch time and disclose their source in detail,
+rather than guessing a title from work-order prose.
+
 
 ## No extra bookkeeping by default
 
@@ -133,9 +148,9 @@ arrange repeated A/B tasks, score models or claim a savings percentage. Recorded
 remain the coordinator’s attributed judgments, with work orders and receipts available
 for local inspection.
 
-## Export a little proof
+## Share cards
 
-“Export a little proof” previews **1600 × 900** landscape and **1080 × 1350** portrait
+“Share card” previews **1600 × 900** landscape and **1080 × 1350** portrait
 artifacts, downloadable as SVG or PNG. Choose Chinese or English independently of the UI language;
 Chinese has its own headlines and layout. Each opening of the dialog starts from the dashboard's current
 palette and lets you pick a different one for that artifact alone, without recolouring the dashboard;
@@ -144,17 +159,16 @@ and date (`worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`), so the four palettes
 layouts × SVG/PNG = 32 combinations stay distinguishable. They cover all ACP aggregates in the selected period,
 regardless of list filters. Preview and download use the same frozen report.
 
-A separate allowlist accepts only numeric aggregates, period bounds, coverage and fixed
+A separate allowlist accepts only numeric aggregates, period bounds, IANA timezone, coverage and fixed
 repository address. Work orders, outputs, route names, paths, parent/session IDs and
-diagnostics never enter the export payload. The graphic shows runtime completion and deliberate review counts, distinguishing completion from acceptance, without individual work-order trails. Nothing uploads automatically.
+diagnostics never enter the export payload. The graphic leads with delegated task count, runtime outcomes and usage coverage, without individual work-order trails. Nothing uploads automatically.
 
 Stitched seals, subtle cardstock edges and a folded-ear cat connect the dashboard with its share cards
 in all four palettes.
 
-The export dialog also downloads a transparent cat-logo SVG. Dashboard, favicon and share art
-use the same vector source, [`brand.mjs`](../integrations/acpx/src/brand.mjs), with no font,
-external image or additional generation step. That mark is the fixed Canon version: renaming,
-recolouring or restyling a theme never changes it.
+“Copy image caption” uses the same frozen aggregate, period and timezone as the image. It never reads
+project names, task titles or private detail. The export dialog offers separate product-mark and
+Canon-cat SVG downloads; theme companions appear in the seal.
 
 The plugin bundles a derived `assets/cat.svg`. After editing the mark, run `npm run brand:sync`
 in `integrations/acpx/`; the test suite checks the packaged copy matches.
@@ -182,8 +196,8 @@ npm run test:acpx
 ```
 
 Synthetic checks cover accounting, event correction, evidence provenance, legacy data,
-export privacy, HTTP access and shutdown. Theme checks cover both layouts and languages, preserving
-counts, ACP-only scope and the Canon header cat while each theme uses its own palette and companion.
+export privacy, HTTP access, preference allowlisting, timezone grouping, project identity and shutdown. Theme checks cover both layouts and languages, preserving
+counts, ACP-only scope and the fixed product mark while each theme uses its own palette and companion.
 Unknown theme or companion ids fall back to Canon, and both modules are served locally under the page CSP.
 Browser acceptance additionally exercises period/search filters, replay, keyboard closure, theme switching
 and refresh restore, the dialog's independent theme, all 32 downloads and filenames, desktop/mobile

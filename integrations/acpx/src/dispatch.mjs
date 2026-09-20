@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Fault, atomicJSON, privateDir, regular, readJSON, lock, sessionId } from './state.mjs';
+import { resolveTimeZone, dayKey } from './time.mjs';
+import { createWorkspaceResolver } from './workspaces.mjs';
+import { aggregateObservations, normalizeObservations } from './observations.mjs';
 
 export const EVENT_SCHEMA = 'cwr.dispatch.event/1';
 export const PROJECTION_SCHEMA = 'cwr.dispatch/1';
@@ -61,6 +64,10 @@ const MAX_RECORD_FILE = 32 * 1024 * 1024;
 
 const isPlainObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 const isoOrNull = v => typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null;
+// Workspace kind/limitation are closed sets; a value from a hand-edited binding is
+// never trusted verbatim.
+const WORKSPACE_KIND = value => ['git', 'folder', 'unknown'].includes(value) ? value : 'unknown';
+const WORKSPACE_LIMITATION = value => ['path_missing', 'cwd_unknown', 'git_unavailable'].includes(value) ? value : null;
 // Strict ISO date/day validation: never accept a permissive Date.parse('1'),
 // a bare year, or any string that is not an explicit ISO 8601 date/instant.
 const STRICT_ISO = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
@@ -501,6 +508,7 @@ async function listEntries(dir, warnings, { jsonOnly = true } = {}) {
 }
 
 export function createProjectionReader(stateDir) {
+  const workspaceResolver = createWorkspaceResolver();
   const cache = new Map(); // absolute file path -> { mtimeMs, size, value, warnings }
   const indexPath = path.join(stateDir, 'bindings');
 
@@ -562,6 +570,9 @@ export function createProjectionReader(stateDir) {
         runtime_status: ['completed', 'failed', 'cancelled'].includes(receipt.runtime_status) ? receipt.runtime_status : null,
         cleanup: ['confirmed', 'unconfirmed'].includes(receipt.cleanup) ? receipt.cleanup : 'unknown',
         usage: usageFromAdapter(receipt.adapter_reported_session_usage),
+        // Normalized, shape-validated runtime observations. Only stable typed fields
+        // survive; raw messages/paths can never appear in this shape.
+        observations: normalizeObservations(receipt.observations, { requestId }),
       });
     }
     receipts.sort((a, b) => String(a.finished_at ?? a.started_at ?? '').localeCompare(String(b.finished_at ?? b.started_at ?? '')));
@@ -578,13 +589,27 @@ export function createProjectionReader(stateDir) {
     }
     const folded = foldEvents(stored, nowMs);
     for (const code of folded.warnings) warnings.push(code);
-    return { id, binding: bindingValid ? binding : null, meta, parent, receipts, effective: folded.effective, history: folded.history };
+    // A recorded active-turn marker is evidence that a turn STARTED; it is never
+    // read as proof of a running process. A marker with no matching terminal
+    // receipt is what lets the projection distinguish "started, not finished" from
+    // a completed responsibility.
+    const activeTurn = bindingValid && isPlainObject(binding.active_turn) && safeOpaque(binding.active_turn.request_id) && isoOrNull(binding.active_turn.started_at) && Date.parse(binding.active_turn.started_at) <= nowMs && !receipts.some(r => r.request_id === binding.active_turn.request_id)
+      ? { request_id: binding.active_turn.request_id, started_at: isoOrNull(binding.active_turn.started_at) }
+      : null;
+    return { id, binding: bindingValid ? binding : null, meta, parent, receipts, effective: folded.effective, history: folded.history, activeTurn };
   };
 
-  const read = async ({ since = 'all', now } = {}) => {
+  const read = async ({ since = 'all', now, timeZone } = {}) => {
     const nowMs = typeof now === 'number' && Number.isFinite(now) ? now : Date.now();
     const sinceIso = normalizeSince(since, nowMs);
     const observedAt = new Date(nowMs).toISOString();
+    // A display zone changes only CALENDAR BUCKETING. The rolling 7d/30d window is
+    // still measured on canonical UTC instants via normalizeSince above, so changing
+    // the zone never redefines a period. An explicit invalid zone is surfaced, never
+    // silently treated as UTC.
+    let zone;
+    try { zone = resolveTimeZone(timeZone); }
+    catch { throw new Fault('BAD_TIME_ZONE', 'timeZone must be a valid IANA time zone name.'); }
     const limit = sinceIso ? Date.parse(sinceIso) : -Infinity;
     const counts = new Map();
     const addWarning = (code, count = 1) => counts.set(code, (counts.get(code) ?? 0) + count);
@@ -600,6 +625,8 @@ export function createProjectionReader(stateDir) {
     const summary = { responsibilities: 0, worker_turns: 0, runtime_completed: 0, failed: 0, cancelled: 0, submissions: 0, revisions: 0, accepted: 0, taken_over: 0, review: emptyReviewCounts(), usage_sessions: 0, usage_total_sessions: 0, external_tokens: null };
     const routes = new Map();
     const activity = new Map();
+    const workspaces = new Map();
+    const observationsBySession = [];
 
     for (const id of ids) {
       const warnings = [];
@@ -614,8 +641,8 @@ export function createProjectionReader(stateDir) {
       const periodEvents = effectiveEvents.filter(e => inPeriod(e.at)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
       const closed = loaded.binding?.closed === true;
       const closedInPeriod = closed && inPeriod(loaded.binding?.closedAt);
-      const latestMeaningful = latestTimestamp([...loaded.receipts.map(r => r.finished_at ?? r.started_at), ...effectiveEvents.map(e => e.at), loaded.binding?.closedAt]);
-      const relevant = inPeriod(loaded.binding?.createdAt) || turnReceipts.length > 0 || periodEvents.length > 0 || closedInPeriod;
+      const latestMeaningful = latestTimestamp([...loaded.receipts.map(r => r.finished_at ?? r.started_at), ...effectiveEvents.map(e => e.at), loaded.binding?.closedAt, loaded.activeTurn?.started_at]);
+      const relevant = inPeriod(loaded.binding?.createdAt) || turnReceipts.length > 0 || periodEvents.length > 0 || closedInPeriod || inPeriod(loaded.activeTurn?.started_at);
       if (!relevant) continue;
 
       // Accounting observations include pre-boundary receipts so a stored
@@ -646,7 +673,7 @@ export function createProjectionReader(stateDir) {
       summary.responsibilities += 1;
       summary.worker_turns += turnReceipts.length;
       // Runtime outcome is the LATEST in-period runtime status, once per session.
-      const latestTurn = turnReceipts.at(-1);
+      const latestTurn = loaded.activeTurn ? null : turnReceipts.at(-1);
       if (latestTurn?.runtime_status === 'completed') summary.runtime_completed += 1;
       else if (latestTurn?.runtime_status === 'failed') summary.failed += 1;
       else if (latestTurn?.runtime_status === 'cancelled') summary.cancelled += 1;
@@ -654,12 +681,30 @@ export function createProjectionReader(stateDir) {
       summary.revisions += revisions;
 
       const timeline = buildTimeline({ binding: loaded.binding, turns: loaded.receipts, history: loaded.history, closed, limit, nowMs });
+      // Local-calendar dates for this responsibility, computed in the SELECTED
+      // display zone. `activity_dates` are the unique in-window receipt dates (the
+      // exact array the day drill-through consumes); `creation_date` places the
+      // binding's creation on the same local calendar.
+      const sessionDates = new Set();
+      for (const turn of turnReceipts) {
+        const day = dayKey(turn.finished_at ?? turn.started_at, zone);
+        if (day) sessionDates.add(day);
+      }
+      const activity_dates = [...sessionDates].sort();
+      const creation_date = dayKey(loaded.binding?.createdAt, zone);
+      const workspace = await workspaceResolver.resolve(typeof loaded.binding?.cwd === 'string' ? loaded.binding.cwd : null);
       sessions.push({
         id,
         title: titleOf(loaded.meta),
         category: categoryOf(loaded.meta),
         route: typeof loaded.binding?.route === 'string' ? loaded.binding.route : null,
         created_at: isoOrNull(loaded.binding?.createdAt),
+        creation_date,
+        activity_dates,
+        workspace: projectWorkspace(workspace),
+        // Evidence that a turn STARTED with no terminal receipt yet. Never a
+        // "running" claim: absence of a terminal receipt is not proof of life.
+        active_turn: loaded.activeTurn,
         updated_at: latestMeaningful ?? isoOrNull(loaded.binding?.createdAt),
         closed,
         runtime_status: latestTurn?.runtime_status ?? null,
@@ -673,6 +718,7 @@ export function createProjectionReader(stateDir) {
         review: { state: review.state, tracked: review.tracked, decision: review.decision, decision_at: review.decision_at },
         evidence_count: evidenceCount,
         usage: usageForProjection(usageState),
+        observations: aggregatePerSessionObservations(turnReceipts),
         timeline,
       });
 
@@ -689,10 +735,26 @@ export function createProjectionReader(stateDir) {
         }
         routes.set(routeName, stat);
       }
+      // Activity is grouped by the SELECTED-ZONE calendar date. A date on which
+      // this session recorded a turn is included even if it is not its creation
+      // date; a session created in-window also contributes its creation date so a
+      // day with zero turns is still represented (continuation days included).
+      const activitySessionId = id;
+      if (creation_date && inPeriod(loaded.binding?.createdAt)) addActivity(activity, creation_date, { created: activitySessionId });
       for (const turn of turnReceipts) {
-        const date = (turn.finished_at ?? turn.started_at ?? '').slice(0, 10);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) activity.set(date, (activity.get(date) ?? 0) + 1);
+        const date = dayKey(turn.finished_at ?? turn.started_at, zone);
+        if (date) addActivity(activity, date, { turns: 1, session: activitySessionId });
       }
+
+      const workspaceStat = workspaces.get(workspace.id ?? 'unknown') ?? {
+        id: workspace.id, name: workspace.name, kind: workspace.kind, root: workspace.root,
+        limitation: workspace.limitation, responsibilities: 0, worker_turns: 0,
+      };
+      workspaceStat.responsibilities += 1;
+      workspaceStat.worker_turns += turnReceipts.length;
+      workspaces.set(workspaceStat.id ?? 'unknown', workspaceStat);
+
+      observationsBySession.push({ session_id: id, observations: aggregatePerSessionObservations(turnReceipts) });
     }
 
     summary.usage_sessions = accounting.summary.usage_sessions;
@@ -714,7 +776,29 @@ export function createProjectionReader(stateDir) {
         usage_total_sessions: stat.usage_total_sessions,
         median_elapsed_ms: median(stat.elapsed),
       })),
-      activity: [...activity.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, turns]) => ({ date, turns })),
+      time_zone: zone,
+      // Calendar-day rows grouped by the SELECTED zone. Each row carries the exact
+      // arrays the drill-through consumes. A created-in-window date with zero turns
+      // still appears (created_session_ids), as does any day an existing session
+      // recorded a turn (session_ids).
+      activity: [...activity.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, row]) => ({
+        date,
+        turns: row.turns,
+        responsibilities: row.session_ids.size,
+        session_ids: [...row.session_ids].sort(),
+        created_session_ids: [...row.created_session_ids].sort(),
+      })),
+      // Local workspace grouping for the private projection. Paths live here only;
+      // the public share allowlist never includes this array.
+      workspaces: [...workspaces.values()]
+        .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? '')))
+        .map(stat => ({
+          id: stat.id, name: stat.name, kind: stat.kind, root: stat.root,
+          limitation: stat.limitation, responsibilities: stat.responsibilities, worker_turns: stat.worker_turns,
+        })),
+      // Truthful aggregate runtime observations. Counters describe OBSERVATIONS,
+      // not inferred requests; a following completion proves no retry/recovery.
+      runtime_notes: aggregateObservations(observationsBySession),
       // Most recently meaningful responsibility first; a legacy record still
       // appears with an honest fallback title rather than being hidden.
       sessions: sessions.sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? ''))),
@@ -722,8 +806,11 @@ export function createProjectionReader(stateDir) {
     };
   };
 
-  const detail = async sessionIdValue => {
+  const detail = async (sessionIdValue, { timeZone } = {}) => {
     const id = sessionId(sessionIdValue);
+    let zone;
+    try { zone = resolveTimeZone(timeZone); }
+    catch { throw new Fault('BAD_TIME_ZONE', 'timeZone must be a valid IANA time zone name.'); }
     const codes = new Set();
     const warnings = [];
     await privateDir(path.join(stateDir, 'bindings', id), { create: false });
@@ -748,8 +835,10 @@ export function createProjectionReader(stateDir) {
         finished_at: isoOrNull(read.value.finished_at),
         runtime_status: ['completed', 'failed', 'cancelled'].includes(read.value.runtime_status) ? read.value.runtime_status : null,
         cleanup: ['confirmed', 'unconfirmed'].includes(read.value.cleanup) ? read.value.cleanup : 'unknown',
+        error_code: typeof read.value.error_code === 'string' && /^[A-Z0-9_]{1,80}$/.test(read.value.error_code) ? read.value.error_code : null,
         work_order: order.status === 'ok' && isPlainObject(order.value) && typeof order.value.text === 'string' ? order.value.text : null,
         output_excerpt: typeof read.value.output_excerpt === 'string' ? read.value.output_excerpt : null,
+        observations: normalizeObservations(read.value.observations, { requestId }),
       });
     }
     turns.sort((a, b) => String(a.finished_at ?? a.started_at ?? '').localeCompare(String(b.finished_at ?? b.started_at ?? '')));
@@ -769,12 +858,25 @@ export function createProjectionReader(stateDir) {
     const effective = [...folded.effective.values()];
     const latestTurn = [...turns].reverse().find(t => t.runtime_status !== null) ?? turns.at(-1) ?? null;
     const review = reviewSummaryFor({ meta, effective, turns, closed: binding.closed === true, nowMs: Date.now() });
+    const workspace = await workspaceResolver.resolve(typeof binding.cwd === 'string' ? binding.cwd : null);
+    const sessionDates = new Set();
+    for (const turn of turns) {
+      const day = dayKey(turn.finished_at ?? turn.started_at, zone);
+      if (day) sessionDates.add(day);
+    }
+    const activeTurn = isPlainObject(binding.active_turn) && safeOpaque(binding.active_turn.request_id) && isoOrNull(binding.active_turn.started_at) && Date.parse(binding.active_turn.started_at) <= Date.now() && !turns.some(r => r.request_id === binding.active_turn.request_id)
+      ? { request_id: binding.active_turn.request_id, started_at: isoOrNull(binding.active_turn.started_at) }
+      : null;
     const session = {
       id,
       title: titleOf(meta),
       category: categoryOf(meta),
       route: typeof binding.route === 'string' ? binding.route : null,
       created_at: isoOrNull(binding.createdAt),
+      creation_date: dayKey(binding.createdAt, zone),
+      activity_dates: [...sessionDates].sort(),
+      workspace: projectWorkspace(workspace),
+      active_turn: activeTurn,
       updated_at: latestTimestamp([...turns.map(t => t.finished_at ?? t.started_at), ...effective.map(e => e.at), binding.closedAt]) ?? isoOrNull(binding.createdAt),
       closed: binding.closed === true,
       runtime_status: latestTurn?.runtime_status ?? null,
@@ -788,11 +890,13 @@ export function createProjectionReader(stateDir) {
       review: { state: review.state, tracked: review.tracked, decision: review.decision, decision_at: review.decision_at },
       evidence_count: effective.reduce((n, e) => n + e.evidence.filter(v => v.source === 'coordinator').length, 0),
       usage: { input: null, output: null, thought: null, total: null },
+      observations: aggregatePerSessionObservations(turns),
       timeline: buildTimeline({ binding, turns: turns.map(t => ({ ...t, usage: null })), history: folded.history, closed: binding.closed === true, limit: -Infinity, nowMs: Date.now() }),
     };
     for (const code of warnings) codes.add(code);
     return {
       schema: PROJECTION_SCHEMA,
+      time_zone: zone,
       session,
       turns,
       events: stored.sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
@@ -948,6 +1052,46 @@ function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+// The private per-responsibility workspace view. Paths (root/cwd) live in this
+// LOCAL projection only; the public share allowlist is a separate boundary.
+function projectWorkspace(workspace) {
+  return {
+    id: typeof workspace.id === 'string' ? workspace.id : null,
+    name: typeof workspace.name === 'string' ? workspace.name : null,
+    kind: WORKSPACE_KIND(workspace.kind),
+    root: typeof workspace.root === 'string' ? workspace.root : null,
+    cwd: typeof workspace.cwd === 'string' ? workspace.cwd : null,
+    limitation: WORKSPACE_LIMITATION(workspace.limitation),
+  };
+}
+
+// Accumulate one selected-zone calendar day. `turns` counts in-window turns that
+// landed on that day; `session_ids`/`created_session_ids` are the exact id arrays
+// the dashboard day drill-through filters on.
+function addActivity(activity, date, { turns = 0, session = null, created = null } = {}) {
+  const row = activity.get(date) ?? { turns: 0, session_ids: new Set(), created_session_ids: new Set() };
+  row.turns += turns;
+  if (session) row.session_ids.add(session);
+  if (created) row.created_session_ids.add(created);
+  activity.set(date, row);
+}
+
+// Fold a session's receipt-level observations into one bounded view. A receipt
+// with no observable structured field contributes nothing, so absence is honest.
+function aggregatePerSessionObservations(receipts) {
+  const events = [];
+  let omitted = 0, coverage = 'none';
+  for (const receipt of receipts) {
+    const observation = receipt.observations;
+    if (!observation || !observation.events.length) continue;
+    coverage = 'runtime_codes_only';
+    events.push(...observation.events);
+    omitted += Number.isSafeInteger(observation.omitted) ? observation.omitted : 0;
+  }
+  events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return { coverage, events, omitted };
 }
 
 function buildTimeline({ binding, turns, history, closed, limit, nowMs }) {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Fault, atomicJSON, privateDir, paths } from './state.mjs';
 import { classifyTurn, planSessionMetadata, planContinuation } from './dispatch.mjs';
+import { createObservationCollector } from './observations.mjs';
 
 const now = () => new Date().toISOString();
 const safeCode = e => typeof e?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(e.code) ? e.code : 'ACP_EXECUTION_FAILED';
@@ -119,6 +120,9 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   let excerpt = '', truncated = false, eventCount = 0;
   let cleanup = 'unconfirmed', touchedRuntime = false;
   const startedAt = now();
+  // A bounded, nonthrowing observation collector for THIS turn. It mirrors only
+  // verified structured runtime fields and never changes the terminal result.
+  const observations = createObservationCollector({ requestId, now });
   const observe = async () => {
     for await (const event of turn.events) {
       eventCount++;
@@ -158,6 +162,17 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     }
     if (signal?.aborted) throw new Fault('CANCELLED_BEFORE_START', 'Cancelled before prompting.');
     touchedRuntime = true;
+    // Record that a turn has STARTED, durably and immediately before the prompt is
+    // written. This is small active-turn evidence so the projection can distinguish
+    // "started, no terminal receipt yet" from "completed". It is never used to infer
+    // a running process from an open persistent session, and it is cleared on any
+    // terminal outcome below.
+    binding.active_turn = { request_id: requestId, started_at: startedAt };
+    await atomicJSON(p.binding, binding);
+    // Re-check after the durable marker write: a cancellation that arrived while we
+    // persisted the marker must still prevent the prompt (the abort listener inside
+    // startTurn is registered too late to observe an already-aborted signal).
+    if (signal?.aborted) throw new Fault('CANCELLED_BEFORE_START', 'Cancelled before prompting.');
     turn = runtime.startTurn({ handle, text: workOrder(text, selection.permissions),
       mode: 'prompt', requestId, timeoutMs: selection.route.timeoutMs, signal });
     // Consume all promises immediately to avoid unhandled rejections on startup.
@@ -186,6 +201,9 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     terminal = { status: signal?.aborted ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
   } finally {
     acceptingLaunches = false;
+    // The turn has settled (any terminal outcome). Clear the active-turn marker so
+    // the projection never reads a stale "started" as an unfinished turn.
+    if (binding.active_turn?.request_id === requestId) delete binding.active_turn;
     // These promises concern the ACP-owned connection/process, not escaped daemons.
     try {
       if (handle && touchedRuntime) await deadline(runtime.close({ handle, reason: 'release CLI connection; retain conversation', discardPersistentState: false }), cleanupMs, 'CLEANUP_TIMEOUT');
@@ -193,6 +211,10 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     } catch (e) { caught ??= e; cleanup = 'unconfirmed'; }
   }
   // A completion signal is runtime evidence, not engineering acceptance.
+  // Capture ONLY verified structured runtime fields for the terminal outcome. The
+  // collector never parses prose and never fabricates an HTTP status; this cannot
+  // change the terminal result.
+  observations.observeTurnResult(terminal);
   let diagnosticPath = null;
   if (caught) {
     diagnosticPath = path.join(p.receipts, `${requestId}.diagnostic.json`);
@@ -218,6 +240,8 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     adapter_reported_session_usage: compactUsage(status?.usage),
     adapter_reported_per_request_usage_omitted: Boolean(status?.usage?.perRequest && Object.keys(status.usage.perRequest).length),
     output_excerpt: excerpt, output_truncated: truncated, observed_event_count: eventCount,
+    // Additive, bounded, truthfully-covered runtime observations.
+    observations: observations.snapshot(),
     transcript_state_dir: recordDir,
     receipt_path: path.join(p.receipts, `${requestId}.json`), diagnostic_path: diagnosticPath,
     // Additive Dispatch pointers, written durably with the receipt. The pointer
@@ -230,6 +254,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   binding.lastReceipt = receipt.receipt_path;
   binding.lastStatus = receipt.runtime_status;
   binding.cleanup = cleanup;
+  // Persist the marker cleared during terminal cleanup.
   await atomicJSON(p.binding, binding);
   return receipt;
 }

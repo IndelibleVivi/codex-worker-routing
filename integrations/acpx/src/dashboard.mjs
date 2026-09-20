@@ -5,6 +5,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createProjectionReader } from './dispatch.mjs';
 import { projectShare } from './share.mjs';
 import { renderLogoSVG } from './brand.mjs';
+import { renderProductMarkSVG } from './mark.mjs';
+import { readPreferences,writePreferences } from './preferences.mjs';
 import { Fault } from './state.mjs';
 
 const files = new Map([
@@ -37,13 +39,25 @@ export async function startDashboard({stateDir, since='all', port=0, reader, idl
         if(supplied.length !== expected.length || !timingSafeEqual(supplied,expected)) return send(401,{error:'Open the private URL printed by cwr-acp dashboard.'});
         touched = Date.now(); opened = true;
         if(url.pathname === '/api/close' && req.method === 'POST') { send(200,{closed:true}); setImmediate(close); return; }
+        if(url.pathname === '/api/preferences' && req.method === 'PUT') {
+          let body='';
+          for await (const chunk of req) {
+            body+=chunk;
+            if(Buffer.byteLength(body)>1024) return send(413,{error:'PREFERENCES_TOO_LARGE'});
+          }
+          let value;
+          try { value=JSON.parse(body); } catch { return send(400,{error:'BAD_PREFERENCES'}); }
+          return send(200,await writePreferences(stateDir,value));
+        }
         if(req.method !== 'GET') return send(405,{error:'Read-only dashboard.'});
         if(url.pathname === '/api/ping') return send(200,{ok:true});
+        if(url.pathname === '/api/preferences') return send(200,await readPreferences(stateDir));
         const period = url.searchParams.get('since') ?? since;
-        if(url.pathname === '/api/snapshot') return send(200,await projection.read({since:period}));
-        if(url.pathname === '/api/share') return send(200,projectShare(await projection.read({since:period})));
+        const timeZone = url.searchParams.get('timeZone') ?? 'UTC';
+        if(url.pathname === '/api/snapshot') return send(200,await projection.read({since:period,timeZone}));
+        if(url.pathname === '/api/share') return send(200,projectShare(await projection.read({since:period,timeZone})));
         const match = url.pathname.match(/^\/api\/detail\/([a-f0-9-]{36})$/);
-        if(match) return send(200,await projection.detail(match[1]));
+        if(match) return send(200,await projection.detail(match[1],{timeZone}));
         return send(404,{error:'Unknown dashboard endpoint.'});
       }
       if(req.method !== 'GET') return send(405,{error:'Method not allowed.'});
@@ -51,13 +65,16 @@ export async function startDashboard({stateDir, since='all', port=0, reader, idl
       if(url.pathname === '/themes.mjs') return send(200,await fs.readFile(new URL('./themes.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/mascots.mjs') return send(200,await fs.readFile(new URL('./mascots.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/brand.mjs') return send(200,await fs.readFile(new URL('./brand.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
+      if(url.pathname === '/mark.mjs') return send(200,await fs.readFile(new URL('./mark.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
+      if(url.pathname === '/time.mjs') return send(200,await fs.readFile(new URL('./time.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/logo.svg') return send(200,renderLogoSVG(),'image/svg+xml');
+      if(url.pathname === '/mark.svg') return send(200,renderProductMarkSVG(),'image/svg+xml');
       const asset = files.get(url.pathname);
       if(!asset) return send(404,{error:'Not found.'});
       send(200,await fs.readFile(new URL(`./dashboard/${asset[0]}`,import.meta.url),'utf8'),asset[1]);
     } catch(error) {
       // Private filesystem paths and raw parser/provider messages never cross HTTP.
-      send(error?.code==='USAGE'||error?.code==='BAD_PERIOD'?400:500,{error:error instanceof Fault ? error.code : 'LOCAL_READ_FAILED'});
+      send(['USAGE','BAD_PERIOD','BAD_TIME_ZONE','BAD_PREFERENCES'].includes(error?.code)?400:500,{error:error instanceof Fault ? error.code : 'LOCAL_READ_FAILED'});
     }
   });
   const close = () => new Promise((resolve,reject) => {
