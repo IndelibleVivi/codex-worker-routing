@@ -230,6 +230,15 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 [行为场景](docs/behavior-scenarios.md)、安装与输入边界文档保持中文。私人说明、
 账号配置、请求与 continuity 不属于仓库。见[来源说明](PROVENANCE.md)。
 
+## 相关项目
+
+面向 MCP 工程与日常仓库工作。
+
+- [MCP Boundary](https://indeliblevivi.github.io/mcp-boundary/zh/)：
+  一套 MCP 工程技能，附 Guide 与 Lab，用于设计、评审与验证 MCP server 与会用 MCP 的应用。
+- [Servotab](https://servotab.com/)：
+  一套工程方法，覆盖仓库规划、实现、调试、评审与验证。
+
 ## 许可
 
 软件与功能材料采用 [`SUL-1.0`](LICENSE)：允许个人、非商业和企业内部使用；

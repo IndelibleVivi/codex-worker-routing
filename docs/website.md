@@ -27,6 +27,13 @@ GitHub Pages 的 repository subpath。停止预览使用 Ctrl-C。
 clipboard 被拒绝时选择原文供手动复制。示例不是完整 Dispatch 编辑器，完整的
 署名、字体、装饰及 PNG 导出在本地[派工台](dispatch.md)中使用。
 
+## 相关项目入口
+
+产品页和两种语言的 README 按用途链接到 MCP Boundary 与 Servotab：前者用于
+MCP 工程设计、审查与验证，后者提供一般仓库工作的工程方法。中英文页面分别
+链接 Boundary 的对应语言入口；这些链接在关闭 JavaScript 时仍可用。
+这批入口已完成源码修改，部署状态待发布后更新。
+
 ## 真源与隐私
 
 - `page.mjs` / `style.css`：双语静态内容与响应式布局。
