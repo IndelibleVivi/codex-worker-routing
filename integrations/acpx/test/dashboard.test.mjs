@@ -54,6 +54,31 @@ test('both share layouts have real selected-period counts and explicit workload 
     assert.doesNotMatch(svg,/PRIVATE_|INTERNAL_|<script|https?:\/\/[^<]*image/);
   }
 });
+test('share outcome geometry preserves rare proportions and the full track width',()=>{
+  const data={...projectShare(snapshot()),responsibilities:10000,worker_turns:12000,runtime_completed:9997,failed:1,cancelled:1,usage_sessions:9000,usage_total_sessions:10000};
+  for(const [format,width] of [['poster',920],['banner',1440]]){
+    const svg=renderShareSVG(data,format);
+    const segments=[...svg.matchAll(/<rect data-outcome="([^"]+)" x="([^"]+)" y="[^"]+" width="([^"]+)"/g)].map(([,key,x,w])=>({key,x:Number(x),width:Number(w)}));
+    assert.equal(segments.length,4);
+    const counts={completed:9997,failed:1,cancelled:1,unknown:1};
+    let end=80;
+    for(const segment of segments){
+      assert.ok(Math.abs(segment.x-end)<1e-9,'segments must be adjacent');
+      assert.ok(Math.abs(segment.width/width-counts[segment.key]/10000)<1e-12,'width must encode the actual fraction');
+      end=segment.x+segment.width;
+    }
+    assert.ok(Math.abs(end-(80+width))<1e-9,'the strip must end at its allotted boundary');
+  }
+});
+test('empty share outcomes keep a neutral track without fabricated segments',()=>{
+  const data={...projectShare(snapshot()),responsibilities:0,runtime_completed:0,failed:0,cancelled:0,worker_turns:0,external_tokens:null,usage_sessions:0,usage_total_sessions:0};
+  for(const format of ['poster','banner']){
+    const svg=renderShareSVG(data,format);
+    assert.match(svg,/id="share-outcome-track"/);
+    assert.doesNotMatch(svg,/data-outcome="|NaN|Infinity/);
+    assert.match(svg,/>—<\/text>/);
+  }
+});
 test('dashboard binds only loopback; data needs a bearer token and exact origin',async t=>{
   const d=await start(t);assert.equal(d.server.address().address,'127.0.0.1');
   assert.equal((await fetch(`${d.origin}/api/snapshot`)).status,401);

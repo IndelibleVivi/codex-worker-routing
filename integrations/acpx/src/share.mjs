@@ -38,51 +38,105 @@ export function renderShareCaption(data,language='en') {
     : `${start} — ${end} (${d.time_zone}): ${d.responsibilities} delegated tasks, ${d.worker_turns} worker turns. Completed ${d.runtime_completed}, failed ${d.failed}, cancelled ${d.cancelled}, no terminal receipt ${unknown}. Observed external usage: ${compact(d.external_tokens)} tokens; attributable for ${d.usage_sessions} of ${d.usage_total_sessions} receipted tasks, unavailable for ${missing}. ACP only. Unknown usage is not zero; not acceptance or Codex quota savings.`;
 }
 const xml=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
-export function renderShareSVG(data,format='banner',lang='en',themeId='sage'){
+const SANS=`Avenir Next,Arial,PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif`;
+const SERIF=`Georgia,'Times New Roman','Songti SC','Noto Serif CJK SC',serif`;
+const MONO=`ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace`;
+// The primary task count and companion share one woven surface. Secondary
+// metrics stay on paper; material never controls quantitative geometry.
+export function renderShareSVG(data,format='banner',lang='en',themeId='sage') {
  const d=publicData(data),theme=getTheme(themeId),c=theme.colors;
- const p={ink:c.ink,text:c.textSecondary,line:c.line,soft:c.primarySoft,seam:c.primaryLine,mat:c.mat,surface:c.surface,mascot:theme.mascot};
  const zh=lang==='zh',portrait=format==='poster',w=portrait?1080:1600,h=portrait?1350:900;
  const T=(a,b)=>zh?a:b;
- const text=(x,y,value,size=30,fill=p.ink,weight=400,extra='')=>`<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" font-weight="${weight}" ${extra}>${xml(value)}</text>`;
- const line=(y,x=80,end=w-80)=>`<path d="M${x} ${y}H${end}" fill="none" stroke="${p.line}" stroke-width="1.5"/>`;
- const seal=(cx,cy,r)=>`<g transform="rotate(5 ${cx} ${cy})"><circle cx="${cx}" cy="${cy+4}" r="${r}" fill="${p.line}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="${p.soft}"/><circle cx="${cx}" cy="${cy}" r="${r-12}" fill="none" stroke="${p.seam}" stroke-width="2" stroke-dasharray="2.5 7"/><g transform="translate(${cx-r*.75} ${cy-r*.82}) scale(${r*1.5/128})">${mascotMark(p.mascot)}</g></g>`;
+ const text=(x,y,value,size=24,fill=c.ink,weight=400,extra='')=>`<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" font-weight="${weight}" ${extra}>${xml(value)}</text>`;
+ const mono=(x,y,value,size=18,extra='')=>text(x,y,value,size,c.textSecondary,400,`font-family="${MONO}" ${extra}`);
+ const serif=(x,y,value,size=54,extra='')=>text(x,y,value,size,c.ink,400,`font-family="${SERIF}" ${extra}`);
+ const rule=(y,x=80,end=w-80)=>`<path d="M${x} ${y}H${end}" fill="none" stroke="${c.primaryLine}" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 6"/>`;
+ const defs=`<defs>
+  <filter id="paper-grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="2" seed="11" stitchTiles="stitch"/><feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .4 0"/></filter>
+  <filter id="cloth-lift" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="${c.ink}" flood-opacity=".12"/></filter>
+  <pattern id="weave" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 1.5H6" stroke="${c.ink}" stroke-opacity=".025"/><path d="M1.5 0V6" stroke="${c.ink}" stroke-opacity=".025"/></pattern>
+  <pattern id="unknown-track" width="5" height="5" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="${c.track}"/><path d="M-1 1L1-1M0 5L5 0M4 6L6 4" stroke="${c.textSecondary}" stroke-width="1"/></pattern>
+  <linearGradient id="cloth-light" x2=".8" y2="1"><stop stop-color="${c.surface}" stop-opacity=".35"/><stop offset="1" stop-color="${c.primary}" stop-opacity=".08"/></linearGradient>
+  <clipPath id="paper-clip"><rect x="24" y="22" width="${w-48}" height="${h-51}" rx="24"/></clipPath>
+ </defs>`;
+ const grain=(x,y,rw,rh)=>`<rect x="${x}" y="${y}" width="${rw}" height="${rh}" filter="url(#paper-grain)" opacity=".045"/>`;
+ const cloth=(x,y,cw,ch)=>`<g transform="rotate(-1.2 ${x+cw/2} ${y+ch/2})" filter="url(#cloth-lift)">
+  <rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="22" fill="${c.primarySoft}"/>
+  <rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="22" fill="url(#cloth-light)"/>
+  <rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="22" fill="url(#weave)"/>
+  <rect x="${x+14}" y="${y+14}" width="${cw-28}" height="${ch-28}" rx="13" fill="none" stroke="${c.primaryLine}" stroke-width="1.7" stroke-dasharray="6 5"/>
+ </g>`;
+ const companion=(x,y,r)=>`<g id="share-companion" transform="translate(${x} ${y}) rotate(-7)">
+  <g transform="rotate(18)"><rect x="${r*.2}" y="${-r-25}" width="${r*.7}" height="${r*.7}" rx="5" fill="${c.secondarySoft}"/><path d="M${r*.25} ${-r-12}h${r*.6}" stroke="${c.secondaryLine}" stroke-width="1.5" stroke-dasharray="5 4"/></g>
+  <circle cy="5" r="${r}" fill="${c.shadow}"/>
+  <circle r="${r}" fill="${c.surface}" filter="url(#cloth-lift)"/>
+  <circle r="${r-7}" fill="${c.primarySoft}"/>
+  <circle r="${r-7}" fill="url(#cloth-light)"/>
+  <circle r="${r-7}" fill="url(#weave)"/>
+  <circle r="${r-20}" fill="none" stroke="${c.primaryLine}" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="5 5"/>
+  <g transform="translate(${-r*.79} ${-r*.84}) scale(${r*1.58/128})">${mascotMark(theme.mascot)}</g>
+ </g>`;
+ const countText=compact(d.responsibilities);
+ const primary=(x,y,maxSize,width)=>text(x,y,countText,Math.min(maxSize,width/(countText.length*.61)),c.ink,550,'id="share-task-count" letter-spacing="-6"');
+ const since=d.period.since?dayKey(d.period.since,d.time_zone).replaceAll('-','.') : T('全部已记录时间','ALL RECORDED TIME');
+ const until=d.period.until?dayKey(d.period.until,d.time_zone).replaceAll('-','.') : T('未知','UNKNOWN');
+ const outcome=[
+  [d.runtime_completed,'completed',T('运行完成','Completed'),c.chartInk],
+  [d.failed,'failed',T('执行中断','Failed'),'#566e7d'],
+  [d.cancelled,'cancelled',T('已取消','Cancelled'),'#8a9097'],
+  [Math.max(0,d.responsibilities-d.runtime_completed-d.failed-d.cancelled),'unknown',T('无终态','No terminal'),'url(#unknown-track)'],
+ ];
+ // Adjacent exact fractions: neither decoration nor a minimum width may enlarge
+ // a rare outcome. The numeric legend remains readable for subpixel segments.
+ const track=(x,y,width)=>{
+  let cumulative=0;
+  const segments=outcome.filter(([n])=>n>0).map(([n,key,,fill])=>{
+   const start=x+width*cumulative/d.responsibilities;cumulative+=n;
+   return `<rect data-outcome="${key}" x="${start}" y="${y}" width="${x+width*cumulative/d.responsibilities-start}" height="6" fill="${fill}"/>`;
+  }).join('');
+  return `<g id="share-outcome-track"><rect x="${x}" y="${y}" width="${width}" height="6" fill="${c.track}"/>${segments}</g>`;
+ };
+ const outcomes=(x,y,step)=>outcome.map(([n,key,label],i)=>`<g data-outcome-label="${key}">${text(x+i*step,y,n,32,c.ink,500)}${text(x+i*step,y+34,label,20,c.textSecondary)}</g>`).join('');
+ const coverage=T(`${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务，用量可归属`,`${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks with attributable usage`);
+ const footer=(y)=>text(80,y,T('仅 ACP · 未知用量不计零。','ACP only · Unknown usage is not zero.'),20,c.textSecondary)
+  +text(80,y+29,T('不代表验收结论或 Codex 额度节省。','Not acceptance or Codex quota savings.'),20,c.textSecondary);
+ const repo=(y)=>mono(w-80,y,'github.com/IndelibleVivi/codex-worker-routing',portrait?20:18,'id="share-repository" text-anchor="end"');
  const mark=`<g transform="translate(77 63) scale(.98)">${productMark().replace(/^<svg[^>]*>/,'').replace('</svg>','')}</g>`;
- let out=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" lang="${zh?'zh-CN':'en'}" aria-labelledby="share-svg-title share-svg-desc"><title id="share-svg-title">${xml(T('Worker Routing · ACP 协作记录','Worker Routing · ACP collaboration'))}</title><desc id="share-svg-desc">${xml(renderShareCaption(d,lang))}</desc><rect width="${w}" height="${h}" fill="${p.mat}"/><rect x="24" y="28" width="${w-48}" height="${h-51}" rx="23" fill="${p.line}"/><rect x="24" y="22" width="${w-48}" height="${h-51}" rx="23" fill="${p.surface}"/><g font-family="Avenir Next,Arial,PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif">`;
- out+=mark+text(141,97,'worker routing',30,p.ink,550)+text(w-80,97,'DISPATCH / FIELD NOTES',19,p.text,400,'text-anchor="end" letter-spacing="2"')+line(142);
- const since=d.period.since?dayKey(d.period.since,d.time_zone).replaceAll('-','.') : T('全部已记录时间','ALL RECORDED TIME'),until=d.period.until?dayKey(d.period.until,d.time_zone).replaceAll('-','.') : T('未知','UNKNOWN');
- const dates=`${since} — ${until}`;
+ let out=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" lang="${zh?'zh-CN':'en'}" aria-labelledby="share-svg-title share-svg-desc"><title id="share-svg-title">${xml(T('Worker Routing · ACP 协作记录','Worker Routing · ACP collaboration'))}</title><desc id="share-svg-desc">${xml(renderShareCaption(d,lang))}</desc>${defs}
+ <rect width="${w}" height="${h}" fill="${c.mat}"/>
+ <rect x="24" y="29" width="${w-48}" height="${h-51}" rx="24" fill="${c.shadow}" opacity=".65"/>
+ <rect x="24" y="22" width="${w-48}" height="${h-51}" rx="24" fill="${c.surface}"/>
+ <g clip-path="url(#paper-clip)">${grain(24,22,w-48,h-51)}</g>
+ <rect x="46" y="44" width="${w-92}" height="${h-95}" rx="15" fill="none" stroke="${c.primaryLine}" stroke-width="1.5" stroke-dasharray="7 6" opacity=".7"/>
+ <g font-family="${SANS}">${mark}${text(141,97,'worker routing',30,c.ink,550)}${mono(w-80,96,'DISPATCH / FIELD NOTES',18,'text-anchor="end" letter-spacing="2"')}${rule(140)}
+ ${mono(80,191,`${since} — ${until}  /  ${d.time_zone}`,portrait?18:20)}`;
  if(portrait){
-  out+=text(80,200,dates,28,p.text)+text(80,243,d.time_zone,24,p.text);
-  if(zh)out+=text(77,340,'工作有去有回。',62,p.ink,500,'letter-spacing="-1.5"');
-  else out+=text(77,314,'Good work,',56,p.ink,500)+text(77,381,'in good company.',56,p.ink,500);
-  out+=text(70,587,compact(d.responsibilities),194,p.ink,500,'letter-spacing="-9"')+text(83,643,T('份委派任务','DELEGATED TASKS'),34,p.ink,450,zh?'':'letter-spacing="1"');
-  out+=seal(820,526,148);
-  out+=line(697);
-  out+=text(80,782,compact(d.worker_turns),64,p.ink,500)+text(81,828,T('轮执行','worker turns'),30,p.text);
-  out+=text(550,782,compact(d.external_tokens),64,p.ink,500)+text(552,828,T('外部已知 tokens','observed tokens'),30,p.text);
-  out+=`<path d="M511 738v92" stroke="${p.line}" stroke-width="1.5"/>`;
-  out+=text(81,895,T(`用量可归属 ${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务`,`Usage coverage: ${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks`),zh?30:28,p.text);
-  out+=text(81,938,T('未知部分，不计作零。','Unknown usage is not zero.'),29,p.text);
-  out+=line(979);
-  const states=[[d.runtime_completed,T('运行完成','Completed')],[d.failed,T('执行中断','Failed')],[d.cancelled,T('已取消','Cancelled')],[Math.max(0,d.responsibilities-d.runtime_completed-d.failed-d.cancelled),T('无终态','No terminal')]];
-  states.forEach(([n,l],i)=>{const x=81+i*233;out+=text(x,1053,String(n),49,p.ink,500)+text(x,1097,l,28,p.text)});
-  out+=line(1140);
-  out+=text(81,1190,T('仅 ACP · 非验收结论或额度节省','ACP only · Not acceptance or quota savings'),zh?28:26,p.text);
-  out+=text(81,1235,T('同一份责任续做，只计一份任务。','Continued work stays one task.'),26,p.text,500);
-  out+=text(81,1291,'github.com/IndelibleVivi/codex-worker-routing',25,p.ink);
+  out+=serif(78,287,T('工作有去有回。','Good work,'),zh?64:62);
+  if(!zh)out+=serif(78,352,'in good company.',62,'font-style="italic"');
+  out+=cloth(80,416,905,307);
+  out+=mono(110,465,T('这个窗口里的协作','THIS COLLABORATION WINDOW'),16,'letter-spacing="1.8"');
+  out+=primary(102,636,214,525)+text(112,682,T('份委派任务','delegated tasks'),27,c.ink,500);
+  out+=companion(836,494,155);
+  out+=text(96,763,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),20,c.textSecondary);
+  out+=text(96,846,compact(d.worker_turns),54,c.ink,500)+text(97,884,T('轮执行','worker turns'),23,c.textSecondary);
+  out+=`<path d="M484 802V887" stroke="${c.secondaryLine}" stroke-dasharray="3 5"/>`;
+  out+=text(544,846,compact(d.external_tokens),54,c.ink,500)+text(545,884,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
+  out+=text(96,934,coverage,20,c.textSecondary,400,'id="share-usage-coverage"');
+  out+=track(80,992,w-160)+outcomes(80,1056,235);
+  out+=rule(1130)+footer(1180)+repo(1270);
  }else{
-  out+=text(80,194,`${dates}   /   ${d.time_zone}`,27,p.text);
-  out+=text(76,288,T('有帮手，工作有去有回。','Good work, in good company.'),58,p.ink,500,'letter-spacing="-1"');
-  out+=text(69,491,compact(d.responsibilities),191,p.ink,500,'letter-spacing="-9"')+text(423,445,T('份委派任务','DELEGATED TASKS'),34,p.ink,500)+text(425,491,T('同一份责任，只计一次。','One responsibility, counted once.'),27,p.text);
-  out+=seal(1321,458,169);
-  out+=line(543,80,1020);
-  out+=text(80,622,compact(d.worker_turns),62,p.ink,500)+text(81,665,T('轮执行','worker turns'),29,p.text);
-  out+=text(416,622,compact(d.external_tokens),62,p.ink,500)+text(418,665,T('外部已知 tokens','observed tokens'),29,p.text);
-  out+=text(773,610,T(`用量可归属 ${d.usage_sessions}/${d.usage_total_sessions}`,`Usage coverage ${d.usage_sessions}/${d.usage_total_sessions}`),27,p.text)+text(774,651,T('分母：有回执的任务','of tasks with receipts'),25,p.text);
-  out+=text(80,727,T(`运行完成 ${d.runtime_completed}   ·   执行中断 ${d.failed}   ·   取消 ${d.cancelled}   ·   无终态 ${Math.max(0,d.responsibilities-d.runtime_completed-d.failed-d.cancelled)}`,`Completed ${d.runtime_completed}   ·   Failed ${d.failed}   ·   Cancelled ${d.cancelled}   ·   Unknown ${Math.max(0,d.responsibilities-d.runtime_completed-d.failed-d.cancelled)}`),29,p.ink,450);
-  out+=line(758);
-  out+=text(80,802,T('仅 ACP · 未知用量不计零 · 非验收结论或额度节省','ACP only · Unknown usage is not zero · Not acceptance or quota savings'),26,p.text);
-  out+=text(80,850,'github.com/IndelibleVivi/codex-worker-routing',24,p.ink);
+  out+=serif(78,275,T('工作有去有回。','Good work, in good company.'),zh?58:54);
+  out+=cloth(80,320,880,292);
+  out+=mono(110,358,T('这个窗口里的协作','THIS COLLABORATION WINDOW'),16,'letter-spacing="1.8"');
+  out+=primary(102,527,210,535)+text(112,577,T('份委派任务','delegated tasks'),27,c.ink,500);
+  out+=companion(853,435,155);
+  out+=text(1110,373,compact(d.worker_turns),54,c.ink,500)+text(1111,412,T('轮执行','worker turns'),23,c.textSecondary);
+  out+=rule(446,1110,1518);
+  out+=text(1110,522,compact(d.external_tokens),54,c.ink,500)+text(1111,560,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
+  out+=`<g id="share-usage-coverage">${text(1111,601,T(`${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务`,`${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks`),19,c.textSecondary)}${text(1111,629,T('用量可归属','with attributable usage'),19,c.textSecondary)}</g>`;
+  out+=text(80,650,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),20,c.textSecondary);
+  out+=track(80,679,w-160)+outcomes(80,728,360);
+  out+=footer(803)+repo(832);
  }
  return out+'</g></svg>';
 }

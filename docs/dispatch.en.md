@@ -18,6 +18,8 @@ Open the private loopback URL printed by the command. The default port is epheme
 use `--port 4317` to choose one. `--since 7d`, `--since 30d` and an ISO date such as
 `--since 2026-01-01` are supported; the default is `all`. The UI offers period selection,
 project/folder grouping, search, explicit revision/takeover filters, replay and Chinese / English labels.
+If the initial local statistics read fails, the dashboard makes up to five attempts; this never
+redispatches a worker. Closing stops retries and polling, and late reads cannot replace the closed notice.
 
 The command stays in the foreground and installs no service. “Close dashboard” or Ctrl+C
 releases the process. After the last page stops sending heartbeats, it exits in about two
@@ -158,6 +160,9 @@ palette, language and layout stay independent choices. Download filenames combin
 and date (`worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`), so the four palettes × two languages × two
 layouts × SVG/PNG = 32 combinations stay distinguishable. They cover all ACP aggregates in the selected period,
 regardless of list filters. Preview and download use the same frozen report.
+The task count and woven companion seal form the primary composition; turns, usage and outcomes
+follow in separate visual tiers, with the repository address right-aligned. Outcome segments use
+exact task proportions without minimum widths; the numeric legend keeps rare outcomes readable.
 
 A separate allowlist accepts only numeric aggregates, period bounds, IANA timezone, coverage and fixed
 repository address. Work orders, outputs, route names, paths, parent/session IDs and

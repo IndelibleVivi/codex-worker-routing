@@ -30,6 +30,7 @@ Chinese / English and landscape / portrait stay independent. Exports keep to an
 aggregate-only allowlist and are named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`: no work orders, private
 route names, paths or internal IDs. The Canon identity is the folded-ear cat together with the default sage
 palette: the original cat remains the default companion and plugin icon. Page, favicon and share headers use a fixed line product mark. Both SVGs are downloadable, and image captions copy the same safe aggregate.
+Share cards pair the primary task count with a woven companion seal, followed by turns, observed usage and runtime outcomes. The repository address stays right-aligned.
 
 Statistics read execution receipts automatically. Ordinary completion needs no review stamp and creates
 no to-do. `continue --revision-reason` optionally records a real correction; on-demand `pending`
