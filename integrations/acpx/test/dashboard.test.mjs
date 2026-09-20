@@ -91,7 +91,7 @@ test('dashboard binds only loopback; data needs a bearer token and exact origin'
 });
 test('static assets are local, read-only and CSP-protected; theme and mascot modules are served the same way',async t=>{
   const d=await start(t);
-  for(const asset of ['/','/app.mjs','/style.css','/share.mjs','/brand.mjs','/logo.svg','/mark.mjs','/mark.svg','/time.mjs']){
+  for(const asset of ['/','/app.mjs','/style.css','/share.mjs','/share-style.mjs','/ornaments.mjs','/brand.mjs','/logo.svg','/mark.mjs','/mark.svg','/time.mjs']){
     const r=await fetch(d.origin+asset);assert.equal(r.status,200);
     assert.match(r.headers.get('content-security-policy'),/frame-ancestors 'none'/);
     assert.equal(r.headers.get('referrer-policy'),'no-referrer');
@@ -268,4 +268,33 @@ test('all private and share HTTP reads forward the same explicit timezone; inval
     const response=await fetch(d.origin+route+'?timeZone=Asia%2FShanghai',{headers:d.headers});assert.equal(response.status,200);assert.equal((await response.json()).time_zone,'Asia/Shanghai');assert.equal(calls.at(-1).timeZone,'Asia/Shanghai');
   }
   assert.equal((await fetch(d.origin+'/api/snapshot?timeZone=Bad%2FZone',{headers:d.headers})).status,400);
+});
+
+test('share author text is explicit, XML-escaped and independent of receipt data',()=>{
+  const data=projectShare(snapshot()),slogan='<script>hello & goodbye</script>',sharedBy='A & B <crew>';
+  for(const format of ['poster','banner']){
+    const svg=renderShareSVG({...data,slogan:'PRIVATE_SLOGAN',sharedBy:'PRIVATE_CREDIT'},format,'en','sage',{slogan,sharedBy});
+    assert.match(svg,/id="share-slogan"/);assert.match(svg,/id="share-credit"/);
+    assert.match(svg,/&lt;script&gt;/);assert.match(svg,/A &amp; B &lt;crew&gt;/);
+    assert.doesNotMatch(svg,/<script>|PRIVATE_SLOGAN|PRIVATE_CREDIT/);
+    assert.equal(renderShareSVG({...data,slogan:'PRIVATE_SLOGAN',sharedBy:'PRIVATE_CREDIT'},format),renderShareSVG(data,format));
+  }
+  const caption=renderShareCaption(data,'en',{slogan:'My little record',sharedBy:'A & B'});
+  assert.ok(caption.startsWith('My little record\n\nShared by A & B\n\n'));
+  assert.match(caption,/4 delegated tasks/);assert.match(caption,/not acceptance or Codex quota savings/);
+  assert.equal(projectShare({...snapshot(),slogan,sharedBy}).slogan,undefined);
+});
+
+test('share personalization changes lettering and ornament without changing statistics or Canon',()=>{
+  const data=projectShare(snapshot()),base=renderShareSVG(data);
+  const track=svg=>svg.match(/<g id="share-outcome-track">.*?<\/g>/s)[0];
+  for(const numberStyle of ['soft','book','mono'])for(const ornament of ['thread','bloom','none']){
+    const svg=renderShareSVG(data,'banner','zh','sage',{slogan:'小小协作，慢慢成事。',numberStyle,ornament});
+    assert.equal(track(svg),track(base));assert.ok(svg.includes(mascotMark('cat')));
+    assert.equal(svg.includes('id="share-ornament"'),ornament!=='none');
+    assert.match(svg,/125\.0K/);
+  }
+  const empty=renderShareSVG(data,'poster','en','sage',{slogan:'',sharedBy:'',ornament:'none'});
+  assert.doesNotMatch(empty,/id="share-slogan"|id="share-credit"|id="share-ornament"/);
+  assert.equal(track(empty),track(renderShareSVG(data,'poster')));
 });

@@ -27,10 +27,11 @@ The palette recolours the dashboard and its charts, while the companion appears 
 share seal. Theme, language and timezone persist locally outside Git across restarts and port changes; the export dialog
 opens with the dashboard's theme each time and lets you pick a different one for the artifact alone.
 Chinese / English and landscape / portrait stay independent. Exports keep to an
-aggregate-only allowlist and are named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`: no work orders, private
-route names, paths or internal IDs. The Canon identity is the folded-ear cat together with the default sage
-palette: the original cat remains the default companion and plugin icon. Page, favicon and share headers use a fixed line product mark. Both SVGs are downloadable, and image captions copy the same safe aggregate.
+aggregate allowlist plus your explicitly entered slogan and credit, and are named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`: work orders, private
+route names, paths and internal IDs are never filled in automatically. The Canon identity is the folded-ear cat together with the default sage
+palette: the original cat remains the default companion and plugin icon. Page, favicon and share headers use a fixed line product mark. Both SVGs are downloadable, and image captions carry the same safe aggregate and authored words.
 Share cards pair the primary task count with a woven companion seal, followed by turns, observed usage and runtime outcomes. The repository address stays right-aligned.
+Edit the slogan from four bilingual presets, add optional shared-by credit, choose Soft / Book / Mono numerals and Thread / Bloom / None flourishes. The preview updates live; Chinese and English drafts stay separate in the current page until refresh. The dashboard uses the same hand-drawn SVG ornaments.
 
 Statistics read execution receipts automatically. Ordinary completion needs no review stamp and creates
 no to-do. `continue --revision-reason` optionally records a real correction; on-demand `pending`

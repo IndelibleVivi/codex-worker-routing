@@ -164,14 +164,23 @@ The task count and woven companion seal form the primary composition; turns, usa
 follow in separate visual tiers, with the repository address right-aligned. Outcome segments use
 exact task proportions without minimum widths; the numeric legend keeps rare outcomes readable.
 
-A separate allowlist accepts only numeric aggregates, period bounds, IANA timezone, coverage and fixed
-repository address. Work orders, outputs, route names, paths, parent/session IDs and
+Personalize the card in the export dialog:
+
+- Start from four bilingual slogans and edit freely. A preset replaces only the selected card language's draft. Up to 80 Unicode characters auto-wrap and shrink to fit; clearing the field hides it.
+- Optional shared-by credit accepts up to 32 Unicode characters on one line. Empty credit stays hidden; no account identity is read.
+- Choose Soft / Book / Mono numerals, with a smaller default primary count, and hand-drawn Thread / Bloom / None flourishes.
+- Both language drafts, credit and styles survive closing and reopening the dialog on this page, and reset on refresh. They are never written to preferences or sent to an API. Each reopening still starts with dashboard language/theme and portrait format.
+- Reset words & style restores both default slogans, empty credit, Soft numerals and Thread ornament. Theme, language, format and aggregate data stay as selected. Narrow layouts keep the preview and close control visible while editing.
+
+The statistical allowlist accepts only numeric aggregates, period bounds, IANA timezone and coverage. The
+renderer supplies the fixed repository address. Explicit author text uses a separate presentation allowlist
+and is escaped as plain text in the image. Work orders, outputs, route names, paths, parent/session IDs and
 diagnostics never enter the export payload. The graphic leads with delegated task count, runtime outcomes and usage coverage, without individual work-order trails. Nothing uploads automatically.
 
 Stitched seals, subtle cardstock edges and a folded-ear cat connect the dashboard with its share cards
 in all four palettes.
 
-“Copy image caption” uses the same frozen aggregate, period and timezone as the image. It never reads
+“Copy image caption” includes the current slogan and optional credit, plus the same frozen aggregate, period and timezone as the image. It never reads
 project names, task titles or private detail. The export dialog offers separate product-mark and
 Canon-cat SVG downloads; theme companions appear in the seal.
 

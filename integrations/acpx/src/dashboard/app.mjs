@@ -4,6 +4,8 @@ import {mascotMark} from '/mascots.mjs';
 import {THEMES,getTheme} from '/themes.mjs';
 import {dayKey,resolveTimeZone} from '/time.mjs';
 import {renderShareSVG,renderShareCaption} from '/share.mjs';
+import {SHARE_SLOGANS,SHARE_NUMBER_STYLES,SHARE_ORNAMENTS,SHARE_TEXT_LIMITS,normalizeShareStyle} from '/share-style.mjs';
+import {renderOrnamentSVG} from '/ornaments.mjs';
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fragment=new URLSearchParams(location.hash.slice(1));
@@ -17,6 +19,9 @@ let view='overview',period=fragment.get('since')??'all',measure='turns',filter={
 let shareState,previewUrl,toastTimer,stopped=false,requestSequence=0,returnY=0,detailId=null,saveQueue=Promise.resolve();
 let refreshTimer,heartbeatTimer;
 const dialogTriggers=new Map();
+const freshShareDraft=()=>({slogans:{zh:SHARE_SLOGANS[0].zh,en:SHARE_SLOGANS[0].en},sharedBy:'',numberStyle:'soft',ornament:'thread'});
+let shareDraft=freshShareDraft();
+const shareStyle=()=>({slogan:shareDraft.slogans[shareState.lang],sharedBy:shareDraft.sharedBy,numberStyle:shareDraft.numberStyle,ornament:shareDraft.ornament});
 const T=(a,b)=>lang==='zh'?a:b;
 const compact=v=>v===null||v===undefined?'—':v>=1e6?`${(v/1e6).toFixed(2)}M`:v>=1e3?`${(v/1e3).toFixed(1)}K`:v.toLocaleString(lang==='zh'?'zh-CN':'en');
 const num=v=>Number(v??0).toLocaleString(lang==='zh'?'zh-CN':'en');
@@ -39,6 +44,7 @@ function buttons(items,attr,selected){return items.map(([id,label])=>`<button ${
 function savePreferences(){const data={theme:theme.id,language:lang,timeZone:zonePreference};saveQueue=saveQueue.then(()=>api('/api/preferences',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})).catch(()=>notify(T('本次显示已更新，但偏好未保存。','Display updated; preferences could not be saved.')));}
 function applyTheme(){const c=theme.colors;const vars={paper:c.paper,surface:c.surface,mat:c.mat,ink:c.ink,soft:c.primarySoft,line:c.line,seam:c.primaryLine,accent:c.primary,blush:c.secondarySoft,chart:c.chartInk,text:c.textSecondary,compare:'#647884',focus:c.focusRing};for(const [k,v]of Object.entries(vars))document.documentElement.style.setProperty('--'+k,v);document.documentElement.dataset.theme=theme.id;}
 function renderStatic(){
+ $('#intro-ornament').innerHTML=renderOrnamentSVG('thread',theme.id);$('#browse-ornament').innerHTML=renderOrnamentSVG('bloom',theme.id);
  document.documentElement.lang=lang==='zh'?'zh-CN':'en';
  const content={
  '#skip':T('跳到内容','Skip to content'),'#brand-edition':T('DISPATCH / 协作手记','DISPATCH / FIELD NOTES'),'#nav-overview':T('协作总览','Overview'),'#nav-records':'Sessions','#language':lang==='zh'?'EN':'中',
@@ -46,10 +52,10 @@ function renderStatic(){
  '#hero-title':T('这个窗口里的协作','COLLABORATION IN THIS WINDOW'),'#task-unit':T('份委派任务','delegated tasks'),'#task-note':T('同一任务续做，只计一份。','Continued work stays one task.'),'#turn-label':T('轮执行','worker turns'),'#turn-note':T('来自运行记录，无需另写回执。','Captured from execution. No extra receipt.'),'#seal-caption':T('今天也有好帮手','A little company.'),
  '#outcome-heading':T('Sessions · 运行状态','Sessions · Runtime state'),'#outcome-note':T('照常结束，不另走盖章流程。','Ordinary completion needs no extra annotation.'),'#activity-title':T('协作节奏','Activity over time'),'#chart-hint':T('点柱形，查看对应记录 ↗','Select a bar to see its records ↗'),'#chart-note':T('按所选时区的自然日分组；较长窗口合并相邻日期。','Calendar days in the selected zone; long windows combine adjacent dates.'),
  '#routes-title':T('这次由谁接住','Who carried the work'),'#routes-note':T('按执行轮次分配；不是模型能力或速度排名。','Share of execution turns, not a model capability or speed ranking.'),'#review-title':T('协作中的调整','Changes along the way'),'#review-description':T('只看明确的返修与接管记录。普通续做不算返修，也不要求事后补记。','Explicit revision and takeover records only. Continuation is not rework; no retrospective paperwork.'),
- '#browse-description':T('数字背后，每份任务都有自己的回执。','Behind the numbers, each task has its own receipt trail.'),'#footer-scope':T('仅 ACP 回执 · 不估算节省的 Codex 额度。','ACP receipts only · No estimate of Codex quota savings.'),'#footer-note':T('本机查看，分享只带走汇总。','Inspect locally. Share aggregates only.'),
+ '#browse-description':T('数字背后，每份任务都有自己的回执。','Behind the numbers, each task has its own receipt trail.'),'#footer-scope':T('仅 ACP 回执 · 不估算节省的 Codex 额度。','ACP receipts only · No estimate of Codex quota savings.'),'#footer-note':T('本机看经过，小卡带走汇总与文案。','Inspect locally. Share aggregates and your words.'),
  '#records-heading':T('协作记录','Collaboration records'),'#workspace-title':T('按项目找到协作','Find work by project'),'#workspace-note':T('按本机 Git 仓库或工作文件夹归组；不是 Codex 保存的项目名称。','Grouped by local Git repository or working folder, not saved Codex project names.'),'#folder-label':T('工作目录','Folder'),
  '#theme-title':T('纸张与伙伴','Paper & companions'),'#theme-note':T('鼠尾草猫是默认伙伴。四只布艺原稿不变，页首线条标识保持固定。','Sage cat is the default companion. Original artwork and the fixed line mark keep their identities.'),'#data-title':T('这些数字，怎样读？','How to read these numbers'),
- '#share-title':T('把协作留成一张小卡。','A little record to keep.'),'#format-legend':T('版式','Format'),'#lang-legend':T('分享语言','Card language'),'#share-theme-legend':T('这张卡的纸张与伙伴','This card’s paper & companion'),'#caption-summary':T('查看文字说明 / 手动复制','View caption / copy manually'),
+ '#share-title':T('把协作，写成你的样子。','Make this little record yours.'),'#format-legend':T('版式','Format'),'#lang-legend':T('分享语言','Card language'),'#share-theme-legend':T('这张卡的纸张与伙伴','This card’s paper & companion'),'#caption-summary':T('查看文字说明 / 手动复制','View caption / copy manually'),
  '#recent-title':T('最近的协作','Recent sessions'),'#recent-note':T('按发生时间展开，自然收尾。','A recent trail, not a to-do list.'),'#transport-title':T('沿途的情况','Along the way'),'#transport-note':T('只看已捕获的运行证据。没有记录，不等于没有发生。','Visible runtime evidence only. No observation is not proof of absence.'),'#runtime-caption':T('本机只读 · 不改派工策略','Local inspection · No routing changes'),
  '#refresh':T('刷新','Refresh'),'#stop':T('关闭面板','Close dashboard'),'#mark-download':T('线条 logo SVG ↓','Product mark SVG ↓'),'#cat-download':T('Canon 猫 SVG ↓','Canon cat SVG ↓')};
  for(const [selector,value]of Object.entries(content))$(selector).textContent=value;
@@ -129,17 +135,39 @@ async function openDetail(id){detailId=id;$('#detail-content').innerHTML=`<h2 id
  $('#detail-content').innerHTML=`<h2 id="detail-title" class="detail-title">${esc(title(s))}</h2><p class="detail-meta">${esc(s.route)} · ${esc(s.id)}<br>${T('创建于','Created')} ${dateTime(s.created_at)} · ${esc(zone)}</p><div class="detail-stats"><div><strong>${num(s.turns)}</strong><span>${T('总执行轮次','total turns')}</span></div><div><strong>${num(s.revisions)}</strong><span>${T('明确返修记录','explicit revisions')}</span></div><div><strong>${kindLabel(status(s))}</strong><span>${T('已观察的运行状态','observed runtime state')}</span></div></div>${s.active_turn?`<p class="detail-explainer">${T(`已观察到 ${dateTime(s.active_turn.started_at)} 开始的新一轮，尚无对应终态回执；不能仅凭此确认进程仍在运行。`,`A later turn started at ${dateTime(s.active_turn.started_at)} without a terminal receipt. This alone does not establish a live process.`)}</p>`:''}<p class="detail-explainer">${T('完整协作经过；高亮的是从图表选中的日期。工单与输出只在本机查看，不进入分享。','Full collaboration trail; highlighted events match the selected chart dates. Work orders and outputs stay local and never enter sharing.')}</p><details class="workspace-detail"><summary>${T('项目、工作目录与来源','Project, working folder and provenance')}</summary><dl><dt>${T('归组','Group')}</dt><dd>${esc(w?.name??T('未记录','Unrecorded'))} · ${esc(w?.kind??'unknown')}</dd><dt>${T('仓库或目录根','Repository / folder root')}</dt><dd>${esc(w?.root??'—')}</dd><dt>${T('实际工作目录','Working directory')}</dt><dd>${esc(w?.cwd??'—')}</dd><dt>${T('关联主会话','Linked parent')}</dt><dd>${esc(s.parent?.thread_id??s.parent?.session_id??T('历史记录未保存','Not recorded'))}</dd></dl></details><ol class="timeline">${s.timeline.map(e=>`<li class="${inSelectedDay(e.at)?'selected-day':''}"><strong>${esc(eventLabel(e.kind))}</strong><time>${dateTime(e.at)}</time>${e.reason?`<p>${esc(reasons[e.reason]?T(...reasons[e.reason]):e.reason)}</p>`:''}${e.summary?`<p>${esc(e.summary)}</p>`:''}${evidenceMarkup(e.evidence)}</li>`).join('')}</ol>${observations.length?`<h3>${T('自动捕获的运行记录','Automatically captured runtime notes')}</h3><ol class="timeline">${observations.map(e=>`<li class="${inSelectedDay(e.at)?'selected-day':''}"><strong>${esc(e.code??e.kind)}</strong><time>${dateTime(e.at)} · ${esc(e.source)}</time><p>${T('这是 runtime 错误码，不是确认的 HTTP 状态。','A runtime code, not a confirmed HTTP status.')}</p></li>`).join('')}</ol>`:''}${d.turns.map((r,i)=>`<details class="receipt-detail"><summary>${T(`第 ${i+1} 轮`,`Turn ${i+1}`)} · ${esc(eventLabel(r.runtime_status))} · ${dateTime(r.finished_at??r.started_at)}<br><span class="quiet-note">${T('清理','Cleanup')}: ${esc(r.cleanup)}${r.error_code?' · '+esc(r.error_code):''}</span></summary><h3>${T('原始工单','Work order')}</h3><pre>${esc(r.work_order??T('旧记录未保存独立工单。','No separately retained historical work order.'))}</pre><h3>${T('Worker 输出节选','Worker output excerpt')}</h3><pre>${esc(r.output_excerpt??T('没有保留输出。','No retained output.'))}</pre></details>`).join('')}<details class="machine-evidence"><summary>${T('给人和机看的同一份结构化经过','The same structured trail for people and agents')}</summary><textarea readonly aria-label="Structured local evidence">${esc(JSON.stringify(source,null,2))}</textarea></details>`;
  }catch(e){$('#detail-content').innerHTML=`<h2 id="detail-title">${T('未能读取这份记录','Record unavailable')}</h2><p class="dialog-note">${esc(e.message)}</p>`;}}
 async function openShare(){if(!snapshot)return;$('#share-open').disabled=true;try{const data=await api('/api/share?'+query());shareState={data,theme:theme.id,lang,format:'poster'};renderShare();showDialog('#share-dialog','#share-open');}catch(e){notice(e.message);}finally{$('#share-open').disabled=false;}}
+function renderSharePreview(){
+ if(!shareState)return;
+ const state=shareState,style=shareStyle();
+ if(previewUrl)URL.revokeObjectURL(previewUrl);
+ previewUrl=URL.createObjectURL(new Blob([renderShareSVG(state.data,state.format,state.lang,state.theme,style)],{type:'image/svg+xml'}));
+ $('#share-preview img').src=previewUrl;
+ $('#caption-text').value=renderShareCaption(state.data,state.lang,style);
+ $('#share-slogan-count').textContent=`${Array.from(shareDraft.slogans[state.lang]).length} / ${SHARE_TEXT_LIMITS.slogan}`;
+}
 function renderShare(){if(!shareState)return;const focus=focusKey(document.activeElement),state=shareState;
- if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(new Blob([renderShareSVG(state.data,state.format,state.lang,state.theme)],{type:'image/svg+xml'}));$('#share-preview').innerHTML=`<img src="${previewUrl}" alt="${T('分享卡预览','Share card preview')}">`;
- $('#share-scope').textContent=T(`已冻结整个时间窗口的 ACP 汇总与 ${state.data.time_zone} 时区。列表筛选不改变分享数字。`,`Frozen ACP totals for the entire window in ${state.data.time_zone}. List filters do not alter the card.`);
+ if(!$('#share-preview img'))$('#share-preview').innerHTML=`<img alt="${T('分享卡预览','Share card preview')}">`;
+ $('#share-scope').textContent=T(`已冻结整个时间窗口的 ACP 汇总 · ${state.data.time_zone}`,`Frozen ACP totals for the entire window · ${state.data.time_zone}`);
+ $('#share-draft-note').textContent=T('实时预览 · 文案留在本页，刷新后重置。','Live preview · Your draft stays on this page until refresh.');
  $('#share-formats').innerHTML=buttons([['poster',T('竖版','Portrait')],['banner',T('横版','Landscape')]],'data-format',state.format);
  $('#share-languages').innerHTML=buttons([['zh','中文'],['en','English']],'data-share-lang',state.lang);
+ $('#share-writing-legend').textContent=T('写一点自己的话','In your own words');
+ $('#share-preset-label').textContent=T('从一句灵感开始','Start with a little inspiration');
+ const current=shareDraft.slogans[state.lang],preset=SHARE_SLOGANS.find(p=>p[state.lang]===current);
+ $('#share-preset').innerHTML=`<option value="custom">${T('自己的文案','Your own words')}</option>`+SHARE_SLOGANS.map(p=>`<option value="${p.id}">${esc(p[state.lang].replaceAll('\n',' '))}</option>`).join('');$('#share-preset').value=preset?.id??'custom';
+ $('#share-slogan-label').textContent=T(state.lang==='zh'?'中文 Slogan':'English Slogan',state.lang==='zh'?'Chinese slogan':'English slogan');
+ $('#share-slogan').value=current;$('#share-slogan').lang=state.lang==='zh'?'zh-CN':'en';
+ $('#share-slogan-hint').textContent=T('中英文分别编辑 · 自动换行缩放 · 清空可留白','Separate Chinese & English drafts · Auto-fit · Clear to leave blank');
+ $('#share-by-label').textContent=T('分享者署名（可选）','Shared by (optional)');$('#share-by').placeholder=T('你的名字或昵称','Your name or handle');$('#share-by').value=shareDraft.sharedBy;
  $('#share-themes').innerHTML=THEMES.map(p=>`<button data-share-theme="${p.id}" class="${state.theme===p.id?'active':''}" aria-pressed="${state.theme===p.id}" aria-label="${esc(p.name[lang])}">${svg(p.mascot)}<span>${esc(p.name[lang])}</span></button>`).join('');
- $('#copy-caption').textContent=T('复制图片说明','Copy image caption');$('#caption-text').value=renderShareCaption(state.data,state.lang);$('#export-note').textContent=T('本机下载，不含任务、项目、route 名称、路径或内部 ID。','Local download. No task or project names, routes, paths or internal IDs.');if(focus)$(focus)?.focus({preventScroll:true});
+ $('#share-number-legend').textContent=T('数字的笔触','Numeral style');$('#share-number-styles').innerHTML=SHARE_NUMBER_STYLES.map(p=>`<button data-number-style="${p.id}" class="${shareDraft.numberStyle===p.id?'active':''}" aria-pressed="${shareDraft.numberStyle===p.id}"><span class="number-sample ${p.id}">123</span><small>${esc(p.name[lang])}</small></button>`).join('');
+ $('#share-ornament-legend').textContent=T('纸上的线条','A little flourish');$('#share-ornaments').innerHTML=SHARE_ORNAMENTS.map(p=>`<button data-ornament="${p.id}" class="${shareDraft.ornament===p.id?'active':''}" aria-pressed="${shareDraft.ornament===p.id}">${p.id==='none'?'<span class="no-ornament" aria-hidden="true">—</span>':renderOrnamentSVG(p.id,state.theme)}<small>${esc(p.name[lang])}</small></button>`).join('');
+ $('#share-reset').textContent=T('恢复文案与样式','Reset words & style');
+ $('#copy-caption').textContent=T('复制图片说明','Copy image caption');$('#export-note').textContent=T('导出汇总与你填写的文案、署名。不自动带入任务、项目、路径或账号信息。','Exports aggregates plus your words and credit. Task, project, path and account details are never filled in automatically.');
+ renderSharePreview();if(focus)$(focus)?.focus({preventScroll:true});
 }
 function download(blob,ext){const a=document.createElement('a'),url=URL.createObjectURL(blob),s=shareState;a.href=url;a.download=`worker-routing-${s.theme}-${s.lang}-${s.format}-${dayKey(s.data.period.until,s.data.time_zone)}.${ext}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
-async function savePNG(){const controls=[...$('#share-dialog').querySelectorAll('button')];controls.forEach(b=>b.disabled=true);try{const image=$('#share-preview img');await image.decode();const canvas=document.createElement('canvas');canvas.width=shareState.format==='poster'?1080:1600;canvas.height=shareState.format==='poster'?1350:900;canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNG');download(blob,'png');notify(T('PNG 好了，可以叼走。','PNG is ready to take home.'));}catch{notify(T('PNG 未能生成，仍可下载 SVG。','PNG did not complete; SVG is still available.'));}finally{controls.forEach(b=>b.disabled=false);}}
-async function copyCaption(){const text=renderShareCaption(shareState.data,shareState.lang);try{await navigator.clipboard.writeText(text);notify(T('图片说明已复制。','Caption copied.'));}catch{$('.caption-fallback').open=true;$('#caption-text').focus();$('#caption-text').select();notify(T('请从已选中的文字手动复制。','Copy the selected caption manually.'));}}
+async function savePNG(){const controls=[...$('#share-dialog').querySelectorAll('button,input,textarea,select')];controls.forEach(b=>b.disabled=true);try{const image=$('#share-preview img');await image.decode();const canvas=document.createElement('canvas');canvas.width=shareState.format==='poster'?1080:1600;canvas.height=shareState.format==='poster'?1350:900;canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNG');download(blob,'png');notify(T('PNG 好了，可以叼走。','PNG is ready to take home.'));}catch{notify(T('PNG 未能生成，仍可下载 SVG。','PNG did not complete; SVG is still available.'));}finally{controls.forEach(b=>b.disabled=false);}}
+async function copyCaption(){const text=renderShareCaption(shareState.data,shareState.lang,shareStyle());try{await navigator.clipboard.writeText(text);notify(T('图片说明已复制。','Caption copied.'));}catch{$('.caption-fallback').open=true;$('#caption-text').focus();$('#caption-text').select();notify(T('请从已选中的文字手动复制。','Copy the selected caption manually.'));}}
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
  if(b.dataset.close){$('#'+b.dataset.close).close();return;}
  if(b.dataset.view){switchView(b.dataset.view);return;}
@@ -157,6 +185,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)r
  if(b.dataset.theme){theme=getTheme(b.dataset.theme);savePreferences();render();$('#theme-dialog').close();return;}
  if(b.dataset.format){shareState.format=b.dataset.format;renderShare();return;}
  if(b.dataset.shareLang){shareState.lang=b.dataset.shareLang;renderShare();return;}
+ if(b.dataset.numberStyle){shareDraft.numberStyle=b.dataset.numberStyle;renderShare();return;}
+ if(b.dataset.ornament){shareDraft.ornament=b.dataset.ornament;renderShare();return;}
  if(b.dataset.shareTheme){shareState.theme=b.dataset.shareTheme;renderShare();return;}
 });
 $('#canon').innerHTML=productMark();$('#home-link').addEventListener('click',e=>{e.preventDefault();switchView('overview');scrollTo(0,0);});
@@ -164,7 +194,20 @@ $('#timezone').addEventListener('change',()=>{zonePreference=$('#timezone').valu
 $('#language').addEventListener('click',()=>{lang=lang==='zh'?'en':'zh';savePreferences();render();});$('#theme-open').addEventListener('click',()=>showDialog('#theme-dialog'));
 for(const sel of ['#data-open','#local-info','#coverage-pill'])$(sel).addEventListener('click',()=>{renderData();showDialog('#data-dialog');});
 $('#browse-records').addEventListener('click',()=>drill({}));$('#back-overview').addEventListener('click',()=>switchView('overview'));$('#workspace-search').addEventListener('input',()=>{workspaceSearch=$('#workspace-search').value;renderWorkspaces();});$('#record-search').addEventListener('input',()=>{filter.search=$('#record-search').value;limit=12;renderRecords();});$('#folder-select').addEventListener('change',()=>{filter.folder=$('#folder-select').value;limit=12;renderRecords();$('#folder-select').focus();});$('#more-records').addEventListener('click',()=>{limit+=12;renderRecords();});
-$('#share-open').addEventListener('click',openShare);$('#save-svg').addEventListener('click',()=>download(new Blob([renderShareSVG(shareState.data,shareState.format,shareState.lang,shareState.theme)],{type:'image/svg+xml'}),'svg'));$('#save-png').addEventListener('click',savePNG);$('#copy-caption').addEventListener('click',copyCaption);
+$('#share-preset').addEventListener('change',()=>{const preset=SHARE_SLOGANS.find(p=>p.id===$('#share-preset').value);if(preset){shareDraft.slogans[shareState.lang]=preset[shareState.lang];renderShare();}});
+function updateShareText(e){
+ if(e.isComposing)return;
+ const field=e.target,key=field.id==='share-slogan'?'slogan':'sharedBy',limit=SHARE_TEXT_LIMITS[key];
+ const value=Array.from(field.value).slice(0,limit).join('');
+ if(value!==field.value)field.value=value;
+ if(key==='slogan')shareDraft.slogans[shareState.lang]=value;else shareDraft.sharedBy=value;
+ const preset=SHARE_SLOGANS.find(p=>p[shareState.lang]===shareDraft.slogans[shareState.lang]);$('#share-preset').value=preset?.id??'custom';
+ renderSharePreview();
+}
+for(const id of ['#share-slogan','#share-by']){const input=$(id);input.addEventListener('input',updateShareText);input.addEventListener('compositionend',updateShareText);}
+$('#share-by').addEventListener('change',()=>{shareDraft.sharedBy=normalizeShareStyle({sharedBy:shareDraft.sharedBy}).sharedBy;$('#share-by').value=shareDraft.sharedBy;renderSharePreview();});
+$('#share-reset').addEventListener('click',()=>{shareDraft=freshShareDraft();renderShare();notify(T('文案与样式已恢复。','Words and style reset.'));});
+$('#share-open').addEventListener('click',openShare);$('#save-svg').addEventListener('click',()=>download(new Blob([renderShareSVG(shareState.data,shareState.format,shareState.lang,shareState.theme,shareStyle())],{type:'image/svg+xml'}),'svg'));$('#save-png').addEventListener('click',savePNG);$('#copy-caption').addEventListener('click',copyCaption);
 for(const d of document.querySelectorAll('dialog'))d.addEventListener('close',()=>{$('#toast').hidden=true;const key=dialogTriggers.get('#'+d.id);if(key)$(key)?.focus({preventScroll:true});});
 $('#refresh').addEventListener('click',()=>void refresh());$('#stop').addEventListener('click',async()=>{try{await api('/api/close',{method:'POST'});stopped=true;clearInterval(refreshTimer);clearInterval(heartbeatTimer);notice(T('面板已关闭。回执仍保留在本机。','Dashboard closed. Receipts remain on this machine.'));$('#stop').disabled=true;$('#refresh').disabled=true;$('#share-open').disabled=true;}catch(e){if(stopped)return;notice(e.message);}});
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(snapshot)renderOverview();},150);});

@@ -61,6 +61,7 @@ export async function startDashboard({stateDir, since='all', port=0, reader, idl
         return send(404,{error:'Unknown dashboard endpoint.'});
       }
       if(req.method !== 'GET') return send(405,{error:'Method not allowed.'});
+      if(['/share-style.mjs','/ornaments.mjs'].includes(url.pathname)) return send(200,await fs.readFile(new URL('.'+url.pathname,import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/share.mjs') return send(200,await fs.readFile(new URL('./share.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/themes.mjs') return send(200,await fs.readFile(new URL('./themes.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');
       if(url.pathname === '/mascots.mjs') return send(200,await fs.readFile(new URL('./mascots.mjs',import.meta.url),'utf8'),'text/javascript; charset=utf-8');

@@ -198,7 +198,14 @@ registry in `themes.mjs` (`getTheme(id)`, four ids, unknown ids falling back to 
 of export data. Each theme selects a companion from `mascots.mjs`; the header uses the fixed line mark from `mark.mjs`; the default seal retains the Canon cat from `brand.mjs`. Neither artwork nor colour values are accepted from data. Its SVG/PNG renderer uses a fixed repository address, task totals, runtime outcomes and usage coverage, with language and theme as independent
 parameters and a `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext` filename. Chinese and
 English exports are independently selectable. Preview and download use the same frozen
-snapshot and timezone, independent of list filters. Image captions use that same allowlist. Export is a local download; nothing is uploaded.
+snapshot and timezone, independent of list filters. The statistical portion of image captions uses that same allowlist. Export is a local download; nothing is uploaded.
+
+Share personalization is separate from this statistical payload. `share-style.mjs`
+normalizes only explicit author text and named presentation choices: slogan (80 Unicode
+code points), optional single-line sharedBy (32), numberStyle and ornament. Drafts live
+in browser memory until refresh, never in receipts, dashboard preferences or an API
+request. The renderer XML-escapes text; captions include the same authored words.
+No task, project, route, path or account identity is used to populate these fields.
 
 ## Workspace and runtime evidence
 
