@@ -2,10 +2,15 @@
 
 [中文](README.md) | English
 
-Hand one complete engineering responsibility to a native Codex worker while the main
-agent keeps ownership of the goal, integration, and delivery. It suits users who have
-already connected more than one model and want to distribute execution work while
-keeping their main-session personal context intact.
+**Multi-model delegation for Codex, with a local Dispatch dashboard.**
+Hand one complete engineering responsibility to a native Codex worker or, through the
+optional ACP integration, a registered external coding agent. The main agent keeps
+ownership of the goal, integration, and delivery. It suits users who have already
+connected more than one model and want to distribute execution work while keeping
+their main-session personal context intact.
+
+[Your first delegated task](docs/first-delegated-task.en.md) · [Install the plugin](#installation) ·
+[Local Dispatch guide](docs/dispatch.en.md) · [Configure custom models](docs/native-model-picker.en.md)
 
 This is an early-stage implementation. Routing is provided by an instruction-only
 plugin; the optional ACP integration connects a registered external coding agent through
