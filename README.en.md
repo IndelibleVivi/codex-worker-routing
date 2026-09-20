@@ -287,6 +287,15 @@ product or a fork maintained by OpenAI.
 **Privacy.** Personal instructions, account configuration, requests, and continuity are
 not part of this repository. See [provenance](PROVENANCE.md).
 
+## Related projects
+
+For MCP engineering and everyday repository work.
+
+- [MCP Boundary](https://indeliblevivi.github.io/mcp-boundary/):
+  An MCP engineering skill with a Guide and Lab for designing, reviewing and verifying MCP servers and the apps that use them.
+- [Servotab](https://servotab.com/):
+  Engineering methods for repository planning, implementation, debugging, review and verification.
+
 ## Licensing
 
 Software and functional material are licensed under [`SUL-1.0`](LICENSE), which permits
