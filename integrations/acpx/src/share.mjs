@@ -97,9 +97,9 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage') {
   return `<g id="share-outcome-track"><rect x="${x}" y="${y}" width="${width}" height="6" fill="${c.track}"/>${segments}</g>`;
  };
  const outcomes=(x,y,step)=>outcome.map(([n,key,label],i)=>`<g data-outcome-label="${key}">${text(x+i*step,y,n,32,c.ink,500)}${text(x+i*step,y+34,label,20,c.textSecondary)}</g>`).join('');
- const coverage=T(`${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务，用量可归属`,`${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks with attributable usage`);
- const footer=(y)=>text(80,y,T('仅 ACP · 未知用量不计零。','ACP only · Unknown usage is not zero.'),20,c.textSecondary)
-  +text(80,y+29,T('不代表验收结论或 Codex 额度节省。','Not acceptance or Codex quota savings.'),20,c.textSecondary);
+ const coverage=(x,y)=>`<g id="share-usage-coverage">${text(x,y,T(`${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务`,`${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks`),19,c.textSecondary)}${text(x,y+26,T('用量可归属','with attributable usage'),19,c.textSecondary)}</g>`;
+ const footer=(y)=>text(80,y,T('仅 ACP · 未知用量不计零。','ACP only · Unknown usage is not zero.'),18,c.textSecondary)
+  +text(80,y+27,T('不代表验收结论或 Codex 额度节省。','Not acceptance or Codex quota savings.'),18,c.textSecondary);
  const repo=(y)=>mono(w-80,y,'github.com/IndelibleVivi/codex-worker-routing',portrait?20:18,'id="share-repository" text-anchor="end"');
  const mark=`<g transform="translate(77 63) scale(.98)">${productMark().replace(/^<svg[^>]*>/,'').replace('</svg>','')}</g>`;
  let out=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" lang="${zh?'zh-CN':'en'}" aria-labelledby="share-svg-title share-svg-desc"><title id="share-svg-title">${xml(T('Worker Routing · ACP 协作记录','Worker Routing · ACP collaboration'))}</title><desc id="share-svg-desc">${xml(renderShareCaption(d,lang))}</desc>${defs}
@@ -111,19 +111,20 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage') {
  <g font-family="${SANS}">${mark}${text(141,97,'worker routing',30,c.ink,550)}${mono(w-80,96,'DISPATCH / FIELD NOTES',18,'text-anchor="end" letter-spacing="2"')}${rule(140)}
  ${mono(80,191,`${since} — ${until}  /  ${d.time_zone}`,portrait?18:20)}`;
  if(portrait){
-  out+=serif(78,287,T('工作有去有回。','Good work,'),zh?64:62);
+  // Centre the single Chinese line within the English title's two-line space.
+  out+=serif(78,zh?316:287,T('工作有去有回。','Good work,'),zh?64:62);
   if(!zh)out+=serif(78,352,'in good company.',62,'font-style="italic"');
   out+=cloth(80,416,905,307);
   out+=mono(110,465,T('这个窗口里的协作','THIS COLLABORATION WINDOW'),16,'letter-spacing="1.8"');
   out+=primary(102,636,214,525)+text(112,682,T('份委派任务','delegated tasks'),27,c.ink,500);
   out+=companion(836,494,155);
-  out+=text(96,763,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),20,c.textSecondary);
-  out+=text(96,846,compact(d.worker_turns),54,c.ink,500)+text(97,884,T('轮执行','worker turns'),23,c.textSecondary);
-  out+=`<path d="M484 802V887" stroke="${c.secondaryLine}" stroke-dasharray="3 5"/>`;
-  out+=text(544,846,compact(d.external_tokens),54,c.ink,500)+text(545,884,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
-  out+=text(96,934,coverage,20,c.textSecondary,400,'id="share-usage-coverage"');
+  out+=text(952,682,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),18,c.textSecondary,400,'text-anchor="end"');
+  out+=text(80,831,compact(d.worker_turns),54,c.ink,500)+text(80,869,T('轮执行','worker turns'),23,c.textSecondary);
+  out+=`<path d="M520 787V873" stroke="${c.secondaryLine}" stroke-dasharray="3 5"/>`;
+  out+=text(560,831,compact(d.external_tokens),54,c.ink,500)+text(560,869,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
+  out+=coverage(560,910);
   out+=track(80,992,w-160)+outcomes(80,1056,235);
-  out+=rule(1130)+footer(1180)+repo(1270);
+  out+=rule(1130)+footer(1174)+repo(1260);
  }else{
   out+=serif(78,275,T('工作有去有回。','Good work, in good company.'),zh?58:54);
   out+=cloth(80,320,880,292);
@@ -133,10 +134,10 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage') {
   out+=text(1110,373,compact(d.worker_turns),54,c.ink,500)+text(1111,412,T('轮执行','worker turns'),23,c.textSecondary);
   out+=rule(446,1110,1518);
   out+=text(1110,522,compact(d.external_tokens),54,c.ink,500)+text(1111,560,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
-  out+=`<g id="share-usage-coverage">${text(1111,601,T(`${d.usage_sessions} / ${d.usage_total_sessions} 份有回执任务`,`${d.usage_sessions} / ${d.usage_total_sessions} receipted tasks`),19,c.textSecondary)}${text(1111,629,T('用量可归属','with attributable usage'),19,c.textSecondary)}</g>`;
-  out+=text(80,650,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),20,c.textSecondary);
+  out+=coverage(1111,596);
+  out+=text(112,650,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),18,c.textSecondary);
   out+=track(80,679,w-160)+outcomes(80,728,360);
-  out+=footer(803)+repo(832);
+  out+=footer(796)+repo(823);
  }
  return out+'</g></svg>';
 }
