@@ -16,7 +16,8 @@ proxy 或固定 planner/tester/reviewer 流水线。
 
 双语产品页沿用鼠尾草、浅粉卡纸与折耳猫圆章，介绍委派流程和本地 Dispatch；
 可直接切换四位伙伴、选择文案并下载合成示例分享卡。页面不连接私人派工台，
-不读取回执，不使用 analytics。公开站点源码与部署流程已准备，尚未启用托管；
+不读取回执，不使用 analytics。访问[中文产品页](https://indeliblevivi.github.io/codex-worker-routing/zh/)
+或 [English](https://indeliblevivi.github.io/codex-worker-routing/)。
 本地预览与发布方法见[产品页面指南](docs/website.md)。中英 Banner 位于
 [`plugins/worker-routing/assets/`](plugins/worker-routing/assets/)。
 

@@ -20,9 +20,10 @@ server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 The bilingual product page carries the sage, blush paper and folded-ear cat identity
 into the delegation guide and a synthetic Dispatch preview. Try four companions,
 choose a slogan and download a sample share card. The site does not connect to a
-private dashboard, read receipts or use analytics. Source and deployment workflow
-are ready; hosting is not enabled yet. See the [website guide](docs/website.md)
-for local preview and publishing. English and Chinese banners live in
+private dashboard, read receipts or use analytics. Visit the
+[English product page](https://indeliblevivi.github.io/codex-worker-routing/) or
+[中文版](https://indeliblevivi.github.io/codex-worker-routing/zh/). See the
+[website guide](docs/website.md) for local preview and publishing. English and Chinese banners live in
 [`plugins/worker-routing/assets/`](plugins/worker-routing/assets/).
 
 ## Dispatch

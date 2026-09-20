@@ -2,7 +2,12 @@
 
 网站源码位于 [`integrations/site/`](../integrations/site/)，使用 Node.js 22+ 标准库构建。
 无额外依赖或服务端。英文入口 `/codex-worker-routing/`，中文入口
-`/codex-worker-routing/zh/`。当前状态：**source candidate；尚未启用 Pages 托管**。
+`/codex-worker-routing/zh/`。
+
+**已上线**（2026-09-21）：[English](https://indeliblevivi.github.io/codex-worker-routing/) ·
+[中文](https://indeliblevivi.github.io/codex-worker-routing/zh/)。GitHub Actions Pages
+负责托管，HTTPS 已开启；[首次部署](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35536211919)
+来自 `d84458c`，已完成公网中英文入口、资源及浏览器交互验收。
 
 ## 构建与预览
 
@@ -55,15 +60,15 @@ README 分别引用这两张 1600×640 Banner。Hero 为 660×580；社交图为
 ## GitHub Pages 发布
 
 [Pages workflow](../.github/workflows/pages.yml) **仅接受手动触发**，普通 push 不部署。
-仓库管理员明确决定公开上线后：
+仓库已选择 GitHub Actions 为 Pages source。后续获准发布更新时：
 
-1. 在仓库 Settings → Pages 选择 **GitHub Actions** 为 source。
+1. 确认待发布源码已提交到 main，Pages source 仍为 **GitHub Actions**。
 2. 从 main 手动运行 **Publish product page**。
 3. 确认 build/check 和部署 job 均成功；发布 artifact 只能是 `integrations/site/dist`。
 4. 实际打开英文、中文入口、社交图，检查链接、交互和 repository subpath 资源。
 5. 更新本指南与 README 的托管状态，不把 workflow 成功等同于浏览器验收。
 
-预定地址：`https://indeliblevivi.github.io/codex-worker-routing/`。
+线上地址：`https://indeliblevivi.github.io/codex-worker-routing/`。
 部署失败时检查该次 Actions 日志；构建失败不会替换已发布版本。恢复以前版本时，
 从已核实的源版本构建并重新发布；不要上传仓库根目录，也不要把私人统计放进示例。
 
