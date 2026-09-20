@@ -154,8 +154,9 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage',sty
   out+=companion(836,494,155);
   out+=text(952,682,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),18,c.textSecondary,400,'text-anchor="end"');
   out+=text(80,831,compact(d.worker_turns),54,c.ink,500)+text(80,869,T('轮执行','worker turns'),23,c.textSecondary);
-  out+=`<path d="M520 787V873" stroke="${c.secondaryLine}" stroke-dasharray="3 5"/>`;
+  out+=`<path d="M520 787V939" stroke="${c.secondaryLine}" stroke-dasharray="3 5"/>`;
   out+=text(560,831,compact(d.external_tokens),54,c.ink,500)+text(560,869,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
+  out+=`<g id="share-turn-note">${text(80,910,T('新派与续做，逐轮计入。','New runs and continuations.'),19,c.textSecondary)}${text(80,936,T('由运行回执自动记录。','Automatically counted from receipts.'),19,c.textSecondary)}</g>`;
   out+=coverage(560,910);
   out+=track(80,992,w-160)+outcomes(80,1056,235);
   out+=rule(1130)+footer(1174)+credit(1233)+repo(authored.sharedBy?1274:1260);
