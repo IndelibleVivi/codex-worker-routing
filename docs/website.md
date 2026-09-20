@@ -9,8 +9,14 @@
 
 **已上线**（2026-09-21）：[English](https://indeliblevivi.github.io/codex-worker-routing/) ·
 [中文](https://indeliblevivi.github.io/codex-worker-routing/zh/)。GitHub Actions Pages
-负责托管，HTTPS 已开启；[首次部署](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35536211919)
-来自 `d84458c`，已完成公网中英文入口、资源及浏览器交互验收。
+负责托管，HTTPS 已开启。当前站点源码为 `6db8294`，
+[Pages 发布](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461878)与
+[该提交 CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461366)均成功。
+中英文首页、站内指南、脚本、样式与 sitemap 在公网与已验收 build 一致；
+桌面与手机浏览器实测柱状图、重置、键盘、章节与语言跳转、无 JavaScript 回退通过。
+
+历史首次部署：[run 35536211919](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35536211919)，
+源码 `d84458c`；其公网中英文入口、资源及浏览器交互已在当次验收。
 
 ## 构建与预览
 
