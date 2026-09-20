@@ -9,7 +9,7 @@ The on-site guides live at `/guide/` and `/zh/guide/` under that same repository
 
 **Live** (2026-09-21): [English](https://indeliblevivi.github.io/codex-worker-routing/) ·
 [中文](https://indeliblevivi.github.io/codex-worker-routing/zh/). GitHub Actions Pages
-hosts the site with HTTPS enabled. The published source is `6db8294`; its
+hosts the site with HTTPS enabled. The bilingual and interactive update was published from `6db8294`; its
 [Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461878) and
 [commit CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461366) succeeded.
 Both public homepages, guides, scripts, styles and sitemap match the accepted build.
