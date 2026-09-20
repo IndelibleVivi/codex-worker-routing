@@ -1,5 +1,7 @@
 # 来源与维护边界
 
+[English](PROVENANCE.en.md) | 中文
+
 这是独立维护的原始 workflow 项目。初始 routing policy 从内部工程 workshop 中
 按组件范围抽取，独立仓库成为后续 canonical source；内部 workshop 的 Git 历史、
 相邻项目、个人说明和工作记录没有迁入。

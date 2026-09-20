@@ -1,5 +1,7 @@
 # 可选 ACP 执行通道 · v0.1
 
+[English](acp-integration.en.md) | 中文
+
 状态：可选接入已实现；`acpx@0.15.1` 的公开 runtime API 已通过合成 ACP server
 联调。真实 adapter、模型、provider、账号和本机上下文边界仍由各 operator 单独验收。
 现有原生 skill、协作工具说明、SessionStart hook 和 installer 都不修改。
@@ -140,7 +142,7 @@ CLI 可传 `stats --time-zone IANA_ZONE`。当前 acpx 只暴露 runtime 错误�
 provider HTTP 429 或内部重试，详情提供同源结构化经过。`stats`、`record`、`pending` 只读本机 private
 state，不加载 adapter。投影为每个责任派生互斥的 `review_state`（`summary.review`
 给出各状态计数）；未登记的 legacy 责任为 `legacy_untracked`，只是安静的历史记录。
-完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.md)。
+完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.zh-CN.md)。
 
 ## 日常用法
 

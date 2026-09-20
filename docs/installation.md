@@ -1,5 +1,7 @@
 # 安装、切换与恢复
 
+[English](installation.en.md) | 中文
+
 调度 plugin 与主会话上下文集成是两个独立安装面。只需要调度时安装 plugin 即可。
 
 ## Plugin

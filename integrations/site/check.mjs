@@ -11,12 +11,12 @@ const root=path.dirname(fileURLToPath(import.meta.url));
 const dist=path.join(root,'dist');
 const files=await fs.readdir(dist,{recursive:true,withFileTypes:true});
 const paths=files.filter(f=>f.isFile()).map(f=>path.relative(dist,path.join(f.parentPath,f.name)).split(path.sep).join('/')).sort();
-const expected=['index.html','zh/index.html','404.html','.nojekyll','sitemap.xml',
+const expected=['index.html','zh/index.html','guide/index.html','zh/guide/index.html','404.html','.nojekyll','sitemap.xml',
  'assets/style.css','assets/client.mjs','assets/demo.mjs','assets/cat.svg',
  ...['en','zh'].flatMap(l=>['hero','banner','social','demo-sage'].map(n=>`assets/${n}-${l}.svg`).concat(`assets/social-${l}.png`)),
  ...['share','share-style','brand','mark','mascots','themes','ornaments','time'].map(n=>`assets/lib/${n}.mjs`)].sort();
 assert.deepEqual(paths,expected,'Only the explicit public projection may be deployed');
-for(const file of ['artwork.mjs','build.mjs','check.mjs','client.mjs','demo.mjs','page.mjs']){
+for(const file of ['artwork.mjs','build.mjs','check.mjs','client.mjs','demo.mjs','page.mjs','guide.mjs']){
  const result=spawnSync(process.execPath,['--check',path.join(root,file)],{encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);
 }
@@ -28,12 +28,12 @@ for(const file of paths.filter(f=>/\.(html|mjs|svg|css)$/.test(f))){
   for(const m of text.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+)['"]/g))await fs.access(path.resolve(dist,path.dirname(file),m[1]));
  }
 }
-for(const [lang,file] of [['en','index.html'],['zh-CN','zh/index.html']]){
+for(const [lang,file] of [['en','index.html'],['zh-CN','zh/index.html'],['en','guide/index.html'],['zh-CN','zh/guide/index.html']]){
  const html=await fs.readFile(path.join(dist,file),'utf8');
- assert.ok(html.includes(`<html lang="${lang}">`));
+ assert.ok(html.includes(`<html lang="${lang}"`));
  assert.ok(html.includes('hreflang="en"')&&html.includes('hreflang="zh-CN"'));
  assert.match(html,/<noscript>/);
- assert.match(html,/SYNTHETIC DATA|合成数据/);
+ if(!file.includes('guide/'))assert.match(html,/SYNTHETIC DATA|合成数据/);
  const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
  assert.equal(new Set(ids).size,ids.length,'HTML ids must be unique');
  for(const m of html.matchAll(/\b(?:href|src)="([^"]+)"/g)){
@@ -44,9 +44,11 @@ for(const [lang,file] of [['en','index.html'],['zh-CN','zh/index.html']]){
    if(match)await fs.access(path.resolve(root,'../..',match[1]));
    continue;
   }
-  let target=path.resolve(dist,path.dirname(file),url);
-  if(url.endsWith('/'))target=path.join(target,'index.html');
+  const [resource,anchor]=url.split('#');
+  let target=path.resolve(dist,path.dirname(file),resource);
+  if(resource.endsWith('/'))target=path.join(target,'index.html');
   await fs.access(target);
+  if(anchor){const targetHTML=await fs.readFile(target,'utf8');assert.ok(targetHTML.includes(`id="${anchor}"`),`Missing destination ${url} in ${file}`);}
  }
 }
 for(const lang of ['en','zh']){

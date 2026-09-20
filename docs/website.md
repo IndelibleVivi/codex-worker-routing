@@ -1,8 +1,11 @@
 # 产品页面与 Banner
 
+中文 | [English](website.en.md)
+
 网站源码位于 [`integrations/site/`](../integrations/site/)，使用 Node.js 22+ 标准库构建。
 无额外依赖或服务端。英文入口 `/codex-worker-routing/`，中文入口
-`/codex-worker-routing/zh/`。
+`/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
+相对于同一 repository subpath。
 
 **已上线**（2026-09-21）：[English](https://indeliblevivi.github.io/codex-worker-routing/) ·
 [中文](https://indeliblevivi.github.io/codex-worker-routing/zh/)。GitHub Actions Pages
@@ -22,8 +25,12 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory integrations/site/dist
 打开 `http://127.0.0.1:8080/`，中文在 `/zh/`。资源使用相对路径，也支持部署到
 GitHub Pages 的 repository subpath。停止预览使用 Ctrl-C。
 
-页面正文、语言切换、文档链接和默认 SVG 在关闭 JavaScript 时仍可用。
-开启 JavaScript 后可切换四个伙伴与四组双语预设、下载当前 SVG，以及复制安装提示；
+页面正文、语言切换、站内指南、FAQ、相关项目和作者链接、默认 SVG 在关闭 JavaScript 时仍可用。
+首页安装、Dispatch 和边界说明优先进入对应语言的站内指南章节；每节明确标注
+「完整仓库文档」供进一步阅读，仓库与许可入口仍保留外链。
+开启 JavaScript 后可点选示例柱状图的某一天查看轮次，再次点选或按「看全周」恢复
+周汇总；支持键盘操作，关闭 JavaScript 时保留静态柱与周汇总。它只展示合成执行轮次，
+不生成个人工单、用量或 runtime 明细。也可切换四个伙伴与四组双语预设、下载当前 SVG，以及复制安装提示；
 clipboard 被拒绝时选择原文供手动复制。示例不是完整 Dispatch 编辑器，完整的
 署名、字体、装饰及 PNG 导出在本地[派工台](dispatch.md)中使用。
 
@@ -31,7 +38,12 @@ clipboard 被拒绝时选择原文供手动复制。示例不是完整 Dispatch 
 
 产品页和两种语言的 README 按用途链接到 MCP Boundary 与 Servotab：前者用于
 MCP 工程设计、审查与验证，后者提供一般仓库工作的工程方法。中英文页面分别
-链接 Boundary 的对应语言入口；这些链接在关闭 JavaScript 时仍可用。
+链接 Boundary 的对应语言入口；桌面以等宽双栏展示，窄屏纵向排列。
+页脚区分项目仓库与 Faye 的 GitHub 主页，并显示 **Co-created by Faye & Cove**。
+FAQ 用六个短问题说明安装选项、委派控制、模型与访问范围、上下文、统计和分享数据。
+这些入口与折叠问答在关闭 JavaScript 时仍可用。
+
+以下是相关项目入口首次上线的历史验收记录：
 [PR #3](https://github.com/IndelibleVivi/codex-worker-routing/pull/3) 合并为
 `0c9a142`，main CI `35538945548` 与 [Pages run `35538947058`](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35538947058)
 均成功。2026-09-21 公网中英文页面返回 `200`，浏览器确认两个相关入口及其语言地址；
@@ -40,7 +52,8 @@ MCP 工程设计、审查与验证，后者提供一般仓库工作的工程方�
 
 ## 真源与隐私
 
-- `page.mjs` / `style.css`：双语静态内容与响应式布局。
+- `page.mjs` / `style.css`：共享页面外壳、双语首页与响应式布局。
+- `guide.mjs`：站内双语指南正文；复用页面外壳，不加载首页交互脚本。
 - `client.mjs`：渐进增强；无 API 请求、持久存储、cookies 或 analytics。
 - `demo.mjs`：明确标注的合成数据，24 份任务 / 42 轮 / 840K observed tokens。
 - `artwork.mjs`：组合 Canon 猫、线条产品标识、针脚与便签；不修改原始猫矢量。
@@ -76,7 +89,7 @@ README 分别引用这两张 1600×640 Banner。Hero 为 660×580；社交图为
 1. 确认待发布源码已提交到 main，Pages source 仍为 **GitHub Actions**。
 2. 从 main 手动运行 **Publish product page**。
 3. 确认 build/check 和部署 job 均成功；发布 artifact 只能是 `integrations/site/dist`。
-4. 实际打开英文、中文入口、社交图，检查链接、交互和 repository subpath 资源。
+4. 实际打开英文、中文入口、站内指南和社交图，检查链接、交互和 repository subpath 资源。
 5. 更新本指南与 README 的托管状态，不把 workflow 成功等同于浏览器验收。
 
 线上地址：`https://indeliblevivi.github.io/codex-worker-routing/`。

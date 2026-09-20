@@ -19,9 +19,10 @@ proxy 或固定 planner/tester/reviewer 流水线。
 ## 产品页面与 Banner
 
 双语产品页沿用鼠尾草、浅粉卡纸与折耳猫圆章，介绍委派流程和本地 Dispatch；
-可直接切换四位伙伴、选择文案并下载合成示例分享卡。页面不连接私人派工台，
+可点选柱状图查看合成示例的逐日轮次，也可切换四位伙伴、选择文案并下载示例分享卡。页面不连接私人派工台，
 不读取回执，不使用 analytics。访问[中文产品页](https://indeliblevivi.github.io/codex-worker-routing/zh/)
 或 [English](https://indeliblevivi.github.io/codex-worker-routing/)。
+安装、Dispatch 与边界说明可在[站内使用指南](https://indeliblevivi.github.io/codex-worker-routing/zh/guide/)阅读。
 本地预览与发布方法见[产品页面指南](docs/website.md)。中英 Banner 位于
 [`plugins/worker-routing/assets/`](plugins/worker-routing/assets/)。
 
@@ -230,8 +231,9 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 本仓库是独立 canonical source。`plugins/worker-routing` 下的 native runtime 五份
 说明（`SKILL.md` 与四份 references）以英文为 canonical text；`acp-worker` 是可选的
 外部 route 入口。native 说明保留 `全权接住`、
-`从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例；README、
-[行为场景](docs/behavior-scenarios.md)、安装与输入边界文档保持中文。私人说明、
+`从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例。公开安装、使用与边界文档
+提供中英文版本，见[文档目录](docs/README.md)，也可用各页顶部语言链接切换。
+Runtime 说明保留英文真源与原始命令名。私人说明、
 账号配置、请求与 continuity 不属于仓库。见[来源说明](PROVENANCE.md)。
 
 ## 相关项目
@@ -249,4 +251,8 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 对外分发或提供必须免费且非商业。文档采用
 [`CC BY-NC-SA 4.0`](LICENSE-DOCUMENTATION.md)：允许署名后的非商业分享与改编，
 公开改编须保持相同许可。本项目是 source-available，**不是 OSI open source**。
-具体文件范围以 [`LICENSING.md`](LICENSING.md) 为准。
+具体文件范围以 [`LICENSING.md`](LICENSING.md) 为准，另有[中文许可说明](docs/licensing.zh-CN.md)。
+
+---
+
+[Faye](https://github.com/IndelibleVivi) & Cove 共同创作。一点巧思，一起做成。

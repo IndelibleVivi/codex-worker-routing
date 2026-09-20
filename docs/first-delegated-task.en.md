@@ -120,7 +120,7 @@ Operator explicitly selects a registered ACP route
 ACP route configuration, worker home, API keys, adapter, and exact workspace
 allowlist stay outside Git. Run the account-free synthetic tests in
 `integrations/acpx` before registering a live route. The schema, commands, and
-recovery contract are in [ACP integration](acp-integration.md).
+recovery contract are in [ACP integration](acp-integration.en.md).
 
 For the first live ACP acceptance, use a clean small repository. Ask the worker to
 edit one function, add one focused check, and run it; then add one rework condition
@@ -149,5 +149,5 @@ installed, current session loaded, real provider turn succeeded, and owner accep
 are separate facts.
 
 Use OpenAI's current [Subagents](https://developers.openai.com/codex/subagents/)
-documentation for the native configuration. See [input boundaries](context.md) and
-[installation and recovery](installation.md) for this repository's deeper contracts.
+documentation for the native configuration. See [input boundaries](context.en.md) and
+[installation and recovery](installation.en.md) for this repository's deeper contracts.

@@ -38,7 +38,10 @@ plugin and its optional main-session context integration.
   ignored. Build with `node integrations/site/build.mjs` and check with
   `node integrations/site/check.mjs`. Browser assets use the explicit build manifest;
   never add private config, receipts, dashboard server modules or real task data.
-  `demo.mjs` owns synthetic examples. `artwork.mjs` composes the existing Canon
+  `demo.mjs` owns synthetic examples and the interactive chart uses only its daily
+  turn counts. `page.mjs` owns the shared shell and homepage; `guide.mjs` owns
+  the bilingual on-site guide. Home links should use the local guide; full
+  repository references remain explicitly labelled. `artwork.mjs` composes the existing Canon
   artwork; `--sync-banner` refreshes derived plugin banners. Verify desktop/mobile
   English and Chinese layouts and actual sampler/download/copy interactions after
   site changes. Pages account activation and deployment are separate from source.
@@ -60,6 +63,8 @@ plugin and its optional main-session context integration.
 - After ACP changes, run `npm ci --ignore-scripts`, `npm run check`, and
   `npm run test:acpx` from `integrations/acpx/`. Track `package-lock.json`, never
   `node_modules/`, private route state, adapter profiles, or receipts.
+- Keep paired public guides in Chinese and English aligned; `docs/README.md` and
+  `docs/README.en.md` index them. Runtime skill instructions stay canonical in English.
 - Update README and installation docs for changed behavior, dependencies, paths,
   privacy boundaries, commands, and acceptance claims.
 - Commit only explicit reviewed component paths. Source, local installation,

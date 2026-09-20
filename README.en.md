@@ -23,12 +23,13 @@ server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
 ## Product page and banners
 
 The bilingual product page carries the sage, blush paper and folded-ear cat identity
-into the delegation guide and a synthetic Dispatch preview. Try four companions,
+into the delegation guide and a synthetic Dispatch preview. Select a bar to explore daily worker turns, try four companions,
 choose a slogan and download a sample share card. The site does not connect to a
 private dashboard, read receipts or use analytics. Visit the
 [English product page](https://indeliblevivi.github.io/codex-worker-routing/) or
 [中文版](https://indeliblevivi.github.io/codex-worker-routing/zh/). See the
-[website guide](docs/website.md) for local preview and publishing. English and Chinese banners live in
+[on-site usage guide](https://indeliblevivi.github.io/codex-worker-routing/guide/) for setup, Dispatch and boundaries,
+or the [website guide](docs/website.en.md) for local preview and publishing. English and Chinese banners live in
 [`plugins/worker-routing/assets/`](plugins/worker-routing/assets/).
 
 ## Dispatch
@@ -151,8 +152,9 @@ and the necessary documentation can be completed coherently by the same worker, 
 correction continues in the same child.
 
 ```text
-修复 CSV 导入时空行导致的失败，补能复现问题的检查。
-可以把导入模块的调查、修复和自测交给一个 worker；你负责整合与最终交付。
+Fix the CSV import failure caused by blank rows and add a reproducing check.
+A worker can own investigation, the fix and self-checks for the import module;
+you retain integration and final delivery.
 ```
 
 `全权接住` and `从头做到位` permit internal delegation; `solo`, `亲自做`, and
@@ -176,7 +178,7 @@ failure.
 ## Behavior Scenarios
 
 Four non-runtime observation scenarios and their evidence standards are recorded in
-[behavior scenarios](docs/behavior-scenarios.md): a mid-sized fix requested in natural
+[behavior scenarios](docs/behavior-scenarios.en.md): a mid-sized fix requested in natural
 language, the same child moving from investigation into implementation or local rework,
 a healthy wait that neither cancels nor restarts anything, and solo or tiny work that is
 not delegated. That page is a manual review record, not an evaluation platform, and it
@@ -227,9 +229,9 @@ npm run test:acpx
 ```
 
 Keep route configuration, worker homes, adapters, and account state outside Git; see the
-[ACP integration guide](docs/acp-integration.md) for commands and boundaries. When
+[ACP integration guide](docs/acp-integration.en.md) for commands and boundaries. When
 private instructions need to be separated, follow
-[installation and recovery](docs/installation.md) to connect the startup hook. That
+[installation and recovery](docs/installation.en.md) to connect the startup hook. That
 integration is independent of the plugin; turning off the routing plugin does not turn
 off main-session private instructions.
 
@@ -258,16 +260,17 @@ the process is not guaranteed to be fully offline.
 The initial native compatibility basis is Codex `0.154.0-alpha.6.2`. The ACP
 integration is pinned and verified against `acpx@0.15.1` and requires Node.js 22.13 or
 newer. The real schema and adapter capabilities still govern at call time. Older CLIs or
-other hosts may not provide the same fields. See [input boundaries](docs/context.md) and
-the [ACP integration guide](docs/acp-integration.md) for more limitations.
+other hosts may not provide the same fields. See [input boundaries](docs/context.en.md) and
+the [ACP integration guide](docs/acp-integration.en.md) for more limitations.
 
 This repository is the independent canonical source. The five native runtime documents
 under `plugins/worker-routing` (`SKILL.md` and four references) are canonical in English;
 `acp-worker` is the optional external-route entry. The native documents keep the trigger
 examples `全权接住`, `从头做到位`, `solo`, `亲自做`, and `别派小弟`.
-The Chinese `README.md`, [behavior scenarios](docs/behavior-scenarios.md), and the
-installation and input-boundary documents remain in Chinese; this page is the English
-companion for public readers.
+Public setup, usage and boundary documents are available in Chinese and English.
+The [documentation index](docs/README.en.md) lists the paired guides; use the language
+link at the top of each page to switch. Runtime instructions retain their canonical
+English text and exact command names.
 
 **Provenance and scope.** This is an independently maintained, project-original workflow
 project. Its initial routing policy was extracted by component scope from an internal
@@ -285,7 +288,7 @@ and independent observation of the local binary. This project is not an OpenAI o
 product or a fork maintained by OpenAI.
 
 **Privacy.** Personal instructions, account configuration, requests, and continuity are
-not part of this repository. See [provenance](PROVENANCE.md).
+not part of this repository. See [provenance](PROVENANCE.en.md).
 
 ## Related projects
 
@@ -304,3 +307,7 @@ must be free of charge and noncommercial. Documentation is licensed under
 [`CC BY-NC-SA 4.0`](LICENSE-DOCUMENTATION.md), allowing noncommercial sharing and
 adaptation with attribution and ShareAlike. This project is source-available and is
 **not OSI open source**. [`LICENSING.md`](LICENSING.md) is the canonical path-level map.
+
+---
+
+Co-created by [Faye](https://github.com/IndelibleVivi) & Cove. Made with care, together.

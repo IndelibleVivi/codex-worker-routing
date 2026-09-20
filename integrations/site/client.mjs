@@ -6,7 +6,7 @@
 
 import {renderShareSVG} from './lib/share.mjs';
 import {SHARE_SLOGANS} from './lib/share-style.mjs';
-import {DEMO_SHARE} from './demo.mjs';
+import {DEMO_SHARE,DEMO_DAYS} from './demo.mjs';
 
 const DEFAULT_THEME = 'sage';
 const DEFAULT_PRESET = 'together';
@@ -116,5 +116,39 @@ function initInstallCopy() {
   });
 }
 
+// --- Synthetic activity chart ----------------------------------------------
+
+function initActivityChart() {
+  const bars = [...document.querySelectorAll('[data-demo-day]')];
+  const chart = document.querySelector('.activity-bars');
+  const label = document.querySelector('[data-day-label]');
+  const value = document.querySelector('[data-day-value]');
+  const reset = document.querySelector('[data-chart-reset]');
+  let selected = null;
+
+  const select = day => {
+    selected = day;
+    for (const [index, button] of bars.entries()) button.setAttribute('aria-pressed', String(index === day));
+    chart.classList.toggle('has-selection', day !== null);
+    label.textContent = day === null
+      ? say('9月1–7日 · 全周', 'September 1–7 · Full week')
+      : say(`9月${day + 1}日 · 当天`, `September ${day + 1} · Selected day`);
+    value.textContent = day === null ? DEMO_SHARE.worker_turns : DEMO_DAYS[day];
+    reset.hidden = day === null;
+  };
+
+  for (const [index, button] of bars.entries()) {
+    button.disabled = false;
+    button.addEventListener('click', () => select(selected === index ? null : index));
+  }
+  reset.addEventListener('click', () => {
+    const previous = selected;
+    select(null);
+    bars[previous].focus();
+  });
+  document.querySelector('[data-chart-hint]').hidden = false;
+}
+
 initShareSampler();
 initInstallCopy();
+initActivityChart();

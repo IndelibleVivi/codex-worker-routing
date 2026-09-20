@@ -8,7 +8,7 @@ activity has no connected data source here; every metric is explicitly ACP-only.
 
 ## Open the dashboard
 
-With the [ACP integration](acp-integration.md) already configured, run from the canonical checkout:
+With the [ACP integration](acp-integration.en.md) already configured, run from the canonical checkout:
 
 ```sh
 node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
@@ -135,7 +135,7 @@ node integrations/acpx/src/cli.mjs pending --config /absolute/private/routes.jso
 This reads local state for execution issues and explicitly outstanding review / revision
 requests. Ordinary completion, normal closure and unannotated history do not create a to-do.
 The updated `acp-worker` skill follows this default. Source changes do not refresh installed
-plugin caches: use the [normal update flow](installation.md#plugin), then start a new main
+plugin caches: use the [normal update flow](installation.en.md#plugin), then start a new main
 session to load the new instructions.
 
 ## Workload, not savings
@@ -198,7 +198,7 @@ The first read builds an in-memory projection; later reads reparse changed files
 no persistent secondary index. Compact events, submitted work orders and available parent
 IDs live in the existing private state outside Git. Details read work orders and bounded
 receipt excerpts on demand, not full transcripts. Legacy records are not migrated or repaired.
-POSIX modes and Windows ACL limits remain those of the [ACP integration](acp-integration.md).
+POSIX modes and Windows ACL limits remain those of the [ACP integration](acp-integration.en.md).
 
 ## Verify and recover
 

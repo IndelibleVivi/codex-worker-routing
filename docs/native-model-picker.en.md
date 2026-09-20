@@ -1,5 +1,7 @@
 # Add a custom API model to the native Codex model picker
 
+[中文](native-model-picker.md) | English
+
 This is an independent configuration example, not a Worker Routing prerequisite.
 Worker Routing decides when and how to delegate an engineering responsibility. It
 does not store API keys, proxy model traffic, or choose a provider, router, or model.

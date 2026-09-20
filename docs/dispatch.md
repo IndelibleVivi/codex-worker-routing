@@ -111,7 +111,7 @@ node integrations/acpx/src/cli.mjs continue --config /absolute/private/routes.js
 
 如果某项任务本来就需要保留主机验证或接管判断，可主动使用 `record`。
 证据区分 `coordinator` 与 `worker`；worker 自述不自动升级为主机独立验证。
-事件 schema、原因、修订与来源规则见 [Dispatch 数据契约](dispatch-data.md)。
+事件 schema、原因、修订与来源规则见 [Dispatch 数据契约](dispatch-data.zh-CN.md)。
 不为统计调用额外模型，也不从旧输出猜测接受结论。
 
 按需查看需要留意的事项，不是每次派工后的固定步骤：

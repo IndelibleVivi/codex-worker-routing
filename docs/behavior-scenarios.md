@@ -1,5 +1,7 @@
 # 行为场景观察
 
+[English](behavior-scenarios.en.md) | 中文
+
 本页只记录四个**非 runtime** 的观察场景，供人在真实主 session 里核对
 worker routing 是否按当前 policy 行事。runtime 的 canonical text 在
 [SKILL.md 与四份 references](../plugins/worker-routing/skills/worker-routing/SKILL.md)。

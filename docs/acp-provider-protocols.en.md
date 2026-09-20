@@ -156,7 +156,7 @@ configured endpoint.
 
 ## Related documents
 
-- [Optional ACP execution channel](acp-integration.md): route schema, commands, and
+- [Optional ACP execution channel](acp-integration.en.md): route schema, commands, and
   security boundaries.
 - [Custom native model picker](native-model-picker.en.md): full provider and catalog
   setup.

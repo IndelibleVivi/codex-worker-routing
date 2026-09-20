@@ -1,5 +1,7 @@
 # Dispatch data contract
 
+[中文](dispatch-data.zh-CN.md) | English
+
 [User guide](dispatch.en.md) · [使用指南](dispatch.md)
 
 Dispatch projects existing private state; it does not own worker execution or create a

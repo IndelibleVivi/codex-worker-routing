@@ -1,5 +1,7 @@
 # Licensing
 
+[中文说明](docs/licensing.zh-CN.md) | English
+
 Copyright © 2026 Faye Fang.
 
 This file is the canonical path-level licensing map for the repository. The
@@ -28,7 +30,7 @@ SPDX identifier `CC-BY-NC-SA-4.0`:
 
 - `README.md` and `README.en.md`
 - `docs/**`
-- `PROVENANCE.md`
+- `PROVENANCE.md` and `PROVENANCE.en.md`
 - `AGENTS.md`
 - `LICENSING.md`
 

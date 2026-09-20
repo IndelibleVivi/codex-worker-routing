@@ -1,5 +1,7 @@
 # 把自定义 API model 接进 Codex native model picker
 
+中文 | [English](native-model-picker.en.md)
+
 这是一份独立的配置例子，不是 Worker Routing 的安装前提。Worker Routing 只决定
 何时、怎样交出一块工程责任；它不提供 API key，不代理模型请求，也不规定使用哪家
 provider、router 或 model。

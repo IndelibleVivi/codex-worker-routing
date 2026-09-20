@@ -1,5 +1,7 @@
 # 输入边界与验收
 
+[English](context.en.md) | 中文
+
 `fork_turns="none"` 排除父对话历史，不替换全局/项目 AGENTS。角色指令或另一份
 AGENTS 的优先级也不意味着旧文本从 provider 请求里消失。
 

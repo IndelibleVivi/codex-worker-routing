@@ -316,7 +316,7 @@ Field notes:
   home, and adapter outside Git.
 
 Route schema, commands, and security boundaries are in the
-[optional ACP execution channel](acp-integration.md).
+[optional ACP execution channel](acp-integration.en.md).
 
 ## Troubleshooting
 
@@ -348,7 +348,7 @@ Route schema, commands, and security boundaries are in the
   [custom native model picker guide](native-model-picker.en.md).
 - **ACP route:** deleting that route from the route config (and cleaning up its private
   `stateDir`/`workerHome` as needed) is a **separate** action, unrelated to uninstalling
-  the router. See the [optional ACP execution channel](acp-integration.md).
+  the router. See the [optional ACP execution channel](acp-integration.en.md).
 - Remove only the keys and routes this flow added; **do not delete user-owned
   configuration**.
 
@@ -358,7 +358,7 @@ Route schema, commands, and security boundaries are in the
   setup.
 - [The ACP channel and the provider-protocol boundary](acp-provider-protocols.en.md):
   why initializing is not inference.
-- [Optional ACP execution channel](acp-integration.md): route schema, commands, and
+- [Optional ACP execution channel](acp-integration.en.md): route schema, commands, and
   security boundaries.
 - [From zero to a first successful delegated task](first-delegated-task.en.md): locate
   the failing layer first.
