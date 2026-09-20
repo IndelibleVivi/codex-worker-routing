@@ -68,6 +68,7 @@ export function fakeAcpx(behavior={}) {
           })();
           job.catch(d.reject);
           d.promise.finally(()=>input.signal?.removeEventListener('abort',onAbort));
+          behavior.onStart?.(input);
           return {
             promptStarted:started,result:d.promise,
             events:{async *[Symbol.asyncIterator](){

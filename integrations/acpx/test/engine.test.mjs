@@ -178,34 +178,30 @@ test('the collector cannot mask an eventual successful result',async t=>{
 });
 test('a started turn writes an active-turn marker that is cleared on terminal',async t=>{
  const {deferred}=await import('./helpers.mjs');
- const gate=deferred();
- const f=await setup(t,{firstTurnGate:gate.promise});
+ const gate=deferred(),started=deferred();
+ const f=await setup(t,{firstTurnGate:gate.promise,onStart:input=>started.resolve(input.requestId)});
  const bindingPath=paths(f.config.stateDir,f.binding.id).binding;
- let seenDuringTurn=null;
- const pending=run(f,{observer:async()=>{ if(seenDuringTurn===null){ const {readJSON}=await import('../src/state.mjs'); const b=await readJSON(bindingPath,{privateFile:true}); seenDuringTurn=b.active_turn??null; } }});
- // The turn is gated open; poll the binding until the marker is durably written.
- const {readJSON}=await import('../src/state.mjs');
- for(let i=0;i<100&&!seenDuringTurn;i++){ await new Promise(r=>setTimeout(r,5)); try{ seenDuringTurn=(await readJSON(bindingPath,{privateFile:true})).active_turn??null; }catch{} }
- gate.resolve();
- const r=await pending;
- assert.equal(seenDuringTurn?.request_id,r.request_id);
- const after=await readJSON(bindingPath,{privateFile:true});
- assert.equal(after.active_turn,undefined);
+ const pending=run(f);
+ let seen,receipt;
+ try {
+   // startTurn can only be reached after the durable marker write. Keep the
+   // runtime gated while reading, so Windows does not race rename with a reader.
+   await Promise.race([started.promise,pending.then(()=>assert.fail('Turn ended before start'))]);
+   seen=(await readJSON(bindingPath,{privateFile:true})).active_turn;
+ } finally { gate.resolve();receipt=await pending; }
+ assert.equal(seen?.request_id,receipt.request_id);
+ assert.equal((await readJSON(bindingPath,{privateFile:true})).active_turn,undefined);
 });
 test('a cancelled turn leaves no active-turn marker behind',async t=>{
  const {deferred}=await import('./helpers.mjs');
- const gate=deferred();
- const f=await setup(t,{firstTurnGate:gate.promise});
- const c=new AbortController();
- const pending=run(f,{signal:c.signal});
- // Wait until the turn has actually started, then cancel while it is in flight.
- const bindingPath=paths(f.config.stateDir,f.binding.id).binding;
- const {readJSON}=await import('../src/state.mjs');
- for(let i=0;i<100;i++){ await new Promise(r=>setTimeout(r,5)); try{ if((await readJSON(bindingPath,{privateFile:true})).active_turn){ break; } }catch{} }
- c.abort();
- gate.resolve();
- const r=await pending;
- assert.equal(r.runtime_status,'cancelled');
- const stored=await readJSON(bindingPath,{privateFile:true});
- assert.equal(stored.active_turn,undefined);
+ const gate=deferred(),started=deferred();
+ const f=await setup(t,{firstTurnGate:gate.promise,onStart:input=>started.resolve(input.requestId)});
+ const c=new AbortController(),pending=run(f,{signal:c.signal});
+ let receipt;
+ try {
+   await Promise.race([started.promise,pending.then(()=>assert.fail('Turn ended before cancellation'))]);
+   c.abort();
+ } finally { gate.resolve();receipt=await pending; }
+ assert.equal(receipt.runtime_status,'cancelled');
+ assert.equal((await readJSON(paths(f.config.stateDir,f.binding.id).binding,{privateFile:true})).active_turn,undefined);
 });
