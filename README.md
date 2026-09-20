@@ -4,8 +4,12 @@
 
 [English](README.en.md) | 中文
 
-把一块完整工程责任交给原生 Codex worker，主 agent 保留目标、整合与交付责任。
-适合已接入多个模型、希望分配执行工作，同时保留主会话个人上下文的使用者。
+**面向 Codex 的多模型委派工具，配有本地 Dispatch 派工台。**
+把一块完整工程责任交给原生 Codex worker，或通过可选 ACP integration 交给已登记的外部 coding agent；
+主 agent 保留目标、整合与交付责任。适合已接入多个模型、希望分配执行工作，同时保留主会话个人上下文的使用者。
+
+[从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
+[本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
 
 这是初版实现。调度由一个 instruction-only plugin 提供；可选 ACP integration
 通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
