@@ -6,3 +6,6 @@ __pycache__/
 !.env.example
 .private/
 .probe-output/
+
+# Generated public website
+integrations/site/dist/

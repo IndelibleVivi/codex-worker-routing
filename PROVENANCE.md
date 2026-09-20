@@ -16,6 +16,11 @@ runtime 或外部 adapter 实现。`acpx` 及其传递依赖保持各自的第�
 Dispatch 的紧凑工作台、线条产品标识与独立分享排版由本项目提供的 v3 设计候选演进；
 候选的合成数据与模拟 runtime 情况没有迁入生产数据路径。实际统计由私有 receipts 投影。
 
+公开产品页与 Banner 由本项目现有猫头、线条标识和手绘装饰组合而来；
+`integrations/site/artwork.mjs` 是页面插画与 Banner 的组合真源。网站不使用外部
+图片、字体或 analytics；Dispatch 示例与示例分享卡来自独立合成数据，未读取真实
+回执。社交预览 PNG 是同源 SVG 的栅格导出。
+
 接口参考 OpenAI 的 [Hooks](https://learn.chatgpt.com/docs/hooks) 和
 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档，
 并用本机 binary 独立观察。本项目不是 OpenAI 官方产品或其维护的 fork。

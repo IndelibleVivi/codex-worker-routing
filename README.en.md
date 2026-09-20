@@ -1,3 +1,5 @@
+![Worker Routing — Good work, in good company.](plugins/worker-routing/assets/banner-en.svg)
+
 # Codex Worker Routing
 
 [中文](README.md) | English
@@ -12,6 +14,16 @@ plugin; the optional ACP integration connects a registered external coding agent
 `acpx/runtime`; and the optional main-session integration uses a native `SessionStart`
 hook to load local private instructions automatically. There is no additional MCP
 server, job database, provider proxy, or fixed planner/tester/reviewer pipeline.
+
+## Product page and banners
+
+The bilingual product page carries the sage, blush paper and folded-ear cat identity
+into the delegation guide and a synthetic Dispatch preview. Try four companions,
+choose a slogan and download a sample share card. The site does not connect to a
+private dashboard, read receipts or use analytics. Source and deployment workflow
+are ready; hosting is not enabled yet. See the [website guide](docs/website.md)
+for local preview and publishing. English and Chinese banners live in
+[`plugins/worker-routing/assets/`](plugins/worker-routing/assets/).
 
 ## Dispatch
 

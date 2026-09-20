@@ -1,3 +1,5 @@
+![Worker Routing — 工作有去有回。](plugins/worker-routing/assets/banner-zh.svg)
+
 # Codex Worker Routing
 
 [English](README.en.md) | 中文
@@ -9,6 +11,14 @@
 通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
 proxy 或固定 planner/tester/reviewer 流水线。
+
+## 产品页面与 Banner
+
+双语产品页沿用鼠尾草、浅粉卡纸与折耳猫圆章，介绍委派流程和本地 Dispatch；
+可直接切换四位伙伴、选择文案并下载合成示例分享卡。页面不连接私人派工台，
+不读取回执，不使用 analytics。公开站点源码与部署流程已准备，尚未启用托管；
+本地预览与发布方法见[产品页面指南](docs/website.md)。中英 Banner 位于
+[`plugins/worker-routing/assets/`](plugins/worker-routing/assets/)。
 
 ## Dispatch · 派工台
 

@@ -34,6 +34,14 @@ plugin and its optional main-session context integration.
 - `share-style.mjs` owns bounded author text, bilingual presets and style choices;
   `ornaments.mjs` owns hand-drawn decorative paths shared by exports and dashboard.
   Share drafts stay in browser memory, separate from persistent dashboard preferences.
+- Public website source lives in `integrations/site/`; `dist/` is generated and
+  ignored. Build with `node integrations/site/build.mjs` and check with
+  `node integrations/site/check.mjs`. Browser assets use the explicit build manifest;
+  never add private config, receipts, dashboard server modules or real task data.
+  `demo.mjs` owns synthetic examples. `artwork.mjs` composes the existing Canon
+  artwork; `--sync-banner` refreshes derived plugin banners. Verify desktop/mobile
+  English and Chinese layouts and actual sampler/download/copy interactions after
+  site changes. Pages account activation and deployment are separate from source.
 - Keep provider IDs and personal preferences in operator-owned configuration.
 - Never place personal instructions, chats, memory, tokens, real request captures,
   machine paths, or private continuity in this repository, including fixtures.

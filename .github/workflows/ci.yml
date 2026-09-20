@@ -50,3 +50,13 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run test:acpx
+
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node integrations/site/build.mjs
+      - run: node integrations/site/check.mjs

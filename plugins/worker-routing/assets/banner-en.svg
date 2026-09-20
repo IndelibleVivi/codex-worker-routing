@@ -1,0 +1,41 @@
+<!-- SPDX-License-Identifier: SUL-1.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-label="Worker Routing — Good work. In good company."><defs><filter id="lift" x="-25%" y="-25%" width="150%" height="160%"><feDropShadow dy="8" stdDeviation="9" flood-color="#51415f" flood-opacity=".1"/></filter><pattern id="weave" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 1.5H6M1.5 0V6" stroke="#51415f" stroke-opacity=".035"/></pattern></defs><rect width="1600" height="640" fill="#f1f2ec"/><rect x="18" y="18" width="1564" height="604" rx="24" fill="#fffefa"/><rect x="36" y="36" width="1528" height="568" rx="16" fill="none" stroke="#acc099" stroke-dasharray="7 6"/>
+ <g font-family="Avenir Next,Arial,PingFang SC,Microsoft YaHei,sans-serif"><g transform="translate(73 69) scale(1.05)"><path d="M6 31C11 22 16 12 20 10C23 14 19 26 20 30C23 26 27 20 29 22C31 24 26 33 31 32L42 21" fill="none" stroke="#51415f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="36" r="1.7" fill="#61794f"/><circle cx="42" cy="21" r="1.7" fill="#51415f"/></g><text x="138" y="107" font-size="32" fill="#51415f" font-weight="600">worker routing</text>
+ <text x="80" y="197" font-size="15" fill="#51415f" letter-spacing="2">MODEL DELEGATION. LOCAL FIELD NOTES.</text>
+ <text x="76" y="293" font-size="80" fill="#51415f" font-family="Georgia,Songti SC,serif">Good work.</text>
+ <text x="76" y="389" font-size="80" fill="#51415f" font-family="Georgia,Songti SC,serif" font-style="italic">In good company.</text>
+ <text x="81" y="463" font-size="22" fill="#51415f" >Hand off a whole responsibility. Bring back the evidence.</text>
+ <text x="81" y="540" font-size="16" fill="#51415f" letter-spacing="1.4">NATIVE CODEX  /  OPTIONAL ACP  /  DISPATCH</text>
+ <text x="1522" y="580" font-size="17" fill="#51415f" text-anchor="end">github.com/IndelibleVivi/codex-worker-routing</text>
+ </g><g transform="translate(930 5) scale(0.89)"><g font-family="Avenir Next,Arial,PingFang SC,Microsoft YaHei,sans-serif">
+ <g transform="rotate(-4 329 283)"><rect x="108" y="119" width="455" height="360" rx="25" fill="#edf2e5"/><rect x="108" y="119" width="455" height="360" rx="25" fill="url(#weave)"/><rect x="121" y="132" width="429" height="334" rx="17" fill="none" stroke="#acc099" stroke-dasharray="6 5" stroke-width="1.5"/></g>
+ <path d="M61 256C15 312 66 355 116 314S192 272 211 292C238 321 177 364 226 402M484 452C566 493 625 462 603 418" fill="none" stroke="#acc099" stroke-width="2.5" stroke-linecap="round"/>
+ <g transform="rotate(-5 214 155)"><rect x="51" y="58" width="337" height="183" rx="13" fill="#fffefa" filter="url(#lift)"/><rect x="61" y="68" width="317" height="163" rx="7" fill="none" stroke="#acc099" stroke-dasharray="5 5"/><rect x="184" y="42" width="83" height="32" rx="3" fill="#faedf1" transform="rotate(8 225 58)"/>
+ <text x="76" y="100" font-size="13" fill="#51415f" letter-spacing="1.3">MAIN AGENT / WORK ORDER</text>
+ <text x="76" y="153" font-size="29" fill="#51415f" font-family="Georgia,Songti SC,serif">A smoother import.</text>
+ <text x="76" y="193" font-size="17" fill="#51415f" >One clear responsibility.</text>
+ <path d="M76 215H239" stroke="#dfbecb" stroke-width="2" stroke-dasharray="2 5"/></g>
+ <g transform="translate(468 273) rotate(7)"><g transform="rotate(14)"><rect x="9" y="-169" width="126" height="118" rx="5" fill="#faedf1"/><path d="M22-154h100" stroke="#dfbecb" stroke-dasharray="5 4" stroke-width="1.5"/></g><circle cy="5" r="145" fill="#deded5"/><circle r="145" fill="#fffefa" filter="url(#lift)"/><circle r="136" fill="#edf2e5"/><circle r="136" fill="url(#weave)"/><circle r="124" fill="none" stroke="#acc099" stroke-width="1.8" stroke-dasharray="5 5"/><g transform="translate(-120 -120) scale(1.875)"><g transform="translate(-11 -10) scale(.12)">
+    <path fill="#44324f" d="M285 484C291 418 308 341 355 323C389 306 476 353 520 394C610 386 689 402 762 421L858 386C915 362 944 384 976 423L1033 480C1052 499 1043 539 1011 575L1005 595C1043 650 1050 742 1032 774C1004 883 897 918 733 929C574 940 423 922 337 890C254 860 200 769 196 685C191 601 238 532 285 484Z"/>
+    <path fill="#fffefa" d="M343 451C338 436 354 382 371 372C386 359 408 388 420 407Q428 419 413 423Q378 433 351 451Q344 457 343 451ZM859 473Q849 524 886 530Q905 533 920 526Q884 510 859 473Z"/>
+    <path fill="#a8be9c" d="M839 417C850 390 871 378 894 381C937 376 952 409 989 445L1033 480C1053 501 1042 545 1013 576C1022 552 1025 528 1003 529C954 540 916 529 890 498C865 471 874 443 852 435C839 432 832 431 839 417Z"/>
+    <path d="M396 595C438 576 494 591 522 621" fill="none" stroke="#fffefa" stroke-width="24" stroke-linecap="round"/>
+    <path fill="#fffefa" d="M740 661C763 646 810 635 831 642C843 647 848 660 841 668C813 662 778 666 745 672Q732 674 740 661Z"/>
+    <ellipse cx="386" cy="681" rx="51" ry="35" transform="rotate(9 386 681)" fill="#edbed0"/>
+    <ellipse cx="842" cy="759" rx="51" ry="33" transform="rotate(8 842 759)" fill="#edbed0"/>
+    <path d="M546 718C568 729 600 719 612 697C624 728 700 752 726 713M241 625L306 637M245 679L302 666M932 727L1001 732M929 759L985 784" fill="none" stroke="#fffefa" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+    <path fill="#edbed0" d="M599 655C611 653 637 657 646 663C658 676 629 689 617 691C603 685 581 660 599 655Z"/>
+    <path d="M377 670L366 683M405 678L393 691M836 750L825 764M861 758L850 771" fill="none" stroke="#88657f" stroke-width="8" stroke-linecap="round"/>
+  </g></g></g>
+ <g transform="rotate(3 252 443)"><rect x="84" y="374" width="355" height="169" rx="13" fill="#fffefa" filter="url(#lift)"/><rect x="94" y="384" width="335" height="149" rx="7" fill="none" stroke="#acc099" stroke-dasharray="5 5"/>
+ <text x="109" y="410" font-size="13" fill="#51415f" letter-spacing="1.1">RETURN / RESULT + EVIDENCE</text>
+ <g stroke="#61794f" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M111 444l5 5 10-12M111 483l5 5 10-12"/></g>
+ <text x="139" y="450" font-size="18" fill="#51415f" >Changes and checks, together</text>
+ <text x="139" y="489" font-size="17" fill="#51415f" >Main agent integrates &amp; delivers</text>
+ </g><g transform="translate(438 463) scale(.56)"><g fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 111C51 93 77 126 109 107S168 113 195 91C211 77 215 58 222 42M195 91C219 90 238 98 260 113" stroke="#acc099"/>
+  <path d="M211 72C190 73 185 58 188 53C204 51 212 61 211 72ZM203 84C223 66 240 73 241 78C230 94 212 92 203 84Z" stroke="#acc099"/>
+  <path d="M222 42C207 38 202 27 211 23C218 20 224 26 225 33C225 15 240 14 242 23C244 31 236 37 229 39C246 33 255 44 248 50C242 56 232 50 227 45C238 59 229 70 221 63C216 57 219 48 222 42C210 55 198 50 201 42C204 35 216 37 222 42Z" stroke="#dfbecb" stroke-width="2.6"/>
+  <circle cx="225" cy="41" r="4" fill="#faedf1" stroke="#51415f" stroke-opacity=".55" stroke-width="1.5"/>
+  <path d="M73 49l8 9m-9 0l9-9M283 81l6 7m-7 0l7-7" stroke="#acc099" stroke-width="1.7"/></g></g>
+ <path d="M593 79l12 13m-13 0l13-13M34 407l8 9m-9 0l9-9" fill="none" stroke="#acc099" stroke-width="2" stroke-linecap="round"/>
+ </g></g></svg>
