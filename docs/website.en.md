@@ -52,9 +52,9 @@ numeral styles, ornaments and PNG exports are available in [local Dispatch](disp
 The product page and both READMEs link to MCP Boundary for MCP engineering design,
 review and verification, and to Servotab for everyday repository engineering methods.
 English and Chinese pages use Boundary's matching language entry. The related links
-use CWR typography and fine dividers, with each project name followed by a short use
-case. Desktop places the two equal-width entries beside the section heading; narrow
-screens stack them. Each destination retains its own website identity.
+use CWR typography, grouped on a pale sage surface with stitched edges. Project
+names and arrow links lead, followed by a short use case. Desktop places the two
+equal-width entries beside the section heading; narrow screens stack them. Each destination retains its own website identity.
 
 The footer distinguishes the project repository from Faye's GitHub profile and includes
 **Co-created by Faye & Cove**. Six short FAQs cover installation choices, delegation
