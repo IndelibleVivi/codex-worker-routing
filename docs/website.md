@@ -32,7 +32,11 @@ clipboard 被拒绝时选择原文供手动复制。示例不是完整 Dispatch 
 产品页和两种语言的 README 按用途链接到 MCP Boundary 与 Servotab：前者用于
 MCP 工程设计、审查与验证，后者提供一般仓库工作的工程方法。中英文页面分别
 链接 Boundary 的对应语言入口；这些链接在关闭 JavaScript 时仍可用。
-这批入口已完成源码修改，部署状态待发布后更新。
+[PR #3](https://github.com/IndelibleVivi/codex-worker-routing/pull/3) 合并为
+`0c9a142`，main CI `35538945548` 与 [Pages run `35538947058`](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35538947058)
+均成功。2026-09-21 公网中英文页面返回 `200`，浏览器确认两个相关入口及其语言地址；
+发布前已检查中英文桌面/手机布局、无 JavaScript 链接、示例切换和安装提示复制。
+下载按钮显示了预期 SVG 文件名的启动回执，浏览器下载事件未取得，故不把它计作文件下载验收。
 
 ## 真源与隐私
 
