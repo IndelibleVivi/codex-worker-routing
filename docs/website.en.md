@@ -7,14 +7,18 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
-**Source update, not deployed** (2026-09-21): the ACP guide now explains one default
-worker, default changes and prelaunch fallbacks; the FAQ clarifies authorized paid
-routes. Local build/check, English/Chinese desktop and mobile copy, expanded FAQs
-and no-JavaScript guides passed. The deployment record below does not cover this copy.
+**Update published** (2026-09-21): the ACP guide now explains one default worker,
+default changes and prelaunch fallbacks; the FAQ clarifies authorized paid routes.
+The [Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35553778616)
+from `8f3c27b` succeeded. Public English/Chinese homepages, guides, scripts, styles and
+sitemap returned 200 and matched the accepted build byte for byte. Live browser
+checks passed for desktop/mobile copy, expanded FAQs, document-language links and
+no-JavaScript guides, without horizontal overflow or console/page errors. Existing
+visuals and interactions were preserved.
 
 **Live** (2026-09-21): [English](https://indeliblevivi.github.io/codex-worker-routing/) ·
 [中文](https://indeliblevivi.github.io/codex-worker-routing/zh/). GitHub Actions Pages
-hosts the site with HTTPS enabled. The bilingual and interactive update was published from `6db8294`; its
+hosts the site with HTTPS enabled. The earlier bilingual and interactive update was published from `6db8294`; its
 [Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461878) and
 [commit CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35544461366) succeeded.
 Both public homepages, guides, scripts, styles and sitemap match the accepted build.

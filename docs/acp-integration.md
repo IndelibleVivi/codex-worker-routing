@@ -296,6 +296,12 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 兼容、撤回许可与启动后不重派；不代表 installed plugin、真实 provider 或本机默认
 配置已更新。跨平台结果以对应提交的 CI 为准。
 
+同日另行完成本机安装与 live route 验收：正式重装后的 plugin 文件与 canonical source
+一致；不带 `--route` 的真实派工使用默认渠道并完成。在独立私有候选配置中模拟默认
+入口缺失后，真实派工只选择已授权备用并完成，回执保留 `BAD_EXECUTABLE` 跳过原因。
+两轮 cleanup 均 confirmed，会话正常关闭；未故障注入日常配置。这只证明所验收渠道的
+此次默认/备用路径，不外推到其他 provider、套餐状态或启动后的自动恢复。
+
 2026-09-20 的 Dispatch v3 项目入口与展示整合 在 canonical macOS 主机重新运行
 `npm ci --ignore-scripts`、`npm run check` 与 `npm run test:acpx`：接入层检查共
 223 项，219 pass、4 项 Windows-only skip；真实 acpx + synthetic ACP server

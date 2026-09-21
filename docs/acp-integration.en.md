@@ -400,6 +400,15 @@ bounded fallbacks, existing-session compatibility, revocation and no post-launch
 redispatch. This does not establish an updated installed plugin, live provider or
 local default config. Cross-platform results belong to the corresponding commit's CI.
 
+Separate local installation and live-route acceptance followed that day: the formally
+reinstalled plugin matched canonical source, and a real run without `--route` used
+the default channel and completed. A separate private candidate config simulated a
+missing default entry; the live run selected only the authorized backup and completed,
+retaining the `BAD_EXECUTABLE` skip reason. Both cleanups were confirmed and sessions
+closed normally, without fault injection into the everyday config. This proves those
+tested default/fallback paths, not other providers, plan status or automatic recovery
+after startup.
+
 On 2026-09-20, the Dispatch v3 project entry point and display integration re-ran
 `npm ci --ignore-scripts`, `npm run check` and `npm run test:acpx` on the canonical macOS
 host: the integration-layer checks numbered 223 items, 219 pass and 4 Windows-only skips;
