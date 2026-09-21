@@ -28,6 +28,20 @@ proxy 或固定 planner/tester/reviewer 流水线。
 
 ## Dispatch · 派工台
 
+Dispatch 是可选的本地派工台，只读展示已有的 ACP 回执——不使用它不影响 Worker
+Routing；它不安排工作、不建 job database，也没有原生 Codex 活动的数据源（页面数字明确只覆盖 ACP）。
+配置好[可选的 ACP integration](#安装)后，在 canonical checkout 中启动：
+
+```sh
+node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
+node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
+```
+
+命令会在前台运行并打印一个私人 loopback URL（默认随机端口，可用 `--port 4317` 固定）；
+需要你自己打开这个 URL，并保持进程运行，直到点击关闭面板或按 Ctrl+C。第一次派发 ACP 任务之前，
+派工台打开时是空的，这是预期行为——它只投影已经存在的回执。分享卡从面板页首的
+「分享小卡 / Share card」按钮进入。
+
 Home 默认显示聚合统计：时间走势、准确占比的状态条、route 分工、明确返修与 runtime notes；具体工单回放在 Sessions。
 Sessions 可按真实工作目录归入 Git 仓库或文件夹，同 repo 的 worktree 合并，再筛选具体目录；
 不把这些归组冒充 Codex 保存的 project 名称。浏览器默认机器时区，日期柱、下钻与分享保持一致。
@@ -48,11 +62,6 @@ Slogan 可从四组双语文案开始自由编辑，支持可选分享者署名�
 
 统计自动读取执行回执，普通完成不需要另写验收标记，也不会变成待办。真正需要保留的返修
 可通过 `continue --revision-reason` 顺手记录；`pending` 仅按需列出异常和明确提出的复查。
-
-```sh
-node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
-node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
-```
 
 业务数据只读，仅写入三个本地展示偏好；仅监听 loopback、按需运行；没有 analytics 或额外 frontend dependency。
 累计 tokens 去重并标明用量覆盖率，缺少数据保持未知；不把 runtime 完成冒充验收，

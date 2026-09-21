@@ -77,6 +77,11 @@ import or scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mj
 record appends one collaboration event and never rewrites a runtime receipt.
 Dashboard data is read-only; theme, language and time zone are local display preferences.
 
+dashboard prints a private loopback URL (ephemeral port by default; use --port to fix
+one), stays in the foreground and projects existing ACP receipts. Before the first ACP
+task it opens an expected empty state. Share cards are reached from the dashboard
+header. Open the printed URL yourself; the command never opens a browser.
+
 continue --revision-reason REASON is an OPTIONAL shortcut for a genuine
 correction: it appends a revision_requested event (using the documented reason
 enum) before the prompt, so the rework is attributed without a separate file. It
@@ -97,6 +102,10 @@ export function parseArgs(args) {
   if (!command || command === '--help' || command === 'help') return { command: 'help' };
   const values = VALUES[command], flags = FLAG[command] ?? [];
   if (!values) throw new Fault('USAGE', 'Unknown command. Run --help.');
+  // A known command's `--help` returns the shared help text instead of failing on
+  // an unknown option. There is no per-command help framework; `help` short-circuits
+  // before option validation, so `<known-command> --help` and bare `--help` agree.
+  if (rest.length === 1 && rest[0] === '--help') return { command: 'help' };
   const out = { command };
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i]?.startsWith('--')) throw new Fault('USAGE', 'Unknown, duplicate or missing option.');
@@ -421,6 +430,7 @@ export async function startDashboardCommand(config, opt, { text, output, deps = 
     throw new Fault('DASHBOARD_UNAVAILABLE', 'The dashboard module does not export startDashboard.');
   const handle = await dashboard.startDashboard({ stateDir: config.stateDir, since, port });
   text(`Dispatch dashboard: ${handle.url}\n`);
+  text('Open this private URL in your browser and keep this process running (Ctrl+C to stop).\n');
   output({ schema: 'cwr.dispatch.dashboard/1', url: handle.url, since, port: handle.port ?? port ?? null });
   return new Promise(resolve => {
     let done = false;

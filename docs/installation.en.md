@@ -29,7 +29,10 @@ See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration 
 Dispatch ships with the optional ACP source, without an additional frontend
 dependency or system service. Operators with the ACP runtime installed can use
 the canonical CLI's `stats`, `pending` and `dashboard`; reading history does not
-start an adapter. The `acp-worker` skill describes natural collaboration records.
+start an adapter or load the `acpx` runtime — these read-only commands validate the
+same private `--config` file but use only its `stateDir`. A config skeleton lives at
+[`integrations/acpx/examples/routes.example.json`](../integrations/acpx/examples/routes.example.json).
+The `acp-worker` skill describes natural collaboration records.
 Refresh its installed copy and the bundled cat icon through the plugin flow above:
 source edits do not replace instructions already loaded in an existing session.
 

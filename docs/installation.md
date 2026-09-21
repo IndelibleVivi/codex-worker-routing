@@ -23,7 +23,10 @@ SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接�
 
 Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统服务。
 已有 ACP runtime 的 operator 可以直接运行 canonical CLI 的 `stats` / `pending` / `dashboard`；
-读取历史无需启动 adapter。新增协作事件的自然记录说明位于 `acp-worker` skill，
+读取历史无需启动 adapter，也不会加载 `acpx` runtime——这些只读命令校验同一份私人
+`--config` 文件，但只使用其中的 `stateDir`。配置示例见
+[`integrations/acpx/examples/routes.example.json`](../integrations/acpx/examples/routes.example.json)。
+新增协作事件的自然记录说明位于 `acp-worker` skill，
 连同内置猫头 icon 一起按上述 Plugin 流程刷新 installed copy；只有修改 source 不会改变旧 session 已加载的说明。
 面板首次使用默认为机器时区；主题、语言、时区保存在 Git 外 stateDir 的
 `dashboard-preferences.json`，换端口后保留。仅这些展示偏好可由面板写入，业务数据仍只读。

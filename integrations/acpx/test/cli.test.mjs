@@ -9,6 +9,31 @@ async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);c
 const args=f=>['run','--config',f.configFile,'--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 
 test('CLI parser refuses unknown/duplicate flags and unknown verbs',()=>{for(const a of [['forget'],['run','--route','x'],['status','--config','a','--session','b','--oops','x'],['status','--config','a','--config','b']])assert.throws(()=>parseArgs(a),{code:'USAGE'})});
+test('bare --help and <known-command> --help both return help',()=>{
+ for(const a of [[],['--help'],['help'],['dashboard','--help'],['run','--help'],['stats','--help'],['pending','--help'],['record','--help'],['continue','--help']])
+  assert.deepEqual(parseArgs(a),{command:'help'},`${a.join(' ')} should resolve to help`);
+ // Help short-circuits before option validation, so a trailing/extra token is still refused.
+ for(const a of [['dashboard','--help','--config','x'],['dashboard','--config','x','--help']])
+  assert.throws(()=>parseArgs(a),{code:'USAGE'},`${a.join(' ')} should not silently accept help mid-command`);
+});
+test('main prints help for a known command without loading config',async()=>{
+ const written=[];assert.equal(await main(['dashboard','--help'],{help:s=>written.push(s),output:()=>{throw new Error('no output expected')}}),0);
+ assert.equal(written.length,1);
+ assert.match(written[0],/dashboard --config FILE/);
+ assert.match(written[0],/private loopback URL/);
+ assert.match(written[0],/share cards are reached from the dashboard\s+header/i);
+});
+test('dashboard startup prints the URL, foreground guidance and JSON handle',async t=>{
+ const f=await setup(t);const text=[],output=[];
+ const stub={startDashboard:async()=>({url:'http://127.0.0.1:4317/#token=deadbeef&since=all',port:4317})};
+ assert.equal(await main(['dashboard','--config',f.configFile,'--port','4317'],{...f.deps,text:s=>text.push(s),output:r=>output.push(r),loadDashboard:async()=>stub}),0);
+ const stdout=text.join('');
+ assert.match(stdout,/Dispatch dashboard: http:\/\/127\.0\.0\.1:4317\/#token=deadbeef&since=all/);
+ assert.match(stdout,/keep this process running \(Ctrl\+C to stop\)/);
+ assert.match(stdout,/Open this private URL/);
+ // The structured handle is preserved and unchanged by the extra guidance line.
+ assert.deepEqual(output,[{schema:'cwr.dispatch.dashboard/1',url:'http://127.0.0.1:4317/#token=deadbeef&since=all',since:'all',port:4317}]);
+});
 test('CLI full lifecycle keeps native channel untouched',async t=>{
  const f=await setup(t);assert.equal(await main(args(f),f.deps),0);const r=f.results.at(-1);
  assert.equal(await main(['continue','--config',f.configFile,'--session',r.session_id,'--file',f.orderFile],f.deps),0);

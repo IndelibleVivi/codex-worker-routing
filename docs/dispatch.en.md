@@ -18,8 +18,16 @@ Open the private loopback URL printed by the command. The default port is epheme
 use `--port 4317` to choose one. `--since 7d`, `--since 30d` and an ISO date such as
 `--since 2026-01-01` are supported; the default is `all`. The UI offers period selection,
 project/folder grouping, search, explicit revision/takeover filters, replay and Chinese / English labels.
+The `dashboard`, `stats` and `pending` commands validate the same private `--config` file but
+read only its `stateDir`; they load no adapter and start no work. A config skeleton lives at
+[`examples/routes.example.json`](../integrations/acpx/examples/routes.example.json).
 If the initial local statistics read fails, the dashboard makes up to five attempts; this never
 redispatches a worker. Closing stops retries and polling, and late reads cannot replace the closed notice.
+
+Before the first ACP task the dashboard is expected to open empty: zero counts and
+an "after your first delegated task" notice. Dispatch projects receipts that already exist;
+it does not create work, so an empty view means only that nothing has been delegated through
+ACP yet.
 
 The command stays in the foreground and installs no service. “Close dashboard” or Ctrl+C
 releases the process. After the last page stops sending heartbeats, it exits in about two
@@ -151,6 +159,8 @@ remain the coordinator’s attributed judgments, with work orders and receipts a
 for local inspection.
 
 ## Share cards
+
+Open the export dialog from the **Share card** button in the dashboard header.
 
 “Share card” previews **1600 × 900** landscape and **1080 × 1350** portrait
 artifacts, downloadable as SVG or PNG. Choose Chinese or English independently of the UI language;

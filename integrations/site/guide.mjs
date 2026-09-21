@@ -81,6 +81,7 @@ Stop and report if the fix would cross that boundary.`);
  <pre><code>${esc(`node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/config.json
 node integrations/acpx/src/cli.mjs stats --config /absolute/private/config.json --since 7d`)}</code></pre>
  <ul>
+  <li>${tp('命令会在前台运行并打印一个私人 loopback URL（默认随机端口）；需要你自己打开该 URL 并保持进程运行。第一次派发 ACP 任务之前，面板打开时是空的，这是预期行为。','The command runs in the foreground and prints a private loopback URL (ephemeral port by default); open that URL yourself and keep the process running. Before your first ACP task the panel opens empty, which is expected.')}</li>
   <li>${tp('统计口径：运行完成不等于工程验收；已观测 tokens 是已知工作量，不是省下的 Codex 额度，也不是计费证据；缺少用量保留为未知而非零。','Accounting: runtime completion is not acceptance; observed tokens are known workload, not quota saved and not billing evidence; missing data stays unknown.')}</li>
   <li>${tp('项目按实际工作目录找回：本机 Git 仓库把链接的 worktree 归入同一仓库，另有文件夹过滤；这不是 Codex 保存的项目名，也不用聊天文本推断身份。','Projects come from the working directory: Git repositories group linked worktrees, with a folder filter. These are not saved Codex project names; no chat text infers identity.')}</li>
   <li>${tp('用量覆盖度指出多少任务有可归属数据；普通完成或关闭不需标注，也不产生待办。','Usage coverage states how many tasks have attributable data; ordinary completion needs no annotation or to-do.')}</li>
@@ -88,6 +89,7 @@ node integrations/acpx/src/cli.mjs stats --config /absolute/private/config.json 
 
  const sharingBody=`<p>${tp('分享卡预览 1600×900 横版与 1080×1350 竖版，可导出 SVG 或 PNG。主题、中英文、版式各自独立：四种主题 × 两种语言 × 两种版式 × SVG/PNG 共 32 种组合，文件名带主题、语言、格式与日期。','Share cards preview 1600×900 landscape and 1080×1350 portrait, as SVG or PNG. Theme, language and layout are independent: four themes × two languages × two layouts × SVG/PNG give 32 combinations, named with theme, language, format and date.')}</p>
  <ul>
+  <li>${tp('分享卡入口在面板页首的「分享小卡」按钮。','Share cards open from the “Share card” button in the dashboard header.')}</li>
   <li>${tp('数字笔触可选 Soft / Book / Mono，装饰可选 Thread / Bloom / None；手绘装饰只来自本地 SVG。','Numerals offer Soft / Book / Mono, ornaments Thread / Bloom / None; decorations stay in local SVG.')}</li>
   <li>${tp('文案从四组双语预设起步、可自由编辑；另有可选署名。这两项是你主动输入的展示文本，以纯文本转义后进入图片，绝不会从私人记录或账号身份推断。','The slogan starts from four bilingual presets and is editable; an optional shared-by credit is separate. Both are text you enter, escaped as plain text, never inferred from records.')}</li>
   <li>${tp('统计部分只接受汇总数字、时间范围、时区与覆盖度；工单、输出、私有 route 名、路径与内部 ID 不会自动填入卡片，也不会自动上传。','The statistics portion accepts only aggregate totals, period, timezone and coverage. Work orders, outputs, private route names, paths and internal IDs are never filled in automatically, and nothing auto-uploads.')}</li>

@@ -111,7 +111,9 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage',sty
  </g>`;
  const countText=compact(d.responsibilities);
  const numberFont=authored.numberStyle==='book'?SERIF:authored.numberStyle==='mono'?MONO:SANS;
- const primary=(x,y,maxSize,width)=>text(x,y,countText,Math.min(maxSize,width/(countText.length*.65)),c.ink,authored.numberStyle==='book'?400:500,`id="share-task-count" font-family="${numberFont}" letter-spacing="-5"`);
+ const primarySize=(maxSize,width)=>Math.min(maxSize,width/(countText.length*.65));
+ const primaryWidth=size=>Array.from(countText).reduce((sum,char)=>sum+glyphWidth(char)*size,0);
+ const primary=(x,y,maxSize,width)=>text(x,y,countText,primarySize(maxSize,width),c.ink,authored.numberStyle==='book'?400:500,`id="share-task-count" font-family="${numberFont}" letter-spacing="-5"`);
  const since=d.period.since?dayKey(d.period.since,d.time_zone).replaceAll('-','.') : T('全部已记录时间','ALL RECORDED TIME');
  const until=d.period.until?dayKey(d.period.until,d.time_zone).replaceAll('-','.') : T('未知','UNKNOWN');
  const outcome=[
@@ -163,14 +165,18 @@ export function renderShareSVG(data,format='banner',lang='en',themeId='sage',sty
  }else{
   out+=cloth(80,320,880,292);
   out+=mono(110,358,T('这个窗口里的协作','THIS COLLABORATION WINDOW'),16,'letter-spacing="1.8"');
-  out+=primary(108,516,authored.numberStyle==='mono'?150:164,535)+text(112,577,T('份委派任务','delegated tasks'),27,c.ink,500);
+  const bannerCountMax=authored.numberStyle==='mono'?150:164;
+  const bannerCountWidth=zh?338:278;
+  const bannerCountSize=primarySize(bannerCountMax,bannerCountWidth);
+  const bannerLabelX=108+primaryWidth(bannerCountSize)+26;
+  out+=primary(108,526,bannerCountMax,bannerCountWidth);
+  out+=`<g id="share-task-label">${text(bannerLabelX,468,T('份委派任务','delegated tasks'),27,c.ink,500)}${text(bannerLabelX,509,T('同一份责任续做，','One responsibility,'),18,c.textSecondary)}${text(bannerLabelX,535,T('只计一份任务。','counted once.'),18,c.textSecondary)}</g>`;
   out+=companion(853,435,155);
   out+=text(1110,373,compact(d.worker_turns),54,c.ink,500)+text(1111,412,T('轮执行','worker turns'),23,c.textSecondary);
   out+=rule(446,1110,1518);
   out+=text(1110,522,compact(d.external_tokens),54,c.ink,500)+text(1111,560,T('外部已知 tokens','observed tokens'),23,c.textSecondary);
   out+=coverage(1111,596);
-  out+=text(112,650,T('同一份责任续做，只计一份任务。','One responsibility, counted once.'),18,c.textSecondary);
-  out+=track(80,679,w-160)+outcomes(80,728,360);
+  out+=track(80,650,w-160)+outcomes(80,703,360);
   out+=footer(796)+credit(796)+repo(823);
  }
  return out+'</g></svg>';

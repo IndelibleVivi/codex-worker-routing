@@ -34,6 +34,22 @@ or the [website guide](docs/website.en.md) for local preview and publishing. Eng
 
 ## Dispatch
 
+Dispatch is an optional, local, read-only view of existing ACP receipts — it is not needed to
+use Worker Routing, and it does not schedule work, add a job database, or show native Codex
+activity (every metric is explicitly ACP-only). Once the [optional ACP integration](#installation)
+is configured, launch it from the canonical checkout:
+
+```sh
+node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
+node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
+```
+
+The command prints a private loopback URL (an ephemeral port unless you add `--port 4317`) and
+runs in the foreground: open that URL yourself and keep the process running until you close the
+panel or press Ctrl+C. Before your first ACP task the dashboard is expected to open empty — it
+projects receipts that already exist, so an empty view simply means nothing has been delegated
+through ACP yet. Share cards are reached from the **Share card** button in the dashboard header.
+
 Home opens with aggregate statistics: activity over time, an exact-proportion status strip, route workload, explicit revisions and runtime notes. Individual replays live in Sessions.
 Search projects by actual working directory: Git repositories group linked worktrees, with a further folder filter. These are not saved Codex project names. The browser defaults to device time; bars, drill-through and shares stay in the same zone.
 
@@ -55,11 +71,6 @@ Edit the slogan from four bilingual presets, add optional shared-by credit, choo
 Statistics read execution receipts automatically. Ordinary completion needs no review stamp and creates
 no to-do. `continue --revision-reason` optionally records a real correction; on-demand `pending`
 lists execution issues and explicitly requested follow-up.
-
-```sh
-node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.json
-node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
-```
 
 Business data stays read-only; only three local display preferences can be saved. It is loopback-only and on demand, with no analytics or additional frontend
 dependency. Cumulative tokens are deduplicated with explicit coverage; missing data stays
