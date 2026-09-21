@@ -144,6 +144,45 @@ state，不加载 adapter。投影为每个责任派生互斥的 `review_state`�
 给出各状态计数）；未登记的 legacy 责任为 `legacy_untracked`，只是安静的历史记录。
 完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.zh-CN.md)。
 
+## 默认与备用
+
+一个默认小工就能完整使用。把下面的可选片段加入现有 Git 外配置的顶层；
+`default` 引用 `routes` 里已登记的名字，`fallbacks` 可省略或留空：
+
+```json
+{
+  "routing": { "default": "kimi-worker", "fallbacks": [] }
+}
+```
+
+正常 `run` 省略 `--route`，入口在同一次调用里读取当前默认，不需要先查询、扫描模型
+或补记录。旧配置继续支持显式 `--route NAME`；显式选择只用该路线，不自动走备用。
+名字、模型、渠道、凭据和临时偏好都留在本机。可选的一句使用经验放在已有 operator
+说明里即可，不需要小工目录、特长 schema 或套餐到期日。
+
+`fallbacks` 是 operator 对这些具体渠道、任务数据与费用的预授权，不是历史使用列表。
+自动选择只发生在 adapter 启动、runtime import 和 worker home/state 写入之前：默认
+入口缺失/不可启动，或缺少 `passEnv` 声明的必要环境凭据时，按顺序尝试明确备用，每条
+最多一次。权限、workspace、`enabled: false`、不安全配置、锁冲突、工单错误、依赖错误
+与任何启动后的失败都不能触发这项自动切换。选中的路线仍须通过原有所有校验。
+跳过的候选不生成虚假的责任或执行轮次；本地回执给出实际选择与有界的跳过原因，
+不保存环境变量的值，也不把这些私有信息放进 aggregate share。
+
+换默认只改 `routing.default`；备用列表也在同一处更新。policy 变化不会改变既有
+session 的 route fingerprint，`continue` 仍回原 worker。若明确要求“不再用旧渠道”，
+同时将旧 route 的 `enabled` 设为 `false`，后续 run/continue 都会拒绝；这不会自动
+终止已在运行的 turn，需通过原 session 协调停止。status/cancel/close 保留恢复能力。
+无需为换默认改 skill、plugin cache 或复制一份 SessionStart 偏好。Native 的默认选择
+仍由宿主和已有本机授权说明管理，不被这个 ACP 配置包装执行。
+
+初始化或执行开始后失败，主 agent 先核对原 receipt/status、确认 writer 停止并检查
+已有成果，再按当前授权把剩余责任交给备用；状态不明不重发写工单。质量问题仍走原
+worker 返修。该主任务内复用未变化的已知故障，不反复试探同一坏渠道；无备用时，任务
+允许就由主线程直接完成。runtime 错误码不能证明套餐到期、余额不足或 HTTP 429。
+
+未选择的旧 route 缺少入口、环境凭据或 workspace，不阻止可用的默认路线；配置的
+安全边界仍统一校验，实际选择的 cwd 必须存在并精确匹配该路线的 workspace 白名单。
+
 ## 日常用法
 
 安装目录变量只用于展示；实际使用登记好的绝对路径。
@@ -152,7 +191,8 @@ state，不加载 adapter。投影为每个责任派生互斥的 `review_state`�
 ENTRY=/absolute/canonical/repo/integrations/acpx/src/cli.mjs
 CONFIG=/absolute/private/routes.json
 
-node "$ENTRY" run --config "$CONFIG" --route kimi-worker \
+# 配置 routing.default 后；旧配置或明确指定渠道时加 --route NAME
+node "$ENTRY" run --config "$CONFIG" \
   --cwd /absolute/approved/worktree --file /absolute/work-order.md
 
 # 从回执取 session_id；给同一个 worker 追加条件
@@ -236,7 +276,7 @@ worktree；worktree 本身也不隔离上述非文件资源。
 
 初始连接/握手使用至多 30 秒控制超时；每轮任务使用 route.timeoutMs。
 初始化取消不代表底层握手已退出；在接口无法确认清理时会保留锁和不确定状态。
-没有自动重试或 native/ACP 静默 fallback。提交后丢失回执时，先查 status 与已保存 receipt。
+启动后没有自动重试或 native/ACP 静默 fallback；启动前的有限选择见[默认与备用](#默认与备用)。提交后丢失回执时，先查 status 与已保存 receipt。
 不要靠再次发送同一写工单来“确认”。正常停止和代码失败会尝试关闭 ACP-owned 连接；
 清理失败、初始化未决、仍观测到活跃 adapter 或进程直接死亡时保留锁。
 
@@ -249,6 +289,12 @@ v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后�
 清理只确认 acpx-owned 进程/连接；不保证恶意 daemon 化或脱离宿主的任意后代已被终止。
 
 ## 验收门
+
+2026-09-21 的默认与备用源码更新在 macOS 通过 256 项 integration 检查（252 pass、
+4 项 Windows-only skip），以及真实 acpx + synthetic ACP server 的 8 项检查
+（6 pass、2 项 Windows-only skip）。覆盖默认省略、显式选择、有限备用、旧 session
+兼容、撤回许可与启动后不重派；不代表 installed plugin、真实 provider 或本机默认
+配置已更新。跨平台结果以对应提交的 CI 为准。
 
 2026-09-20 的 Dispatch v3 项目入口与展示整合 在 canonical macOS 主机重新运行
 `npm ci --ignore-scripts`、`npm run check` 与 `npm run test:acpx`：接入层检查共

@@ -34,6 +34,14 @@ legacy orders are not reconstructed from transcripts. Managed reads reject direc
 symlinks, non-regular or multi-link files and unsafe private file modes; they never
 repair state. Windows ACL privacy remains an operator responsibility.
 
+An implicit-default run may also retain `receipt.selection` (`cwr.acp.selection/1`):
+`requested_route`, `actual_route`, `fallback` (route name or null), and
+`skipped_routes` with route names and safe availability codes. It records prelaunch
+selection, not additional executions: only the chosen route creates a responsibility
+and turn. This local receipt field is outside both the Dispatch projection and share
+allowlists. It contains no environment values, raw errors or paths; explicit runs,
+continuations and older receipts need not contain it.
+
 ## Coordinator events
 
 The `record --session UUID --file FILE` input is an object with the following fields.

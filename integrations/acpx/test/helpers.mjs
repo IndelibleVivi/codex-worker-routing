@@ -6,6 +6,19 @@ import { atomicJSON, paths } from '../src/state.mjs';
 import { loadConfig, selectRoute } from '../src/config.mjs';
 export const sleep = ms => new Promise(r => setTimeout(r,ms));
 export function deferred() { let resolve,reject; const promise = new Promise((a,b)=>{resolve=a;reject=b;}); return {promise,resolve,reject}; }
+// A synthetic worker home under the fixture root, disjoint from every other
+// route home and from the granted workspace.
+export const homeFor = (root, name) => path.join(root, `${name}-home`);
+// A route record with the fixture defaults. `argv[0]` must already exist as a
+// launchable file when a test expects the route to be selectable.
+export function routeFor(root, cwd, over = {}) {
+  const { __name: name = 'worker', ...fields } = over;
+  return {
+    enabled: true, argv: [process.execPath], workerHome: homeFor(root, name),
+    workspaces: [cwd], passEnv: [], contextRevision: 'synthetic-v1', maxPermissions: 'full',
+    sessionOptions: {}, timeoutMs: 2000, ...fields,
+  };
+}
 export async function fixture(overrides={}) {
   const lexicalRoot = await fs.mkdtemp(path.join(os.tmpdir(),'cwr-test-'));
   // Match production config loading, which canonicalizes an existing system

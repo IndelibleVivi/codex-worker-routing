@@ -13,5 +13,6 @@
       "sessionOptions": {},
       "timeoutMs": 900000
     }
-  }
+  },
+  "routing": { "default": "kimi-worker", "fallbacks": [] }
 }

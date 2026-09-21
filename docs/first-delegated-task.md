@@ -99,10 +99,10 @@ codex plugin list --marketplace personal --json
 这条路线。它与 native subagent 并列，不替换路线 A/B。
 
 ```text
-普通派工
+未另选 ACP 的派工
   -> native Codex child
 
-operator 明确选择已登记 ACP route
+operator 已设 ACP 默认或明确选择已登记 ACP route
   -> acp-worker skill
   -> cwr-acp
   -> external ACP agent
@@ -112,6 +112,10 @@ ACP route config、worker home、API key、adapter 和 exact workspace allowlist
 Git 外。先完成 `integrations/acpx` 的无账号合成测试，再登记真实 route；具体 schema、
 `run` / `continue` / `status` / `cancel` / `close` 与恢复边界见
 [ACP integration](acp-integration.md)。
+
+一个默认小工就够了。已有 ACP 配置可加入 `routing.default` 与可选 `routing.fallbacks`，
+正常派工省略 `--route`，无需每次比较模型；具体的[默认切换与备用边界](acp-integration.md#默认与备用)
+都在原配置中管理。Native 则沿用宿主默认和已授权选择，不需要另写小工简介。
 
 第一次真实 ACP 验收使用一个干净的小 repo：让 worker 修改一个小函数、补一条检查、
 运行测试，再用同一个 integration session 增加一条返修要求。主 agent 检查实际 diff。

@@ -250,6 +250,10 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     work_order_pointer: config.dispatch?.orderPointer ? requestId : null,
     dispatch_warning: config.dispatch?.orderWarning ?? null,
   };
+  // Additive, bounded local selection evidence: which route produced this turn.
+  // It carries only route names and safe skip codes; never env values, messages
+  // or filesystem paths, and it never enters an aggregate share projection.
+  if (selection.selection) receipt.selection = { ...selection.selection };
   await atomicJSON(receipt.receipt_path, receipt);
   binding.lastReceipt = receipt.receipt_path;
   binding.lastStatus = receipt.runtime_status;

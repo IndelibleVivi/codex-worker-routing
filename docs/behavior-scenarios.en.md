@@ -2,7 +2,7 @@
 
 [中文](behavior-scenarios.md) | English
 
-This page describes four **non-runtime** observation scenarios for checking
+This page describes **non-runtime** observation scenarios for checking
 whether Worker Routing follows its policy in an ordinary main session. The
 canonical runtime instructions remain the
 [SKILL.md and its four references](../plugins/worker-routing/skills/worker-routing/SKILL.md).
@@ -63,6 +63,36 @@ or the work is tiny, nearly complete, or cheaper to finish than to hand over.
 - Evidence: the trace with no new child, and the main session's diff and checks.
 - No claim: this is not proof of reliable triggering and does not require
   duplicate production runs or paid testing.
+
+## 5. Change the default or revoke a route
+
+Configure only one default worker and dispatch two independent responsibilities;
+then change the default from A to B and continue the existing responsibility on A.
+
+- Expected: ordinary delegation requires no catalog scan or capability biography.
+  New work uses the current default; the existing session stays on A. Explicitly
+  revoking A blocks further use while leaving stop/recovery operations available.
+- Evidence: the selected route, same-session continuation, and run/continue/control
+  outcomes before and after the change. ACP resolves the default inside the normal
+  run call, without a mandatory discovery round trip.
+- No claim: a shared model name proves neither equivalent capabilities nor data
+  authorization across channels; config tests do not prove native host behavior.
+
+## 6. Authorized fallback and execution recovery
+
+The default entry is unavailable before launch and the operator has authorized a
+backup; a separate responsibility fails after submission or has an ambiguous receipt.
+
+- Expected: preflight availability failure considers only authorized backups and
+  launches at most one worker. Permission, workspace and disabled-route denials do
+  not trigger a bypass. After startup or ambiguous submission, recover the original
+  execution, confirm the writer has stopped and inspect its changes before handing
+  over remaining work. Quality failures use same-worker rework.
+- Evidence: skipped-route codes, launch/prompt counts, receipts and cleanup, and the
+  recovered diff. Do not repeatedly probe an unchanged known failure in the same task;
+  without a backup, finish directly when the task allows it.
+- No claim: runtime codes do not prove subscription expiry, exhausted credit or HTTP
+  429; a historically used channel is not current fallback authorization.
 
 ## Explicit non-goals
 

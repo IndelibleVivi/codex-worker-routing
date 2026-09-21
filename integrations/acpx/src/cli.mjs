@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
-import { loadConfig, loadControlConfig, selectRoute, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform } from './config.mjs';
+import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
 
@@ -29,7 +29,9 @@ const VALUES = Object.freeze({
   dashboard: ['config', 'since', 'port'],
 });
 const REQUIRED = Object.freeze({
-  run: ['config', 'route', 'cwd', 'file'],
+  // `route` is resolved separately: it is required only for configs without a
+  // routing.default (or for continue, which always uses the bound route).
+  run: ['config', 'cwd', 'file'],
   continue: ['config', 'session', 'file'],
   status: ['config', 'session'],
   cancel: ['config', 'session'],
@@ -42,7 +44,7 @@ const REQUIRED = Object.freeze({
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
 
 const HELP = `cwr-acp (optional channel; does not replace native subagents)
-  run      --config FILE --route NAME --cwd DIR --file ORDER [--permissions read|full]
+  run      --config FILE [--route NAME] --cwd DIR --file ORDER [--permissions read|full]
            [--title TEXT] [--category investigation|implementation|review|other]
   continue --config FILE --session UUID --file INCREMENT [--permissions read|full]
            [--revision-reason REASON]
@@ -56,7 +58,19 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
-claim the worker has stopped. No automatic route fallback or background wakeup.
+claim the worker has stopped. No background wakeup and no post-launch retry.
+
+run resolves its route fresh on every call. Omit --route when CONFIG declares a
+top-level routing.default; the default is read from the current config, not from
+memory. An explicit --route uses that exact enabled route and never falls back.
+Optional routing.fallbacks are tried, in declared order and at most once each,
+ONLY before any adapter launch, runtime import, or worker home/state write, and
+only when the selected route's entry is missing/unlaunchable or its explicitly
+required passEnv credential is absent. Fallback never bypasses a permission,
+workspace or enabled:false denial, an unsafe config, a BUSY lock, an invalid
+order or any runtime/dependency failure, and never retries post-launch. A
+fallback launch is exactly one responsibility/prompt. The receipt reports the
+requested route, the actual route and bounded skipped-route codes.
 
 stats, record and pending read the private state root only; they never load,
 import or scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
@@ -222,7 +236,27 @@ export async function main(args, deps = {}) {
     } finally { await unlock(); }
   }
   if (binding?.closed) throw new Fault('SESSION_CLOSED','The work order is closed.');
-  const selection = await selectRoute(config, opt.route ?? binding.route, opt.cwd ?? binding.cwd, opt.permissions ?? 'read');
+  // Route resolution, freshly per call: explicit --route and continue stay pinned
+  // to exactly one route (no fallback); run without --route resolves the current
+  // routing.default and, only prelaunch, its authorized fallbacks.
+  const resolveOne = name => selectRoute(config, name, opt.cwd ?? binding?.cwd, opt.permissions ?? 'read');
+  let selection, routeNote;
+  if (opt.route !== undefined) {
+    selection = await resolveOne(opt.route); routeNote = opt.route;
+  } else if (opt.command === 'continue') {
+    selection = await resolveOne(binding.route); routeNote = binding.route;
+  } else if (config.routing?.default) {
+    const resolved = await resolveRouteSelection(config.routing, resolveOne);
+    selection = resolved.selection;
+    routeNote = resolved.fallback ? `${resolved.requestedRoute} -> ${resolved.fallback}` : resolved.requestedRoute;
+    selection.selection = {
+      schema: 'cwr.acp.selection/1', requested_route: resolved.requestedRoute,
+      actual_route: selection.name, fallback: resolved.fallback,
+      skipped_routes: resolved.skips.map(s => ({ route: s.route, code: s.code })),
+    };
+  } else {
+    throw new Fault('ROUTE_REQUIRED', 'No --route was given and the config has no routing.default. Add --route NAME or register a default route.');
+  }
   if (binding && selection.fingerprint !== binding.routeFingerprint) throw new Fault('ROUTE_CHANGED','Route/context revision changed. Start an explicit new responsibility.');
   const order = await readOrder(opt.file);
   // The child-only environment option in acpx is not assumed to be a scrubber.
@@ -312,7 +346,7 @@ export async function main(args, deps = {}) {
       }
     }
     runtimeStarted = true;
-    (deps.progress ?? (s => process.stderr.write(s)))(`[acp] session ${binding.id}; ${selection.permissions} permissions\n`);
+    (deps.progress ?? (s => process.stderr.write(s)))(`[acp] session ${binding.id}; route ${routeNote}; ${selection.permissions} permissions\n`);
     receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId});
     safeRelease = receipt.cleanup === 'confirmed';
 
@@ -407,7 +441,13 @@ export async function startDashboardCommand(config, opt, { text, output, deps = 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main(process.argv.slice(2)).then(code => { process.exitCode = code; }).catch(e => {
     const code = typeof e.code==='string' && /^[A-Z0-9_]{1,80}$/.test(e.code) ? e.code : 'INTEGRATION_ERROR';
-    process.stderr.write(JSON.stringify({schema:'cwr.acp.error/1',code,message:e instanceof Fault?e.message:'Local operation failed. Inspect the private runtime state; no route fallback occurred.'})+'\n');
+    // A prelaunch failure may have skipped unavailable candidates before a later
+    // fatal error (for example a BUSY lock after the default was skipped), so the
+    // terminal message must not claim that no selection occurred. Fault messages
+    // already stay bounded and path-free; the non-Fault fallback also avoids any
+    // "no fallback" claim. The local receipt carries the exact selection evidence.
+    const message = e instanceof Fault ? e.message : 'Local operation failed. Inspect the private runtime state; no post-launch route fallback occurred.';
+    process.stderr.write(JSON.stringify({schema:'cwr.acp.error/1',code,message})+'\n');
     process.exitCode=2;
   });
 }

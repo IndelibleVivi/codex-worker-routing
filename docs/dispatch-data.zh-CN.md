@@ -31,6 +31,12 @@ legacy 续做开始纳入追踪的时刻。既有的 `dispatch.type='dispatched'
 目录 symlink、非普通文件或多重链接文件以及不安全的私有文件权限；它们从不修复
 状态。Windows ACL 隐私仍由操作者负责。
 
+使用默认的 run 还可留存 `receipt.selection`（`cwr.acp.selection/1`）：
+`requested_route`、`actual_route`、`fallback`（route 名或 null）与包含 route 名、
+安全可用性错误码的 `skipped_routes`。它记录启动前的选择，不增加执行次数；只有
+选中的路线建立责任和 turn。该本地回执字段不进入 Dispatch 投影或 share 白名单，
+不含环境变量值、原始错误或路径；显式 run、continue 与旧回执可没有该字段。
+
 ## 协调者事件
 
 `record --session UUID --file FILE` 的输入是含以下字段的对象。未知字段被拒绝；

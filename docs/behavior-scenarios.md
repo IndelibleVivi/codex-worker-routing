@@ -2,7 +2,7 @@
 
 [English](behavior-scenarios.en.md) | 中文
 
-本页只记录四个**非 runtime** 的观察场景，供人在真实主 session 里核对
+本页记录**非 runtime** 的观察场景，供人在真实主 session 里核对
 worker routing 是否按当前 policy 行事。runtime 的 canonical text 在
 [SKILL.md 与四份 references](../plugins/worker-routing/skills/worker-routing/SKILL.md)。
 
@@ -52,6 +52,22 @@ worker 仍在工作时，等待出现 timeout、静默或 active yield。
   其安全停止或收尾再接管，且停止盯进度不等于取消 worker。
 - 需要的证据：thread trace（没有新 child）与主线程完成的 diff、checks。
 - 不作断言：不声称这是稳定触发的证据，也不要求生产双跑或付费测试。
+
+## 场景五：默认切换与撤回许可
+
+只配置一个默认小工，连续派出两块独立责任；随后把默认从 A 改为 B，再续做 A 的旧责任。
+
+- 期望可观察行为：普通派工不扫描模型目录、不要求填写特长；新责任使用最新默认，旧责任保持 A 的会话。只有明确撤回 A 的许可，才拒绝后续继续使用 A，并保留停止与恢复入口。
+- 需要的证据：实际选择的 route、同一 session 的续做、配置变更前后 run/continue/control 的结果。ACP 的正常默认解析在原 run 内完成，没有固定的查询前置回合。
+- 不作断言：一个模型名相同不证明不同渠道有相同能力或数据授权；配置测试不证明 Native 宿主行为。
+
+## 场景六：获准备用与执行恢复
+
+默认入口在启动前不可用，且 operator 明确允许一个备用；另一次工作在提交后出现错误或回执不明。
+
+- 期望可观察行为：启动前的可用性故障只尝试明确备用，实际最多启动一个 worker；权限/workspace/停用不能触发自动绕路。已经启动或提交状态不明时先恢复原执行，确认 writer 停止、检查已有修改后再交接剩余工作。质量不合格仍用同 worker 返修。
+- 需要的证据：preflight 跳过原因、实际 launch/prompt 次数、receipt 与 cleanup、恢复后的 diff。该任务内未变化的已知故障不反复试探；没有备用时，在任务允许的范围内由主线程直接做。
+- 不作断言：runtime 错误码不证明套餐到期、余额不足或 HTTP 429；历史上用过的渠道不是当前备用授权。
 
 ## 明确不做
 

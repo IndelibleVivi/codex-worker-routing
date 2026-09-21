@@ -67,9 +67,11 @@ Stop and report if the fix would cross that boundary.`);
   <li>${tp('说「自己来」或「solo」，工作就留在主会话，主 agent 也应避免重复实现已经交出的责任。','Say \u201csolo\u201d or \u201cdo not delegate\u201d to keep the work in the main session; the main agent should also avoid re-implementing work already delegated.')}</li>
  </ul>`;
 
- const acpBody=`<p>${tp('普通委托走原生 Codex child。只有当你已登记一条 ACP route、并且确实想用那个独立会话时，操作者才明确选择 acp-worker 路径；它与原生路径并列，而非替代它。','Ordinary delegation goes to a native Codex child. Only if you registered an ACP route and want that separate session does the operator pick the acp-worker path, beside the native one, not replacing it.')}</p>
+ const acpBody=`<p>${tp('可以从一个默认小工开始，不需要比较模型或填写特长。原生 worker 使用宿主工具；你也可以把已登记的 ACP route 设为日常默认，交给它自己的独立会话。','Start with one default worker, without comparing models or writing capability profiles. Native workers use host tools; a registered ACP route can also be your everyday default with its own separate session.')}</p>
  <ul>
   <li>${tp('route 配置、worker home、workspace 白名单、provider 与账号选择都留在 Git 外，由你掌握。','Route config, worker home, workspace allowlist and provider/account choices stay outside Git, under your control.')}</li>
+  <li>${tp('在现有 ACP 配置里设 routing.default，正常 run 就能省略 --route；换渠道只改这一处。routing.fallbacks 可留空，备用必须预先获准。','Set routing.default in the existing ACP config and omit --route on ordinary runs. Change channels in that one place; routing.fallbacks may stay empty and backups require prior authorization.')}</li>
+  <li>${tp('自动备用只处理启动前的入口不可用或必要环境凭据缺失。启动后先恢复原执行；改默认保留旧会话，明确停用旧渠道则阻止后续续做。','Automatic backups handle only unavailable entries or missing required environment credentials before launch. After startup, recover the original execution first. Changing the default preserves existing sessions; disabling a channel blocks further continuation.')}</li>
   <li>${tp('工单通过你可配置的 agent 传出去；--permissions read|full 只决定 cwr-acp 如何应答 ACP 权限请求，它不是 OS 文件沙箱，也不构成隔离。','The work order goes to your configured agent. --permissions read|full only decides how cwr-acp answers ACP permission requests; it is not an OS sandbox and gives no isolation.')}</li>
   <li>${tp('能启动 route 或列出模型，不等于真实推理成功；初始化与执行是两个观测层。','A route starting or a model listed does not prove real inference succeeds; initialization and execution are separate.')}</li>
  </ul>

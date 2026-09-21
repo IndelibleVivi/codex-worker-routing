@@ -7,8 +7,8 @@
 **Multi-model delegation for Codex, with a local Dispatch dashboard.**
 Hand one complete engineering responsibility to a native Codex worker or, through the
 optional ACP integration, a registered external coding agent. The main agent keeps
-ownership of the goal, integration, and delivery. It suits users who have already
-connected more than one model and want to distribute execution work while keeping
+ownership of the goal, integration, and delivery. One default worker is a complete
+setup. It suits users who want to distribute execution work while keeping
 their main-session personal context intact.
 
 [Your first delegated task](docs/first-delegated-task.en.md) · [Install the plugin](#installation) ·
@@ -98,7 +98,7 @@ flowchart LR
   Adapter -->|install handler| Hook
   Private -->|local read| Hook
   Hook -->|private context<br/>root only| Main
-  RouteConfig -->|named route| ACPBridge
+  RouteConfig -->|default / explicit route| ACPBridge
   Shared --> Main
   Shared --> Native
   Shared --> External
@@ -131,8 +131,8 @@ paths and a troubleshooting table.
 To add an API model to the native Codex model picker, use the
 [custom native model picker guide](docs/native-model-picker.en.md). It covers both a
 direct Responses-compatible endpoint and several upstreams behind one local
-router/proxy. Provider keys, subscription priorities, and fallback policy remain in
-operator-owned configuration outside Git and never become Worker Routing policy.
+router/proxy. Provider keys, subscription priorities, and concrete fallback choices remain
+in operator-owned configuration outside Git, never hardcoded in the public skill.
 
 ACP route reachability has a separate protocol boundary: the channel carries sessions,
 lifecycle, permissions, and evidence, but it does not translate provider wire formats.
@@ -171,17 +171,31 @@ the responsibility and consumes less of the main subscription quota; do not dele
 for the sake of dividing work when no known benefit exists. External worker API spend is
 accounted separately, with no silent fallback to a higher-cost route. Model and provider
 names stay in operator configuration; the plugin keeps no leaderboards, price lookups,
-or evaluation matrices. An optional ACP route performs no automatic fallback: only the
-current task authority and operator policy may decide whether to switch routes after a
-failure.
+or evaluation matrices.
+
+Use the default when it fits, without comparing models or filling in worker biographies.
+For registered ACP routes, add `routing.default` to the existing private `routes.json`
+and omit `--route` on ordinary runs; `routing.fallbacks` may be omitted or empty.
+Changing channels updates that one location, without editing public skills or reinstalling
+the plugin. Native workers retain host tools and local authorized selection. A short
+experience note is optional, useful only when it changes a concrete choice.
+
+Fallbacks require explicit advance authorization. Before launching an adapter, ACP can
+try configured backups for an unavailable executable or missing required environment
+credential. Permission, workspace, disabled-route, initialization and execution failures
+do not trigger this automatic switch. After startup, the coordinator recovers the original
+execution, confirms it has stopped and preserves its work before authorized recovery;
+quality issues use same-worker rework. A default change affects new responsibilities;
+`enabled: false` revokes a route for subsequent runs and continuations while leaving
+status/cancel/close available. See [ACP defaults and fallbacks](docs/acp-integration.en.md#defaults-and-fallbacks).
 
 ## Behavior Scenarios
 
-Four non-runtime observation scenarios and their evidence standards are recorded in
+Non-runtime observation scenarios and their evidence standards are recorded in
 [behavior scenarios](docs/behavior-scenarios.en.md): a mid-sized fix requested in natural
 language, the same child moving from investigation into implementation or local rework,
 a healthy wait that neither cancels nor restarts anything, and solo or tiny work that is
-not delegated. That page is a manual review record, not an evaluation platform, and it
+not delegated, plus default changes, revocation and fallback recovery. That page is a manual review record, not an evaluation platform, and it
 makes no claim of stable triggering, net quota savings, low rework, or greater speed.
 
 ## How Context Is Separated

@@ -108,10 +108,10 @@ persistent session is useful. It sits beside native subagents rather than replac
 paths A or B.
 
 ```text
-Ordinary delegation
+Delegation without an ACP selection
   -> native Codex child
 
-Operator explicitly selects a registered ACP route
+Operator has an ACP default or explicitly selects a registered route
   -> acp-worker skill
   -> cwr-acp
   -> external ACP agent
@@ -121,6 +121,12 @@ ACP route configuration, worker home, API keys, adapter, and exact workspace
 allowlist stay outside Git. Run the account-free synthetic tests in
 `integrations/acpx` before registering a live route. The schema, commands, and
 recovery contract are in [ACP integration](acp-integration.en.md).
+
+One default worker is enough. An existing ACP config can add `routing.default` and
+optional `routing.fallbacks`; ordinary runs omit `--route`, without comparing models
+each time. [Default changes and fallback boundaries](acp-integration.en.md#defaults-and-fallbacks)
+live in that same config. Native workers retain host defaults and authorized choices;
+no worker biography is required.
 
 For the first live ACP acceptance, use a clean small repository. Ask the worker to
 edit one function, add one focused check, and run it; then add one rework condition

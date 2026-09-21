@@ -7,6 +7,10 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
+**源码更新，尚未发布**（2026-09-21）：站内 ACP 指南已加入单一默认小工、默认切换与
+启动前备用的说明，FAQ 明确只使用获准付费路线。本地 build/check、中英桌面与手机文案、
+展开 FAQ 和无 JS 指南检查通过；下方部署记录不代表这次文案已在公网生效。
+
 **已上线**（2026-09-21）：[English](https://indeliblevivi.github.io/codex-worker-routing/) ·
 [中文](https://indeliblevivi.github.io/codex-worker-routing/zh/)。GitHub Actions Pages
 负责托管，HTTPS 已开启。双语与交互更新由源码 `6db8294` 发布，

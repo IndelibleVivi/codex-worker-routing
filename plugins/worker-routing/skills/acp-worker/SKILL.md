@@ -1,13 +1,14 @@
 ---
 name: acp-worker
-description: Run or continue an explicitly named, operator-enabled external ACP coding-agent route using the optional cwr-acp integration. Trigger only when the user requests that external route or has already configured explicit ACP routing for this responsibility. Ordinary delegation, native Codex subagents, or merely seeing an ACP-capable CLI do not activate this skill.
+description: Run or continue an operator-authorized external ACP worker through cwr-acp, using a configured default or an explicitly selected route. Use when the operator has selected ACP for this responsibility; native workers and merely discovering an ACP-capable CLI do not trigger it.
 ---
 
 # Optional external ACP worker
 
-This skill does not choose a default provider or route. That preference belongs in
-operator-owned configuration outside the plugin and may change with the operator's
-current subscriptions. Native Codex workers keep their existing collaboration tools;
+Use the operator's current ACP default or explicit task selection. Defaults and
+authorized fallbacks belong in the existing private route config, outside the plugin.
+One route is sufficient; no worker catalog or subscription calendar is required.
+Native Codex workers keep their existing collaboration tools;
 do not wrap them in this CLI, switch the main model, or treat one route's failure as
 authorization to launch another. An ACP worker is a separate agent session, not a
 native Codex child or a new user-visible Codex task.
@@ -35,7 +36,7 @@ prerequisite and keep the existing native route available.
 Use the trusted, operator-supplied paths in place of ENTRY and CONFIG:
 
 ```sh
-node ENTRY run --config CONFIG --route NAME --cwd WORKSPACE --file ORDER --title TITLE --category implementation
+node ENTRY run --config CONFIG --cwd WORKSPACE --file ORDER --title TITLE --category implementation
 node ENTRY continue --config CONFIG --session UUID --file INCREMENT
 node ENTRY continue --config CONFIG --session UUID --file REWORK --revision-reason REASON
 node ENTRY status --config CONFIG --session UUID
@@ -45,6 +46,11 @@ node ENTRY close --config CONFIG --session UUID
 ```
 
 `run` creates an independent responsibility. Keep its returned integration UUID.
+Omit `--route` when CONFIG has `routing.default`; the same call reads the current
+default and optional `routing.fallbacks`. Add `--route NAME` only for an explicit
+task/operator choice or an authorized recovery, not a remembered old default.
+Legacy configs without routing still require that flag. An explicit route never
+automatically falls back. Use `docs/acp-integration.md` for the small config example.
 `continue` resumes that exact conversation; it cannot silently create a fresh one.
 `--permissions` selects this integration's ACP permission-response policy, not a
 filesystem boundary. The default `read` answers requests with approve-reads plus
@@ -65,6 +71,26 @@ integration's workspace lock cannot see native workers, other installations,
 ports, databases, services, or external shared resources.
 
 ## Wait, cancel, continue, accept
+
+Automatic fallback is limited to configured alternatives during preflight, before
+any adapter launch, for a missing/unlaunchable entry or missing required environment
+credential. It does not widen workspace or permissions, override a disabled route,
+or retry dependency, initialization, prompt, stream or cleanup failures. Check the
+returned selection evidence if a route was skipped; do not repeat the failed default
+for another responsibility in the same task while the cause is unchanged. If no
+alternative is authorized, use the main thread when the task allows direct work.
+
+After startup, use the original receipt/status and cleanup evidence before recovery.
+Only confirmed stopped work may move to a preauthorized alternative; inspect existing
+artifacts and hand over the remainder, never replay an ambiguous write order. Do not
+infer quota expiry, HTTP status or retry timing from generic runtime errors. A failed
+test or missed requirement normally continues the same worker for correction.
+
+Changing `routing.default` or its fallback order does not migrate an existing session.
+To revoke a channel, set its existing route's `enabled` to false under the user's
+authorization as well as selecting the new default; subsequent runs and continuations
+on that channel are denied. Status/cancel/close remain available for safe recovery.
+Do not disable a still-authorized old route merely because a new default was selected.
 
 The CLI blocks until its turn result and owned-connection cleanup. Use the host's
 normal shell execution/wait semantics. Do not short-poll a healthy worker, restart

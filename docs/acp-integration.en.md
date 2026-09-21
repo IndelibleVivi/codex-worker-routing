@@ -205,6 +205,56 @@ an unregistered legacy responsibility is `legacy_untracked`, merely quiet histor
 [Dispatch](dispatch.en.md) for complete operations and the [data contract](dispatch-data.md)
 for data semantics.
 
+## Defaults and fallbacks
+
+One default worker is a complete setup. Add this optional fragment at the top level
+of the existing private config. `default` names a registered entry in `routes`;
+`fallbacks` may be omitted or empty:
+
+```json
+{
+  "routing": { "default": "kimi-worker", "fallbacks": [] }
+}
+```
+
+Ordinary `run` omits `--route` and reads the current default in that same call. There
+is no discovery command, catalog scan or record-writing step. Legacy configs retain
+explicit `--route NAME`; an explicit selection uses only that route, without automatic
+fallback. Names, models, channels, credentials and temporary preferences stay local.
+An optional experience note fits in existing operator instructions; no worker catalog,
+specialty schema or subscription expiry date is required.
+
+`fallbacks` is advance authorization for those actual channels, task data and costs,
+not a history of previously used routes. Automatic selection happens only before
+adapter launch, runtime import and worker home/state writes: if the default executable
+is missing/unlaunchable, or a required `passEnv` credential is absent, try authorized
+backups in order, at most once each. Permission, workspace, `enabled: false`, unsafe
+config, lock, work-order and dependency failures, and all failures after startup, do
+not trigger this switch. The selected route still satisfies every existing check.
+Skipped candidates create no phantom responsibility or turn; local receipts retain
+the actual choice and bounded skip codes, without environment values or policy data
+entering the aggregate share.
+
+Change `routing.default` for new work and keep backup choices in the same location.
+Policy changes do not change existing session fingerprints; `continue` returns to
+the original worker. To stop using an old channel, also set that route's `enabled`
+to `false`, denying subsequent runs and continuations. This does not terminate an
+already active turn; coordinate its stop through the original session. Status/cancel/
+close remain available for recovery. Changing defaults needs no skill/cache edit or
+second preference copy in SessionStart. Native defaults remain with the host and
+existing local authorization; this ACP config does not execute native workers.
+
+After initialization or execution starts, the coordinator checks the original
+receipt/status, confirms the writer has stopped and inspects its work before handing
+the remainder to an authorized backup. Never replay an ambiguous write order. Quality
+failures use same-worker rework. Reuse an unchanged known availability failure within
+the current task; without a backup, finish directly when the task permits it. Runtime
+codes do not prove subscription expiry, exhausted credit or HTTP 429.
+
+An unused route's missing entry, credential or workspace does not block an available
+default. Configuration safety boundaries remain validated across routes; the selected
+cwd must exist and exactly match that route's workspace allowlist.
+
 ## Everyday usage
 
 The install-directory variables are for display only; use the registered absolute paths
@@ -214,7 +264,8 @@ in practice.
 ENTRY=/absolute/canonical/repo/integrations/acpx/src/cli.mjs
 CONFIG=/absolute/private/routes.json
 
-node "$ENTRY" run --config "$CONFIG" --route kimi-worker \
+# With routing.default configured; legacy config or an explicit channel uses --route NAME
+node "$ENTRY" run --config "$CONFIG" \
   --cwd /absolute/approved/worktree --file /absolute/work-order.md
 
 # Get session_id from the receipt; add conditions to the same worker
@@ -321,7 +372,8 @@ worktree; a worktree itself also does not isolate the non-file resources above.
 The initial connect/handshake uses a control timeout of at most 30 seconds; each task turn
 uses route.timeoutMs. Cancelling initialization does not mean the underlying handshake has
 exited; when cleanup cannot be confirmed through the interface, the lock and an uncertain
-state are kept. There is no automatic retry and no silent native/ACP fallback. When a
+state are kept. After startup there is no automatic retry or silent native/ACP fallback;
+limited preflight selection is described in [defaults and fallbacks](#defaults-and-fallbacks). When a
 receipt is lost after submission, check status and the saved receipt first. Do not "confirm"
 by re-sending the same write work order. A normal stop and a code failure attempt to close
 ACP-owned connections; a cleanup failure, unresolved initialization, an observed active
@@ -340,6 +392,13 @@ processes/connections; it does not guarantee that a malicious daemonized or othe
 host-detached descendant has been terminated.
 
 ## Acceptance gate
+
+The 2026-09-21 default/fallback source update passed 256 integration checks on macOS
+(252 pass, 4 Windows-only skips) and 8 real-acpx plus synthetic-ACP-server checks
+(6 pass, 2 Windows-only skips). Coverage includes omitted defaults, explicit choices,
+bounded fallbacks, existing-session compatibility, revocation and no post-launch
+redispatch. This does not establish an updated installed plugin, live provider or
+local default config. Cross-platform results belong to the corresponding commit's CI.
 
 On 2026-09-20, the Dispatch v3 project entry point and display integration re-ran
 `npm ci --ignore-scripts`, `npm run check` and `npm run test:acpx` on the canonical macOS

@@ -6,7 +6,7 @@
 
 **面向 Codex 的多模型委派工具，配有本地 Dispatch 派工台。**
 把一块完整工程责任交给原生 Codex worker，或通过可选 ACP integration 交给已登记的外部 coding agent；
-主 agent 保留目标、整合与交付责任。适合已接入多个模型、希望分配执行工作，同时保留主会话个人上下文的使用者。
+主 agent 保留目标、整合与交付责任。一个默认小工就能完整使用；适合希望分配执行工作，同时保留主会话个人上下文的使用者。
 
 [从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
 [本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
@@ -90,7 +90,7 @@ flowchart LR
   Adapter -->|install handler| Hook
   Private -->|local read| Hook
   Hook -->|private context<br/>root only| Main
-  RouteConfig -->|named route| ACPBridge
+  RouteConfig -->|default / explicit route| ACPBridge
   Shared --> Main
   Shared --> Native
   Shared --> External
@@ -119,7 +119,7 @@ model 的临时优先级由 operator 在 Git 外配置，仓库本身不替使�
 要把自有 API model 放进 Codex native model picker，见
 [自定义 native model picker](docs/native-model-picker.md)。该例子同时覆盖直接连接
 Responses-compatible API 与在本机 router/proxy 后汇集多个 upstream；provider、key、
-套餐优先级和 fallback 始终留在 operator 的 Git 外配置里，不进入 Worker Routing policy。
+套餐优先级和具体 fallback 选择始终留在 operator 的 Git 外配置里，不写死在公共 skill 中。
 
 ACP route 的可达性另有协议边界：通道负责 session、生命周期、权限与证据，不负责
 provider wire format 的转换。为什么 route 或 model 能初始化而推理仍会失败，见
@@ -148,14 +148,24 @@ agent 执行。微小、接近完成或交接成本过高的工作也直接完�
 执行消耗，同时控制端到端耗时和 coordinator 返工。使用 operator 已指定、已授权且
 适合责任、较少消耗主订阅 quota 的路线；没有已知收益就不为分工本身派工。外部
 worker API 支出单独计算，不悄悄回退到更高成本路线。模型与 provider 名留在
-operator 配置里，插件不做排行榜、价格查询或评测矩阵。可选 ACP route 不做自动
-fallback：只有当前任务权限与 operator policy 才能决定失败后是否换路线。
+operator 配置里，插件不做排行榜、价格查询或评测矩阵。
+
+默认小工适用时直接派，不需要每次比较模型或填写小工简介。对已登记的 ACP，在现有
+Git 外 `routes.json` 加入 `routing.default`，正常 `run` 即可省略 `--route`；
+`routing.fallbacks` 可不填或留空。换渠道只更新这一处，无需改公共 skill 或重装插件。
+Native 继续使用宿主工具及本机授权选择；特长经验只有能改变具体选择时才值得写一句。
+
+备用只来自明确的预授权。ACP 会在启动 adapter 之前，因入口不可用或缺少必要环境凭据，
+尝试配置的备用；权限、workspace、停用、初始化或执行失败都不会触发这项自动切换。
+启动后由主 agent 查回原执行、确认停止并保留成果，再按授权恢复；质量问题走原 worker 返修。
+换默认只影响新责任；明确停用旧渠道用其 `enabled: false` 阻止后续 run/continue，
+保留 status/cancel/close。配置和恢复细节见[ACP 默认与备用](docs/acp-integration.md#默认与备用)。
 
 ## 行为场景
 
-四个非 runtime 的观察场景与证据标准见[行为场景](docs/behavior-scenarios.md)：
+非 runtime 的观察场景与证据标准见[行为场景](docs/behavior-scenarios.md)：
 自然语言中的中等修复、同一 child 从调查转入实施或局部返修、健康等待不取消也不
-重复启动、以及 solo 或微小工作不派工。该页是人工核对用的观察记录，不是评测平台，
+重复启动、solo 或微小工作不派工，以及默认切换、撤回许可与备用恢复。该页是人工核对用的观察记录，不是评测平台，
 也不提供稳定触发、净省 quota、低返工或更快的结论。
 
 ## 上下文怎样分开

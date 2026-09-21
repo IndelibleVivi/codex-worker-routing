@@ -40,6 +40,43 @@ async function until(check,message,timeout=15000){
 }
 const initial=f=>['--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 
+// A routing config is exercised against the REAL pinned acpx and the spawned
+// synthetic ACP server. The default route omits --route entirely; the fallback
+// case points the default at a non-existent entry so the run resolves the
+// registered backup before any adapter launch and issues exactly one prompt.
+async function routingSetup(t,{fallbacks=[],breakDefault=false}={}){
+ await loadAcpx();
+ const f=await fixture({argv:[process.execPath,agent],timeoutMs:5000});
+ t.after(f.cleanup);
+ // Register a second, launchable route as the backup with a disjoint worker home.
+ f.raw.routes.backup={...f.raw.routes.worker,argv:[process.execPath,agent],workerHome:path.join(f.root,'backup-home'),contextRevision:'synthetic-backup-v1'};
+ if(breakDefault) f.raw.routes.worker={...f.raw.routes.worker,argv:[path.join(f.root,'missing-agent')]};
+ f.raw.routing={default:'worker',...(fallbacks.length?{fallbacks}:{})};
+ await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ return f;
+}
+test('REAL acpx: omitting --route uses routing.default end-to-end',async t=>{
+ const f=await routingSetup(t);
+ const {code,stderr,receipt}=await command(f,'run',['--cwd',f.cwd,'--file',f.orderFile]);
+ assert.equal(code,0,stderr);
+ assert.equal(receipt.route,'worker');
+ assert.deepEqual(receipt.selection,{schema:'cwr.acp.selection/1',requested_route:'worker',actual_route:'worker',fallback:null,skipped_routes:[]});
+ assert.equal(JSON.parse(receipt.output_excerpt).turn,1);
+});
+test('REAL acpx: an unavailable default falls back before launch and issues exactly one prompt',async t=>{
+ const f=await routingSetup(t,{fallbacks:['backup'],breakDefault:true});
+ const {code,stderr,receipt}=await command(f,'run',['--cwd',f.cwd,'--file',f.orderFile]);
+ assert.equal(code,0,stderr);
+ assert.equal(receipt.route,'backup');
+ assert.deepEqual(receipt.selection,{schema:'cwr.acp.selection/1',requested_route:'worker',actual_route:'backup',fallback:'backup',skipped_routes:[{route:'worker',code:'BAD_EXECUTABLE'}]});
+ // Exactly one responsibility/prompt in the fallback worker home's audit trail.
+ const audit=(await fs.readFile(path.join(f.raw.routes.backup.workerHome,'fixture-audit.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
+ assert.equal(audit.filter(e=>e.method==='session/new').length,1);
+ assert.equal(audit.filter(e=>e.method==='session/prompt').length,1);
+ // The unavailable default never launched: its worker home was never created.
+ await assert.rejects(fs.stat(f.raw.routes.worker.workerHome),{code:'ENOENT'});
+});
+
 test('REAL acpx plus spawned synthetic ACP process: restart, same session, clean env, preserved history',async t=>{
  const f=await setup(t);const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);assert.equal(a.receipt.cleanup,'confirmed');
  const text=JSON.parse(a.receipt.output_excerpt);assert.equal(text.turn,1);assert.equal(text.main_marker_present,false);assert.equal(text.home,f.selection.route.workerHome);

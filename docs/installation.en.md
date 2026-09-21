@@ -17,6 +17,13 @@ the marketplace, then run `update_plugin_cachebuster.py <plugin-path>` and the
 normal `codex plugin add` flow. Do not edit an installed cache in place. Verify
 discovery in a new main session after installation.
 
+Defaults and fallbacks require updated canonical ACP source and plugin instructions;
+an existing session does not reload its instructions automatically. Existing
+`routes.json` files and explicit `--route` remain compatible, without migrating
+receipts or sessions. Once `routing.default` is configured, routine ACP channel changes
+only edit that private file; do not copy the current route name into SessionStart.
+See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration and revocation.
+
 ## Local Dispatch dashboard
 
 Dispatch ships with the optional ACP source, without an additional frontend

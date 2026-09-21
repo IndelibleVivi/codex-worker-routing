@@ -7,6 +7,11 @@ plugin and its optional main-session context integration.
 - Edit `integrations/main-session/` for the native SessionStart adapter.
 - Edit `integrations/acpx/` for the optional ACP transport. Keep route names,
   provider/model priorities, account state, worker homes, and route config outside Git.
+  `config.mjs` owns optional `routing.default`/`routing.fallbacks` in that same private
+  config. Automatic fallback ends before adapter launch and cannot bypass permission,
+  workspace or disabled-route checks. Default changes do not alter a bound session's
+  fingerprint; revocation blocks continuation but leaves control recovery available.
+  Keep one selected launch and truthful selection evidence without extra dispatch tasks.
 - Dispatch source lives in `integrations/acpx/src/dispatch.mjs`, `dashboard.mjs`,
   `share.mjs` and `dashboard/`. `time.mjs` owns shared calendar bucketing;
   `workspaces.mjs` resolves private local Git/folder identity; `observations.mjs`

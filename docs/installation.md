@@ -14,6 +14,11 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
 再运行 `update_plugin_cachebuster.py <plugin-path>` 与正常 `codex plugin add`。
 不要热改 installed cache。安装后用新的主 session 验收 discovery。
 
+默认与备用功能需要同时更新 canonical ACP source 和 plugin instructions；旧会话已加载的
+说明不会自动刷新。已有 `routes.json` 与显式 `--route` 继续兼容，无需迁移回执或会话。
+可选加入 `routing.default` 后，日常换 ACP 渠道只修改这份 Git 外配置；不要在
+SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接入](acp-integration.md#默认与备用)。
+
 ## Dispatch 本地面板
 
 Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统服务。
