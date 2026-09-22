@@ -69,13 +69,18 @@ JSON-LD 关系与语言、指南导航层级，以及 sitemap 恰好覆盖四个
 均成功。公网四页、sitemap 与两张分享图均返回 200，且与本地 build 逐字节一致。
 真实浏览器检查四页的中英桌面/手机布局、标题与 JSON-LD、无 JS 正文、首页示例交互、
 SVG 下载与复制通过，无横向溢出或 console/page errors。搜索引擎收录、排名与
-rich results 未验证；此次没有进行 Search Console 账号操作。
+rich results 在该次元数据发布时未验证；Search Console 后续状态单独记录。
 
 本网站部署在 repository subpath；有效的 `robots.txt` 必须位于 origin 根目录，
 不由本仓库控制。Search Console 可使用以下 URL-prefix property，验证后提交 sitemap：
 
 - Property：`https://indeliblevivi.github.io/codex-worker-routing/`
 - Sitemap：`https://indeliblevivi.github.io/codex-worker-routing/sitemap.xml`
+
+`page.mjs` 的共享 `<head>` 包含 Google 提供的 `google-site-verification` 标记，
+用于上述网址前缀的 HTML 标记验证。它是有意公开的所有权证明，不是登录凭据，
+也不引入 analytics 或浏览器网络请求。验证成功后仍须保留；移除前先安排替代验证方式。
+源码包含标记与 Google 账号端验证成功是两项独立状态。
 
 资源验证、sitemap 提交与 URL Inspection 是独立的账号操作，需要对应账号权限。
 可依据 [Google 标题指南](https://developers.google.com/search/docs/appearance/title-link)、

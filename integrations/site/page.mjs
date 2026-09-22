@@ -78,6 +78,7 @@ export function renderPage(lang='en',view='home'){
  return `<!doctype html>
 <html lang="${zh?'zh-CN':'en'}" data-page="${view}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><meta name="description" content="${description}"><meta name="theme-color" content="#fdfdfb">
+<meta name="google-site-verification" content="7VmMLWHwFBaFG7l2fMQyj7y3wFvLIC9Lmudl_CuoVHE">
 <link rel="canonical" href="${SITE}${pagePath}"><link rel="alternate" hreflang="en" href="${SITE}${guide?'guide/':''}"><link rel="alternate" hreflang="zh-CN" href="${SITE}zh/${guide?'guide/':''}"><link rel="alternate" hreflang="x-default" href="${SITE}${guide?'guide/':''}">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Worker Routing"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${SITE}${pagePath}"><meta property="og:locale" content="${zh?'zh_CN':'en_US'}"><meta property="og:image" content="${socialUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${ogAlt}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${socialUrl}"><meta name="twitter:image:alt" content="${ogAlt}">
 ${jsonLdTag}

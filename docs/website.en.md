@@ -85,7 +85,7 @@ return 200 and match the local build byte-for-byte. Real-browser checks passed f
 English/Chinese desktop/mobile layouts, titles and JSON-LD, no-JS content, homepage
 sampler interactions, SVG downloads and clipboard copying, with no horizontal
 overflow or console/page errors. Indexing, rankings and rich results remain
-unverified; no Search Console account action was performed.
+unverified at that metadata release; later Search Console status is recorded separately.
 
 The site lives under a repository subpath. An effective `robots.txt` must live at
 the origin root, outside this repository's control. Search Console can use this
@@ -93,6 +93,13 @@ URL-prefix property and, after verification, receive this sitemap:
 
 - Property: `https://indeliblevivi.github.io/codex-worker-routing/`
 - Sitemap: `https://indeliblevivi.github.io/codex-worker-routing/sitemap.xml`
+
+The shared `<head>` in `page.mjs` includes Google's `google-site-verification`
+tag for HTML tag verification of this URL-prefix property. It is intentionally
+public ownership proof, not a login credential, and adds no analytics or browser
+network requests. Keep it after verification; arrange another verification method
+before removing it. Source presence and successful Google account verification
+are separate states.
 
 Property verification, sitemap submission and URL Inspection are separate account
 actions requiring the relevant account access. References:
