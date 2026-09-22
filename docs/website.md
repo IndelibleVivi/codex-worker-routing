@@ -82,6 +82,12 @@ rich results 在该次元数据发布时未验证；Search Console 后续状态�
 也不引入 analytics 或浏览器网络请求。验证成功后仍须保留；移除前先安排替代验证方式。
 源码包含标记与 Google 账号端验证成功是两项独立状态。
 
+**Search Console 已验证（2026-09-22）**：源码 `2ed71c1` 的
+[Pages 发布](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35723949498)
+与五项 CI jobs 均成功；公网四页和 sitemap 返回 200，并与构建逐字节一致。
+Google 已通过 HTML 标记确认上述网址前缀的所有权。抓取和索引状态以 Search Console
+的实时报告为准，所有权验证或提交请求不代表网页已经收录。
+
 资源验证、sitemap 提交与 URL Inspection 是独立的账号操作，需要对应账号权限。
 可依据 [Google 标题指南](https://developers.google.com/search/docs/appearance/title-link)、
 [多语言标注](https://developers.google.com/search/docs/specialty/international/localized-versions)、

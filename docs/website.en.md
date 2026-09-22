@@ -101,6 +101,14 @@ network requests. Keep it after verification; arrange another verification metho
 before removing it. Source presence and successful Google account verification
 are separate states.
 
+**Search Console verified (2026-09-22)**: the
+[Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35723949498)
+and all five CI jobs passed for source `2ed71c1`. The four public pages and sitemap
+return 200 and match the build byte-for-byte. Google confirmed ownership of this
+URL-prefix through the HTML tag. Consult Search Console for current crawl and
+index status; ownership verification or a submitted request does not mean a page
+is indexed.
+
 Property verification, sitemap submission and URL Inspection are separate account
 actions requiring the relevant account access. References:
 [Google title guidance](https://developers.google.com/search/docs/appearance/title-link),
