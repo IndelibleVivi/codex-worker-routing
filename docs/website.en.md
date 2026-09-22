@@ -56,6 +56,46 @@ and copy the installation prompt. If clipboard access is denied, the prompt is s
 for manual copying. This sampler is not the full Dispatch editor: authored credits,
 numeral styles, ornaments and PNG exports are available in [local Dispatch](dispatch.en.md).
 
+## Search metadata and limits
+
+`page.mjs` owns distinct titles and descriptions for the English and Chinese home
+and guide pages, self canonicals, reciprocal `en` / `zh-CN` / `x-default` hreflang,
+and Open Graph / Twitter cards. Social previews use the matching-language,
+same-origin 1200×630 PNG.
+
+JSON-LD describes the site and public source with `WebSite` and `SoftwareSourceCode`,
+and each page with `WebPage`. Shared entities have stable URLs and both languages;
+guide `BreadcrumbList` entries connect the matching-language homepage and guide.
+The software node points to the repository `LICENSE`; the full path-level terms
+remain governed by [`LICENSING.md`](../LICENSING.md). Metadata reads no local
+configuration or runtime receipts.
+
+`check.mjs` checks distinct titles and descriptions, the public origin and canonicals,
+language alternates, social assets, JSON-LD relationships and languages, guide hierarchy,
+and sitemap membership matching exactly the four canonical pages. It also rejects
+`noindex` / `nofollow` / `none` restrictions on indexing or link following for real
+pages (including `googlebot`), and preserves `noindex` on the error page. Building
+and checking require only Node.js.
+
+**SEO update status (2026-09-22): source and local verification complete; not yet
+published.** The site already has a live version; an ordinary push does not publish
+these changes. Indexing, rankings and rich results require separate observation;
+static checks cannot establish those outcomes.
+
+The site lives under a repository subpath. An effective `robots.txt` must live at
+the origin root, outside this repository's control. Search Console can use this
+URL-prefix property and, after verification, receive this sitemap:
+
+- Property: `https://indeliblevivi.github.io/codex-worker-routing/`
+- Sitemap: `https://indeliblevivi.github.io/codex-worker-routing/sitemap.xml`
+
+Property verification, sitemap submission and URL Inspection are separate account
+actions requiring the relevant account access. References:
+[Google title guidance](https://developers.google.com/search/docs/appearance/title-link),
+[localized versions](https://developers.google.com/search/docs/specialty/international/localized-versions),
+[sitemaps](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap),
+and [robots.txt scope](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec).
+
 ## Related projects
 
 The product page and both READMEs link to MCP Boundary for MCP engineering design,
@@ -82,7 +122,7 @@ file-download acceptance.
 
 ## Source and privacy
 
-- `page.mjs` / `style.css`: shared shell, bilingual homepages and responsive layout.
+- `page.mjs` / `style.css`: shared shell, bilingual homepages, responsive layout and the four-page search metadata (title, description, canonical, hreflang, social cards, JSON-LD); product name, repository and license are public constants in the module, with no private fields.
 - `guide.mjs`: bilingual on-site guide content; shares the shell without loading the homepage script.
 - `client.mjs`: progressive enhancement; no API calls, persistent storage, cookies or analytics.
 - `demo.mjs`: explicitly synthetic data: 24 tasks / 42 turns / 840K observed tokens.

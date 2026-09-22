@@ -47,6 +47,39 @@ GitHub Pages 的 repository subpath。停止预览使用 Ctrl-C。
 clipboard 被拒绝时选择原文供手动复制。示例不是完整 Dispatch 编辑器，完整的
 署名、字体、装饰及 PNG 导出在本地[派工台](dispatch.md)中使用。
 
+## 搜索元数据与边界
+
+`page.mjs` 维护中英首页和指南的独立 title / description、自指 canonical、
+互指的 `en` / `zh-CN` / `x-default` hreflang，以及 Open Graph / Twitter 卡片。
+分享预览使用对应语言的同源 1200×630 PNG。
+
+JSON-LD 用 `WebSite` 与 `SoftwareSourceCode` 描述网站和公开源码，用 `WebPage`
+描述每个页面。共享实体使用稳定的 URL 与双语声明；指南的 `BreadcrumbList`
+连接对应语言的首页与指南。软件节点指向仓库 `LICENSE`，完整路径级许可仍以
+[`LICENSING.md`](../LICENSING.md) 为准。元数据不读取本机配置或运行回执。
+
+`check.mjs` 检查四页标题与摘要互异、公开域名和 canonical、语言互指、社交图存在性、
+JSON-LD 关系与语言、指南导航层级，以及 sitemap 恰好覆盖四个 canonical 页面。
+它也检查正常页没有 `noindex` / `nofollow` / `none` 等限制索引或链接跟踪的指令
+（包括 `googlebot`），错误页保留 `noindex`。构建与检查均仅需 Node.js。
+
+**SEO 更新状态（2026-09-22）：源码与本地验收完成，尚未发布。**
+网站已有线上版本；这次修改不会因普通 push 自动上线。搜索引擎收录、排名与
+rich results 需要独立观察，静态检查不能证明这些结果。
+
+本网站部署在 repository subpath；有效的 `robots.txt` 必须位于 origin 根目录，
+不由本仓库控制。Search Console 可使用以下 URL-prefix property，验证后提交 sitemap：
+
+- Property：`https://indeliblevivi.github.io/codex-worker-routing/`
+- Sitemap：`https://indeliblevivi.github.io/codex-worker-routing/sitemap.xml`
+
+资源验证、sitemap 提交与 URL Inspection 是独立的账号操作，需要对应账号权限。
+可依据 [Google 标题指南](https://developers.google.com/search/docs/appearance/title-link)、
+[多语言标注](https://developers.google.com/search/docs/specialty/international/localized-versions)、
+[sitemap 指南](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
+和 [robots.txt 适用范围](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec)
+继续核对。
+
 ## 相关项目入口
 
 产品页和两种语言的 README 按用途链接到 MCP Boundary 与 Servotab：前者用于
@@ -67,7 +100,7 @@ FAQ 用六个短问题说明安装选项、委派控制、模型与访问范围�
 
 ## 真源与隐私
 
-- `page.mjs` / `style.css`：共享页面外壳、双语首页与响应式布局。
+- `page.mjs` / `style.css`：共享页面外壳、双语首页、响应式布局与四页搜索元数据（title、description、canonical、hreflang、社交卡片、JSON-LD）；其中产品名称、仓库与许可为模块内公开常量，不含私有字段。
 - `guide.mjs`：站内双语指南正文；复用页面外壳，不加载首页交互脚本。
 - `client.mjs`：渐进增强；无 API 请求、持久存储、cookies 或 analytics。
 - `demo.mjs`：明确标注的合成数据，24 份任务 / 42 轮 / 840K observed tokens。
