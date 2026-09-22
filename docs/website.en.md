@@ -77,10 +77,15 @@ and sitemap membership matching exactly the four canonical pages. It also reject
 pages (including `googlebot`), and preserves `noindex` on the error page. Building
 and checking require only Node.js.
 
-**SEO update status (2026-09-22): source and local verification complete; not yet
-published.** The site already has a live version; an ordinary push does not publish
-these changes. Indexing, rankings and rich results require separate observation;
-static checks cannot establish those outcomes.
+**SEO update published (2026-09-22)**: all five
+[CI jobs](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35709426584)
+and the [Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35709605726)
+passed for source `e423bd2`. The four public pages, sitemap and two social images
+return 200 and match the local build byte-for-byte. Real-browser checks passed for
+English/Chinese desktop/mobile layouts, titles and JSON-LD, no-JS content, homepage
+sampler interactions, SVG downloads and clipboard copying, with no horizontal
+overflow or console/page errors. Indexing, rankings and rich results remain
+unverified; no Search Console account action was performed.
 
 The site lives under a repository subpath. An effective `robots.txt` must live at
 the origin root, outside this repository's control. Search Console can use this

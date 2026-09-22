@@ -63,9 +63,13 @@ JSON-LD 关系与语言、指南导航层级，以及 sitemap 恰好覆盖四个
 它也检查正常页没有 `noindex` / `nofollow` / `none` 等限制索引或链接跟踪的指令
 （包括 `googlebot`），错误页保留 `noindex`。构建与检查均仅需 Node.js。
 
-**SEO 更新状态（2026-09-22）：源码与本地验收完成，尚未发布。**
-网站已有线上版本；这次修改不会因普通 push 自动上线。搜索引擎收录、排名与
-rich results 需要独立观察，静态检查不能证明这些结果。
+**SEO 更新已发布（2026-09-22）**：源码 `e423bd2` 的
+[CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35709426584)
+五项 jobs 和 [Pages 发布](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35709605726)
+均成功。公网四页、sitemap 与两张分享图均返回 200，且与本地 build 逐字节一致。
+真实浏览器检查四页的中英桌面/手机布局、标题与 JSON-LD、无 JS 正文、首页示例交互、
+SVG 下载与复制通过，无横向溢出或 console/page errors。搜索引擎收录、排名与
+rich results 未验证；此次没有进行 Search Console 账号操作。
 
 本网站部署在 repository subpath；有效的 `robots.txt` 必须位于 origin 根目录，
 不由本仓库控制。Search Console 可使用以下 URL-prefix property，验证后提交 sitemap：
