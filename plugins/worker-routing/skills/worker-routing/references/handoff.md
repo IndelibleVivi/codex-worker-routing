@@ -80,3 +80,31 @@ not add a new tracker. Switch workers only when the original child cannot recove
 misjudging because of tangled context, or genuinely lacks the execution capability.
 Confirm the old writer has stopped, then hand the smallest recoverable summary and the
 existing artifacts to the new executor.
+
+
+## Assistance, handback and evidence
+
+The core positive worker responsibility lives in [worker-contract.md](worker-contract.md),
+not in a coordinator-only reminder. Native orders include it; ACP's workOrder delivers it.
+The coordinator gives outcome/acceptance, exact roots and material facts, not a duplicated
+method manual. Use the project/Servotab methods already in force for meaningful checks.
+
+Distinguish implementation defects, missing evidence and poor presentation. A bounded
+excerpt is not the whole investigation. Return a narrow report-consolidation request or
+check gap to the original worker before redoing useful work. Preserve relevant supported
+behavior and explain which old evidence an increment invalidates. New scope is not failure.
+
+A worker may ask for a concrete product decision or unavailable capability while retaining
+execution ownership. Give that increment, then continue it. If the coordinator fixes a
+critical part, first stop overlapping writes; tell the same worker what to preserve and
+reread, then hand back remaining implementation/checks/docs. Explicitly change executor
+only for an unrecoverable context/capability or concrete remaining benefit. A tiny remainder
+may be closed directly. Do not infer inability from a better-informed coordinator's later
+success, or reclaim every batch responsibility because one lane required assistance.
+
+For one complete responsibility, current applicable checks plus essential evidence can be
+sufficient. Batch acceptance starts with coverage, source identity, key support, unresolved
+conflicts and the combined final state. A merger is a peer bounded responsibility when
+cross-result reasoning warrants it; it does not reread all source by default or promote
+worker declarations into independently observed facts. Ordinary work has no required
+record/pending ceremony. See the companion swarm method when independent batches exist.

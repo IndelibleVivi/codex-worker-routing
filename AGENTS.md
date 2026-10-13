@@ -18,6 +18,20 @@ plugin and its optional main-session context integration.
   Keep setup, prompt-start task budget, and cleanup boundaries independently testable
   against the pinned public acpx runtime, including progress without a final response.
   Keep one selected launch and truthful selection evidence without extra dispatch tasks.
+  The packaged `plugins/worker-routing/skills/worker-routing/references/worker-contract.md` is the single
+  authored worker responsibility contract. ACP assembles it into every actual order;
+  native handoffs deliver the same body. Keep optional report schemas out of ordinary
+  prompts. `delivery.mjs` owns bounded per-request collection; `batch.mjs` owns finite
+  CLI subprocess admission and collection, local to one batch. The shared nonce
+  cancellation writer lives in `state.mjs`; a start handle records
+  locks held, not prompt acknowledgement. Check actual child admission against its
+  planned resources before launch. Worker reports remain declarations, separate from observed runtime/check evidence. Missing, stale or
+  conflicting evidence cannot become acceptance. Never execute report-supplied
+  commands. `verify.mjs` accepts task-confirmed checks in an explicit task environment;
+  relocated environment is not an OS sandbox. Recovery/Dispatch/swarm references load
+  only on their concrete trigger. Shared worker HOME concurrency requires evidence for
+  the actual adapter topology; distinct cwd or read policy is insufficient. Keep outer
+  feedback test-local until bounded comparison justifies adoption; no default loop.
 - Dispatch source lives in `integrations/acpx/src/dispatch.mjs`, `dashboard.mjs`,
   `share.mjs` and `dashboard/`. `time.mjs` owns shared calendar bucketing;
   `workspaces.mjs` resolves private local Git/folder identity; `observations.mjs`

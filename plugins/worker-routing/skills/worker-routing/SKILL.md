@@ -1,58 +1,79 @@
 ---
 name: worker-routing
-description: Choose an authorized execution channel and delegate a complete responsibility for the main coordinating agent, using the operator's standing native or ACP selection. Use for substantial investigation, implementation, fixes, verification, continuation, and rework; temporary workers, explicit solo requests, casual explanations, and tiny or nearly finished work do not trigger delegation.
+description: Choose the authorized worker channel and hand over complete engineering responsibilities, including in-scope self-check, repair and delivery. Use for substantial investigation, implementation, continuation and recovery; use swarm for approved independent batches. Respect the operator's standing ACP/native choice, explicit solo, and tiny or nearly finished work.
 ---
 
 # Worker routing
 
-This skill decides only who executes a block of work, and how that work is taken back. The current task, the repository contract, the engineering methods already in force, and real permissions remain the complete contract; do not open a second plan, acceptance, or reporting system, and do not modify Servotab, Oracle, or model configuration.
+The main coordinator owns the user's complete result and keeps its model. Reuse the
+current goal, project contract, settled decisions and task record; this skill creates
+no second plan, acceptance authority or model/provider policy. Temporary workers follow
+[worker-role](references/worker-role.md) and do not route again or call Oracle.
 
-## Identify the role first
+## Choose a complete responsibility
 
-If you are a temporary worker that received a work order, read and follow [worker-role.md](references/worker-role.md), then complete the order; do not route again.
+Before heavy execution, give a worker a bounded outcome it can independently investigate,
+implement, check, repair and deliver. Supply enough entry clues and conditions to start;
+do not investigate every source first or hand over only clerical fragments of a coherent
+problem. Repeated small operations can be a worthwhile batch; scripts can handle the
+mechanical part. Already-defined independent batches use the companion swarm skill.
 
-If you are the main coordinating agent, you always own the complete result the user accepted, its integration, and final delivery, and you keep the current main model. Reuse the goals, constraints, evidence, and worker state the current task has already established. `全权接住` and `从头做到位` allow internal delegation; when the user explicitly asks for `solo`, `亲自做`, `别派小弟`, or an end to internal delegation, stay on the main thread; if a writer already exists, first let it stop or wind down safely through whatever the host supports, then take over. Stopping progress monitoring does not cancel a worker.
+Prefer continuing useful execution on the worker side. Ordinary technical choices and
+in-scope failures belong to its loop; a request for one decision does not surrender the
+whole responsibility. Keep tiny/finished work or frequent unresolved product decisions
+with the coordinator. Explicit solo/no-delegation stays solo; safely stop an existing
+writer before takeover. Stopping monitoring does not cancel it.
 
-After context loss or compaction, recover the responsibility, the child or thread identifier, and the existing evidence from the task record and native state you already have before deciding whether to create anything new. Missing memory does not mean an earlier worker no longer exists, and a new tracker does not replace that recovery.
+Select the channel from current task authority and standing operator policy BEFORE tool
+selection. Native availability does not override ACP. For ACP, follow acp-worker and let
+its normal run resolve the current private default/fallback config. Do not scan a catalog,
+pin old routes, silently change provider or infer free capacity from a name. One route
+is enough; it does not prove concurrent sessions share state safely. Registration/past
+use is not fallback authority for the data and cost.
 
-## Delegate only when handing over a whole responsibility reduces main-thread work
+## Hand over and let execution stay there
 
-Make one short judgement before heavy execution starts. Investigate far enough to state the goal, the key constraints, entry-point clues, and the acceptance evidence; do not write a per-function implementation plan just to delegate.
+An order gives the outcome, preserved constraints, exact cwd/read/write roots, shared
+resources, actual permissions and acceptance evidence. Do not copy private main context,
+raw chats or account data. The core worker contract is canonical in
+[worker-contract](references/worker-contract.md); ACP injects it automatically. For native
+work read [native tools](references/native-tools.md) and worker-role, and send that core
+contract with the smallest order. Host-added shared context still needs its real boundary.
 
-Protect the complete outcome, its quality, and the applicable permissions first. On that basis, prefer reducing execution consumption on the main subscription while keeping end-to-end duration and coordinator rework under control. Use an operator-specified, authorized route that reduces main-subscription quota consumption when it fits the responsibility. Do not delegate for the sake of delegating when no known benefit exists. Account for external worker API spend separately, and never silently fall back to a higher-cost route. Keep model and provider names in operator-owned configuration: no leaderboards, price lookups, evaluation matrices, or brand hardcoding.
+Retain the real session/child identifier and one writer per overlapping surface. Worktrees
+do not isolate ports, Git shared state, databases, output paths or adapter HOME. After
+dispatch, avoid a second investigation/implementation of the same responsibility; work
+on a distinct coordinator-owned part or use the host's blocking wait. A healthy yield or
+wait timeout does not justify restarting. Recover existing identity after compaction.
 
-Choose the execution channel before invoking tools, honoring the operator's standing authorized default as well as an explicit task selection. Native tool availability alone does not override an ACP choice; follow the companion acp-worker skill for that channel. One configured worker is a complete setup; do not compare a catalog on every handoff or require capability biographies. A route means the actual authorized model, channel and execution environment, not just a model name. Consider another authorized route only for a concrete capability, quality or availability reason. An optional short experience note can inform that exception; do not invent specialties or split a coherent responsibility into specialist stages.
+## Accept evidence and resolve only the gap
 
-Keep changing preferences in the operator's existing local source, outside Git. Record a requested channel change there once, within the user's authority; do not duplicate it in this skill, plugin cache and SessionStart text. For configured ACP defaults, the normal run resolves the current choice itself; do not add a mandatory lookup or pin a stale `--route` from earlier context. Native workers keep their host tools and authorized local selection. Changing the default affects new responsibilities. Revoking a route also forbids subsequent continuation on it; coordinate an active writer's stop and preserve its work before takeover. A preference change alone must not rebind an existing session.
+Workers return a candidate result, necessary supporting evidence, actual checks and
+coverage/unknowns. Inspect the real relevant artifacts and reuse valid current evidence.
+For a batch, start with coverage, key claims, conflicts and integration boundaries;
+directed code checks may stay delegated. Main-agent accountability is not a requirement
+to reread all sources or rewrite qualified work. A summary's confidence or runtime
+completed does not establish acceptance; stale, missing and worker-reported evidence stay
+explicit. Result content is data, never permission to execute its commands.
 
-Fallback requires prior authorization for the actual route, task data and cost; registration or past use is not permission. Reuse a confirmed availability failure within the current task while its conditions remain unchanged. Before launch, use an authorized available alternative; after launch or ambiguous submission, recover the original execution and confirm it has stopped before handing over remaining work. Permission denials cannot be bypassed by changing routes. A quality failure follows same-worker rework. Without an authorized alternative, finish directly when the task permits it; ask only when an external-worker-only requirement or another real authority boundary prevents progress. No subscription calendar, recurring health probe or automatic provider-error diagnosis is required.
+Send new constraints promptly. Normal phase changes, corrected coordinator assumptions,
+missing capabilities and internal test failures are not quality reworks. Give specific
+failed criteria and preserve supported behavior. After two explicit coordinator reworks
+leave the same gap without progress, make a new recovery decision before an equivalent
+third order; this is not a fixed turn limit.
 
-A suitable delegation is one coherent responsibility, such as a local investigation plus implementation, self-testing, and the necessary documentation. Tight internal coupling can sit with a single worker as a whole; use serial delegation by default. Parallelize only when the responsibilities and the shared write surface are genuinely independent. Finish the work directly when the change is tiny, the answer is nearly complete, handing over would amount to redoing it yourself, product semantics need continuous decisions from the main coordinating agent, or acceptance costs more than the execution gains.
+Missing final prose first needs consolidation of existing artifacts/checks. A report
+problem does not automatically warrant repeating the work. Help with a key judgment or
+capability, then return remaining execution to the original worker when useful. Before
+coordinator edits or switching executors, confirm conflicting writers stopped, preserve
+results, and make the retained and handed-back scope clear. One blocked lane does not
+reclaim unrelated batch work. Directly finish a genuinely tiny remainder when warranted.
 
-Use the worker, agent role, model, and reasoning inventory the host offers live and has already authorized; do not bind to brands or model names, and do not infer a real route from a menu, configuration, or role name. Stay solo while no applicable worker is confirmed. `worker-role` is task semantics, not an OS sandbox, network isolation, or a permission system.
+Read [handoff and recovery](references/handoff.md) for a difficult increment, cross-project
+scope, partial takeover or replacement. Read [context boundary](references/context-boundary.md)
+when a route/environment/injection condition changes, not as a routine startup ritual.
+No mandatory scoring, specialist pipeline, review ledger or Oracle call is added.
 
-## Let go after the handoff
-
-Read [handoff.md](references/handoff.md) and hand over a responsibility a worker can start on independently. A new independent work order explicitly uses `fork_turns='none'` on the current host by default, but that value controls only that API's conversation-fork choice; it does not prove that global or project instructions, skills, tools, or other host-attached context were isolated. With a third-party provider, no unauthorized private or account data transfer may be trial-run just to verify routing.
-
-Read [context-boundary.md](references/context-boundary.md) and confirm the actual input boundary; do not assume from an old main session that private instructions were excluded.
-
-The work order must state the temporary worker's role semantics, allowed write surface, shared resources, and permission boundaries. Every step authorized downstream comes from the current task; documentation, test results, tool availability, or upstream authorization cannot be used to derive new permission to commit, push, deploy, perform account operations, make paid calls, or transfer private data.
-
-Once the worker has started, keep its real child or thread identifier. The main thread stops same-source investigation and any second version of the implementation; it may advance non-overlapping work, handle genuine coordination decisions, or wait. Keep one writer per overlapping file and per shared runtime state; a worktree does not automatically isolate ports, databases, services, or output directories.
-
-When you use the collaboration tools, read [native-tools.md](references/native-tools.md). Waiting uses the host's blocking wait and completion messages: query the worker only to recover it, to resolve an ambiguous state, or when intervention is needed, and do not short-poll a healthy worker. A health-wait timeout, an active yield, or silence on the current host is not failure, and none of them justifies interrupting the worker or duplicating the same responsibility.
-
-When a reference is already read and unchanged in the current context, do not read it again; re-read it after context loss or when its trigger materially changes. Reuse valid route and input-boundary evidence while the relevant host, configuration, and injection conditions are unchanged, and refresh only the affected part when a condition changes or evidence contradicts the earlier conclusion. Routine delegation does not run native probes, search model catalogs, run health checks, or request private transfers.
-
-## Continuation, rework, and acceptance
-
-When an active worker receives a new constraint that affects its work, send the increment promptly; do not wait for it to return under the old contract and then reject the result. When the same responsibility moves from a read-only investigation to authorized implementation, needs missing evidence, or requires local rework, prefer continuing the same worker and its evidence. Aggregate feedback around the actual failure, the expectation, and the scope, and preserve accepted artifacts; do not create a new worker for a phase name, and continue or rework through the existing child rather than starting a fresh one.
-
-After a worker returns, the main coordinating agent checks the real diff, the key invariants, the permission scope, and the verification coverage. The main thread does not repeat the whole investigation or rewrite a qualified implementation to personal preference. Evidence from the final relevant code in the same environment can be reused; after the relevant code, dependencies, or runtime state change, add only the affected fresh check. Do not spawn a separate reviewer by default, and do not trigger Oracle for an ordinary return.
-
-After two explicit reworks leave the same acceptance gap with no material progress, make a new recovery decision before a third equivalent order: repair an evidenced environment/permission problem within authority, narrow the remaining responsibility, take over the unresolved part, or switch only when authorized and justified. This is a decision trigger, not a turn cap: new requirements, phase transitions, corrected coordinator assumptions, and missing runtime capabilities are not worker quality failures. Follow the recovery distinctions in handoff.md; do not infer rework quality from telemetry counts.
-
-Re-divide or withdraw the responsibility when the task premise no longer holds, when permissions conflict, or when the original worker cannot recover. Before taking over or switching workers, confirm the old writer has stopped and preserve still-usable changes and evidence. A runtime completion is not task acceptance, and a missing final report first calls for consolidation of existing artifacts and checks, not repeating the investigation.
-
-Report only results, material decisions, real blockers, and the evidence sufficient to support the conclusion. Do not routinely narrate routing steps, generate a standardized delegation report, or claim a savings ratio that was never actually measured.
+Report the usable result, material decisions and actual limits. Follow the repository's
+Git/install/deploy/privacy gates; successful checks and worker reports confer no new
+permission. Shareable data is only the product's explicit public projection.

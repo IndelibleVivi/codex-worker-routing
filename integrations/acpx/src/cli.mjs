@@ -4,11 +4,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest, sessionId, requestCancel } from './state.mjs';
 import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform, executionIdentity, assertBindingIdentity } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
+import { readDelivery } from './delivery.mjs';
+import { runBatch } from './batch.mjs';
 
 
 // Property tables for the argument parser. `flags` take no value; `values` take
@@ -16,10 +18,13 @@ import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, norma
 // bare flag so the parser never mistakes it for the value of a preceding option.
 const FLAG = Object.freeze({
   stats: ['json'],
+  delivery: ['json'],
+  run: ['deliver'],
+  continue: ['deliver'],
 });
 const VALUES = Object.freeze({
-  run: ['config', 'route', 'cwd', 'file', 'permissions', 'title', 'category'],
-  continue: ['config', 'session', 'file', 'permissions', 'revision-reason'],
+  run: ['config', 'route', 'cwd', 'file', 'permissions', 'title', 'category', 'start-handle', 'expected-admission'],
+  continue: ['config', 'session', 'file', 'permissions', 'revision-reason', 'start-handle', 'expected-admission'],
   status: ['config', 'session'],
   cancel: ['config', 'session'],
   close: ['config', 'session'],
@@ -27,6 +32,8 @@ const VALUES = Object.freeze({
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config', 'since', 'port'],
+  batch: ['config', 'manifest', 'concurrency'],
+  delivery: ['config', 'session', 'request'],
 });
 const REQUIRED = Object.freeze({
   // `route` is resolved separately: it is required only for configs without a
@@ -40,8 +47,13 @@ const REQUIRED = Object.freeze({
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config'],
+  batch: ['config', 'manifest'],
+  delivery: ['config', 'session'],
 });
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
+// Absolute path to THIS CLI entry, used by `batch` to spawn canonical,
+// independent subprocesses with the exact same module (never a copy).
+const cli_path = () => fileURLToPath(import.meta.url);
 
 const HELP = `cwr-acp (optional channel; does not replace native subagents)
   run      --config FILE [--route NAME] --cwd DIR --file ORDER --permissions read|full
@@ -55,10 +67,29 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   pending  --config FILE
   stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--time-zone IANA_ZONE] [--json]
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
+  batch    --config FILE --manifest FILE [--concurrency N]
+  delivery --config FILE --session UUID [--request REQUEST_ID] [--json]
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
 claim the worker has stopped. No background wakeup and no post-launch retry.
+
+run/continue accept an OPTIONAL bare --deliver flag: it collects a bounded
+cwr-delivery result block into a private per-request sidecar, separate from the
+runtime receipt and the truncated output excerpt. Absent the flag, ordinary
+run/continue behavior is unchanged. A missing/oversized/malformed block is
+recorded as such and never re-runs the work or changes runtime status. No command
+inside a delivery block is ever executed.
+
+run/continue also accept an OPTIONAL --start-handle FILE: once the operation
+holds its locks the CLI atomically writes a machine-readable start handle there
+for a batch runner, instead of parsing human stderr text.
+
+batch runs a finite, coordinator-authored manifest of run/continue jobs as
+independent CLI subprocesses, with explicit per-job permissions, a maximum
+concurrency, and safe local admission for an exact cwd and a shared worker home.
+It reports partial when required results are missing. delivery is read-only and
+never loads an adapter.
 
 run and continue require an explicit --permissions read|full on EVERY turn.
 The category is metadata, never permission. A continuation does not inherit a
@@ -129,6 +160,14 @@ export function parseArgs(args) {
     throw new Fault('PERMISSIONS_REQUIRED', 'Choose --permissions read or --permissions full explicitly for this turn; category and earlier turns do not grant permission.');
   return out;
 }
+// Restrictive batch ticket: bind actual child selection to the resource plan.
+// It contains no credential values and cannot authorize a route or permission.
+function assertAdmission(config, selection, opt) {
+  if (opt['expected-admission'] === undefined) return;
+  const actual = digest({ stateDir: config.stateDir, routeName: selection.name,
+    route: selection.route, cwd: selection.cwd, permissions: selection.permissions });
+  if (opt['expected-admission'] !== actual) throw new Fault('ADMISSION_CHANGED', 'Selected configuration changed after batch admission; no adapter launch.');
+}
 export async function loadAcpx() {
   try {
     const require = createRequire(import.meta.url);
@@ -164,23 +203,7 @@ export async function localStatus(config, binding) {
     closed:binding.closed === true, last_runtime_status:binding.lastStatus ?? null,
     cleanup:binding.cleanup ?? 'unknown', last_receipt:binding.lastReceipt ?? null };
 }
-export async function requestCancel(config, binding) {
-  const p = paths(config.stateDir, binding.id);
-  await privateDir(p.lock, { create:false });
-  const owner = await readJSON(path.join(p.lock, 'owner.json'), { privateFile:true });
-  if (typeof owner.nonce !== 'string') throw new Fault('BAD_LOCK', 'Invalid owner token.');
-  // Do not use atomicJSON here: a concurrent terminal cleanup must not recreate
-  // a deleted lock directory. Exclusive creation has no mkdir side effects.
-  let h;
-  try { h = await fs.open(path.join(p.lock, 'cancel.json'), 'wx', 0o600); }
-  catch (e) {
-    if (e.code !== 'EEXIST') throw e;
-    const old = await readJSON(path.join(p.lock,'cancel.json'), {privateFile:true});
-    if (old.nonce !== owner.nonce) throw new Fault('LOCK_CHANGED','Cancellation belongs to a different operation.');
-  }
-  if (h) try { await h.writeFile(JSON.stringify({nonce:owner.nonce})); await h.sync(); } finally { await h.close(); }
-  return { schema:'cwr.acp.control/1', session_id:binding.id, cancel_requested:true, stopped:false };
-}
+export { requestCancel } from './state.mjs';
 
 export async function main(args, deps = {}) {
   const opt = parseArgs(args);
@@ -210,6 +233,21 @@ export async function main(args, deps = {}) {
   if (opt.command === 'dashboard') {
     const config = await loadControlConfig(opt.config);
     return startDashboardCommand(config, opt, { text, output, deps });
+  }
+  if (opt.command === 'delivery') {
+    // Read-only private view of one delivery sidecar. Never loads or scrubs for
+    // an adapter, never executes anything from the block.
+    const config = await loadControlConfig(opt.config);
+    // Validate the integration UUID before constructing a managed read path.
+    const id = sessionId(opt.session);
+    const record = await readDelivery(config.stateDir, id, opt.request ?? null);
+    if (opt.json) output(record ?? { schema: 'cwr.acp.delivery-sidecar/1', session_id: id, delivery: null });
+    else text(renderDeliveryText(id, record));
+    return 0;
+  }
+  if (opt.command === 'batch') {
+    const config = await loadControlConfig(opt.config);
+    return runBatch({ config, opt, deps, output, text, cliPath: cli_path() });
   }
   const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';
   const config = controlOnly ? await loadControlConfig(opt.config) : await loadConfig(opt.config);
@@ -277,6 +315,7 @@ export async function main(args, deps = {}) {
   // The child-only environment option in acpx is not assumed to be a scrubber.
   // Scrub this standalone CLI process BEFORE importing/executing that package.
   // This never changes the shell, Codex, or the native subagent environment.
+  assertAdmission(config, selection, opt);
   const env = buildEnvironment(selection.route);
   await (deps.replaceEnvironment ?? replaceOwnEnvironment)(env);
   const acpx = await (deps.loadAcpx ?? loadAcpx)();
@@ -309,6 +348,21 @@ export async function main(args, deps = {}) {
   catch (e) { metadataWarning = 'ORDER_NOT_RETAINED'; }
   config.dispatch.orderPointer = orderPointer;
   config.dispatch.orderWarning = metadataWarning;
+  // Machine-readable start handle for a batch runner: written ONLY after every
+  // lock is held, before adapter/session setup. Prompt acknowledgement is separate. A batch consumer reads
+  // this file instead of scraping human stderr text. Failure to write it is not
+  // fatal to the turn (it is a coordination aid), but a batch reports the job
+  // without a handle rather than inventing one.
+  if (opt['start-handle'] !== undefined) {
+    try {
+      await atomicJSON(path.resolve(opt['start-handle']), {
+        schema: 'cwr.acp.start-handle/1', session_id: binding.id, request_id: requestId,
+        cwd: selection.cwd, route: selection.name, phase: 'locks_held', started_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      (deps.progress ?? (s => process.stderr.write(s)))(`[acp] start handle not written (${typeof e?.code === 'string' ? e.code : 'HANDLE_WRITE_FAILED'}); continuing.\n`);
+    }
+  }
   let safeRelease = false, timer, receipt;
   let runtimeStarted = false;
   const controller = new AbortController();
@@ -351,6 +405,7 @@ export async function main(args, deps = {}) {
       }
       binding = current;
     }
+    assertAdmission(config, selection, opt);
     if (opt.command === 'run') await atomicJSON(p.binding,binding);
     // OPTIONAL `continue --revision-reason REASON` records one revision_requested
     // event before the prompt. It is a shortcut for a genuine correction, not a
@@ -375,7 +430,7 @@ export async function main(args, deps = {}) {
     }
     runtimeStarted = true;
     (deps.progress ?? (s => process.stderr.write(s)))(`[acp] session ${binding.id}; route ${routeNote}; ${selection.permissions} permissions\n`);
-    receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId});
+    receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId,deliver:Boolean(opt.deliver)});
     safeRelease = receipt.cleanup === 'confirmed';
 
   } finally {
@@ -402,6 +457,21 @@ export async function main(args, deps = {}) {
 // Text rendering is a convenience view over the same projection object. It
 // never adds a metric or an inference the JSON projection does not already
 // contain, and it never prints a filesystem path.
+// A private human view of the worker-declared summary and bounded counts.
+// It is not a public/share projection.
+export function renderDeliveryText(session, record) {
+  if (!record) return `No delivery collected for session ${session}.\n`;
+  const w = record.worker ?? {};
+  const lines = [`Delivery for session ${session} request ${record.request_id}: ${w.status}${w.code ? ` (${w.code})` : ''}`];
+  const block = w.block;
+  if (block) {
+    lines.push(`summary: ${block.summary}`);
+    lines.push(`criteria ${block.criteria.length} | checks ${block.checks.length} (worker_reported) | artifacts ${block.artifacts.length} | questions ${block.questions.length}`);
+  }
+  if (record.observed?.runtime_status) lines.push(`runtime_status ${record.observed.runtime_status}; cleanup ${record.observed.cleanup ?? 'unknown'}`);
+  if (record.collection_warnings?.invalid_sidecars) lines.push('invalid sidecars skipped: ' + record.collection_warnings.invalid_sidecars);
+  return lines.join('\n') + '\n';
+}
 export function renderStatsText(p) {
   const s = p.summary;
   const period = s ? (p.period.since ? `${p.period.since} .. ${p.period.until}` : `all .. ${p.period.until}`) : '';

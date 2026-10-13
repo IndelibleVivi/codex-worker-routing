@@ -11,7 +11,7 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
 同名目录归属，不能覆盖其他插件。
 
 更新源码后，先用当前宿主的 `codex plugin marketplace list --json` 核对 marketplace
-和源目录；为插件 manifest 更新版本（本次为 `0.2.0`），再通过正式
+和源目录；为插件 manifest 更新版本（本次为 `0.3.0`），再通过正式
 `codex plugin add worker-routing@MARKETPLACE --json` 重装。宿主若提供 bundled authoring
 helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设旧 helper 路径仍存在。
 不要热改 installed cache。安装后核对版本与源文件，并用新的主 session 验收 discovery。
@@ -20,6 +20,17 @@ helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设�
 说明不会自动刷新。已有 `routes.json` 与显式 `--route` 继续可用。
 可选加入 `routing.default` 后，日常换 ACP 渠道只修改这份 Git 外配置；不要在
 SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接入](acp-integration.md#默认与备用)。
+
+## Delivery 与 swarm 升级
+
+同时更新 canonical ACP source 并正式重装 plugin。0.3.0 包含共同 worker contract，
+以及按需 recovery/Dispatch/swarm 方法；native 交接送入同一契约，ACP 在实际工单中装配。
+已有 0.2.0 的 run/continue/control 调用与历史回执仍可使用。
+
+日常工作没有新配置或报告表单。可选 --deliver 和有限 batch manifest 保存在 Git 外，
+不改变 runtime 与验收的区分。共享 HOME 并发未知时在批次内串行，对应真实 route 的能力
+需单独验证；不能为激活 swarm 复制凭据或改变默认。完整接口与边界见
+[Worker 交付](worker-delivery.md)。
 
 ## Recovery 升级兼容事项
 

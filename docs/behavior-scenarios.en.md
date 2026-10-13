@@ -5,7 +5,7 @@
 This page describes **non-runtime** observation scenarios for checking
 whether Worker Routing follows its policy in an ordinary main session. The
 canonical runtime instructions remain the
-[SKILL.md and its four references](../plugins/worker-routing/skills/worker-routing/SKILL.md).
+[SKILL.md and its on-demand references](../plugins/worker-routing/skills/worker-routing/SKILL.md).
 
 Use tool/thread traces, diffs and actual checks as evidence. A coordinator,
 worker or user's assertion alone is not evidence. Each scenario separates the
@@ -132,6 +132,57 @@ canonical final result.
 - Evidence: time boundaries, real acpx synthetic integration, result/receipt/exit status,
   cleanup and lock state, with normal completion as a control.
 - No claim: synthetic tests establish real-provider reliability or reclassify old receipts.
+
+## 10. Self-check, repair and timely delivery
+
+A complete authorized modification has an existing check that exposes an in-scope defect;
+compare an already-correct input.
+
+- Expected: the actual order contains the shared worker contract. The worker checks, fixes
+  actionable failures and revalidates before delivery. Correct work stops promptly without
+  a fixed reflection turn; internal failed tests are not coordinator reworks.
+- Evidence: transmitted text, actual tool feedback, final artifacts and check state. Contract
+  presence establishes delivery of instructions, not improved behavior by itself.
+- No claim: one success proves general success rates or inherent model ability.
+
+## 11. Assistance, partial takeover and handback
+
+A worker lacks one source, product decision or host capability while other execution remains useful.
+
+- Expected: return a precise question and existing evidence. After a coordinator increment
+  or necessary local intervention, the same session rereads changed state, preserves accepted
+  work and completes the remainder. Stop overlapping writers first; independent items continue.
+- Evidence: the exact gap, new information/capability, original-session continuation and retained
+  artifacts. A better-informed coordinator's later success does not prove equal-condition inability.
+- No claim: a lower takeover rate is always better; a tiny remainder can be finished directly.
+
+## 12. Natural new responsibility and a finite batch
+
+A fresh main session has native tools and an authorized ACP default. Ask only to delegate
+an independent batch, without giving a CLI command or existing session.
+
+- Expected: select the channel from current authority and explicit permissions, then safely
+  expand the finite list. Serialize unverified shared-HOME resources; never bypass cwd locks.
+  Mechanical collection exposes coverage, missing items and duplicates. A peer can merge
+  complex results; the main agent does not repeat every original investigation.
+- Evidence: first actual tool/channel choice, new handles, execution overlap/resource isolation,
+  restart continuation, batch coverage and key counterevidence. Continuing an already-selected
+  session does not exercise this entrypoint.
+- No claim: N processes mean N effective parallel responsibilities; missing required items mean partial.
+
+## 13. Reports, acceptance gates and faulty criteria
+
+Useful work lacks a report; compare behavioral failure, missing environment, stale checks
+and a known-correct candidate.
+
+- Expected: repair only delivery when a report is missing. Return deterministic failures with
+  a minimal counterexample to the original worker. Keep blocked/stale/not_checked separate
+  from failed; a worker declaration never becomes runner observation. Do not execute reported
+  shell commands. Resolve an evidenced challenge to a faulty criterion before equivalent rework.
+- Evidence: separate runtime and delivery records, exact relevant source/dirty state, actual
+  check execution and positive/negative controls. Experimental outer feedback uses a fixed
+  responsibility deadline and bounded corrections; ordinary success gets no extra reflection.
+- No claim: passing checks cover all semantics, or open research must recommend a fixed number of items.
 
 ## Explicit non-goals
 

@@ -7,6 +7,8 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
+**Delivery 0.3 候选文案（2026-10-13）**：本轮站内双语指南补充 worker 自修、按证据验收和有限 batch / swarm。以下 0.2 发布回执保留为历史；0.3 仍待本次构建、浏览器与发布验收。
+
 **Recovery 0.2 已上线（2026-10-13）**：站内双语指南已同步每轮显式权限、通道选择与
 超时/取消恢复规则。当日既有 Pages workflow 发布了公开源码
 `2194db4b4452d0f65aae74f6ef4d36ffc798f172`；build 与 deploy 均成功

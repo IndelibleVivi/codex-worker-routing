@@ -11,7 +11,7 @@
 [从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
 [本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
 
-当前源码版本为 0.2.0。调度由一个 instruction-only plugin 提供；可选 ACP integration
+当前源码版本为 0.3.0。调度由一个 instruction-only plugin 提供；可选 ACP integration
 通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
 proxy 或固定 planner/tester/reviewer 流水线。
@@ -108,7 +108,7 @@ flowchart LR
   Main -->|ACP work order| ACPBridge
   ACPBridge -->|ACP session| External
   External -->|result + evidence| ACPBridge
-  ACPBridge -->|receipt + excerpt| Main
+  ACPBridge -->|receipt + optional delivery| Main
   ACPBridge -->|private receipts| Dispatch
   Main -->|explicit review events| Dispatch
   Main -->|integrated delivery| User
@@ -181,6 +181,20 @@ ACP 的每次 `run` / `continue` 都必须显式带 `--permissions read|full`，
 同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式。
 可以修复具体环境问题、缩小剩余责任或部分接管；新需求、阶段推进和未送达权限不计为质量失败。
 只有 final report 缺失时先整理已有成果与检查，避免重做调查；切换 writer 前须确认原执行停止。
+
+## 自主交付与有限 swarm
+
+worker 的完整责任包括范围内自检、自修与收尾；普通测试失败先留在它自己的工具反馈循环。
+主脑提供一个关键判断或完成受限操作后，可把剩余执行交回原 session，保留已经成立的结果。
+达到既定条件就停止，不默认多派 reviewer 或追加反思轮次。
+
+批量找仓库、多个独立方向或重复脏活，可触发安装包里的 `swarm` 方法。主脑明确有限清单、
+权限和共享资源；运行器用独立 CLI 子进程执行，程序先收集覆盖、重复、缺失与证据，复杂归并
+再交给一个平级 worker。主脑围绕关键结论和具体疑点验收，不从头重查每份来源。
+
+日常 `run/continue/close` 保持简单。复杂成果可选 `--deliver`，有限批次可选 `batch`；
+报告不完整只修交付，不自动重放写工单。shared HOME 并发未验证时串行该资源，read 模式与
+不同 worktree 不等于隔离。完整接口、恢复与实验边界见[Worker 交付与有限批次](docs/worker-delivery.md)。
 
 ## 行为场景
 
@@ -259,9 +273,9 @@ Codex home、合成说明和本机 scripted Responses 服务，验证首次 root
 能力为准。较旧的 CLI 或其他宿主未必提供相同字段。更多限制见
 [输入边界](docs/context.md)与[ACP integration](docs/acp-integration.md)。
 
-本仓库是独立 canonical source。`plugins/worker-routing` 下的 native runtime 五份
-说明（`SKILL.md` 与四份 references）以英文为 canonical text；`acp-worker` 是可选的
-外部 route 入口。native 说明保留 `全权接住`、
+本仓库是独立 canonical source。`plugins/worker-routing` 的共同角色契约、协调入口和
+按需 references 以英文为 canonical text；`acp-worker` 负责可选通道调用，`swarm` 负责
+已授权有限批次。native 说明保留 `全权接住`、
 `从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例。公开安装、使用与边界文档
 提供中英文版本，见[文档目录](docs/README.md)，也可用各页顶部语言链接切换。
 Runtime 说明保留英文真源与原始命令名。私人说明、

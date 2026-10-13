@@ -10,6 +10,7 @@ Start with [your first delegated task](first-delegated-task.en.md), or explore t
 | Installation, verification and recovery | [中文](installation.md) | [English](installation.en.md) |
 | Custom models in the native picker | [中文](native-model-picker.md) | [English](native-model-picker.en.md) |
 | Optional ACP integration | [中文](acp-integration.md) | [English](acp-integration.en.md) |
+| Worker delivery and finite batches | [中文](worker-delivery.md) | [English](worker-delivery.en.md) |
 | ACP and provider-protocol boundaries | [中文](acp-provider-protocols.md) | [English](acp-provider-protocols.en.md) |
 | Command Code through Codex Router | [中文](commandcode-via-codex-router.md) | [English](commandcode-via-codex-router.en.md) |
 | Local Dispatch and share cards | [中文](dispatch.md) | [English](dispatch.en.md) |

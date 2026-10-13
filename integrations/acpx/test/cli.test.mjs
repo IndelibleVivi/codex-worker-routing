@@ -110,3 +110,45 @@ test('environment preparation happens before runtime import',async t=>{
  const f=await setup(t);let clean=false;
  await main(args(f),{...f.deps,replaceEnvironment:env=>{assert.equal(env.HOME,f.selection.route.workerHome);assert.equal(env.OPENAI_API_KEY,undefined);clean=true},loadAcpx:async()=>{assert.equal(clean,true);return f.api}});
 });
+test('parser accepts --deliver and delivery/batch/start-handle verbs and refuses malformed options',()=>{
+ assert.equal(parseArgs(['run','--config','c','--cwd','/w','--file','/o','--permissions','read','--deliver']).deliver,true);
+ assert.equal(parseArgs(['continue','--config','c','--session','s','--file','/o','--permissions','full','--start-handle','/h'])['start-handle'],'/h');
+ assert.equal(parseArgs(['delivery','--config','c','--session','s','--json']).json,true);
+ assert.equal(parseArgs(['batch','--config','c','--manifest','/m']).manifest,'/m');
+ for(const bad of [['delivery','--config','c'],['batch','--config','c'],['run','--config','c','--cwd','/w','--file','/o','--permissions','read','--deliver','x']])assert.throws(()=>parseArgs(bad),{code:'USAGE'});
+});
+test('--deliver collects a sidecar from the real CLI turn and delivery prints a path-free view',async t=>{
+ // The block must carry the ACTUAL request/session ids the collector expects.
+ const f=await setup(t,{events:input=>[{type:'text_delta',stream:'output',text:'```cwr-delivery\n'+JSON.stringify({schema:'cwr.acp.delivery/1',status:'ready',summary:'synthetic done',criteria:[],checks:[],artifacts:[],questions:[],request_id:input.requestId,session_id:(input.handle.sessionKey||'').replace(/^cwr:/,'')})+'\n```'}]});
+ assert.equal(await main([...args(f),'--deliver'],f.deps),0);
+ const id=f.results.at(-1).session_id;
+ const jsonOut=[],textOut=[];
+ assert.equal(await main(['delivery','--config',f.configFile,'--session',id,'--json'],{...f.deps,output:r=>jsonOut.push(r),text:()=>{}}),0);
+ assert.equal(jsonOut.at(-1).worker.status,'ready');
+ assert.equal(jsonOut.at(-1).observed.checks_source,'runner_observed');
+ assert.equal(await main(['delivery','--config',f.configFile,'--session',id],{...f.deps,output:()=>{},text:s=>textOut.push(s)}),0);
+ assert.match(textOut.join(''),/Delivery for session/);
+ // The human view carries no filesystem path.
+ assert.ok(!/\/private\/|\/tmp\/|\/Users\//.test(textOut.join('')));
+});
+test('a start handle is written only for an opted-in job with real session/request ids',async t=>{
+ const f=await setup(t);const handle=path.join(f.root,'handle.json');
+ assert.equal(await main([...args(f),'--start-handle',handle],f.deps),0);
+ const h=JSON.parse(await fs.readFile(handle,'utf8'));
+ assert.equal(h.schema,'cwr.acp.start-handle/1');assert.equal(h.session_id,f.results.at(-1).session_id);assert.equal(h.request_id,f.results.at(-1).request_id);
+});
+test('delivery on a session with no collected report returns an explicit null, not a fake pass',async t=>{
+ const f=await setup(t);assert.equal(await main(args(f),f.deps),0);const id=f.results.at(-1).session_id;
+ const out=[];assert.equal(await main(['delivery','--config',f.configFile,'--session',id,'--json'],{...f.deps,output:r=>out.push(r),text:()=>{}}),0);
+ assert.deepEqual(out.at(-1),{schema:'cwr.acp.delivery-sidecar/1',session_id:id,delivery:null});
+});
+
+
+test('a changed batch admission ticket refuses execution before environment/runtime preparation', async t => {
+ const f=await setup(t);let imported=false,environment=false;
+ await assert.rejects(main([...args(f),'--expected-admission','old-plan'],{...f.deps,
+   loadAcpx:async()=>{imported=true;return f.api},replaceEnvironment:()=>{environment=true}}),{code:'ADMISSION_CHANGED'});
+ assert.equal(imported,false);assert.equal(environment,false);
+ assert.equal(f.api.calls.length,0);
+ await assert.rejects(fs.stat(f.selection.route.workerHome),{code:'ENOENT'});
+});

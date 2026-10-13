@@ -1,4 +1,4 @@
-# Optional ACP execution route · v0.2
+# Optional ACP execution route · v0.3
 
 [中文](acp-integration.md) | English
 
@@ -64,6 +64,12 @@ rejected; no separate acpx queue is rebuilt.
 
 ## Files
 
+0.3 adds actual assembly of the shared worker contract, optional delivery sidecars,
+finite batches and task-scoped acceptance helpers. See [Worker delivery and finite
+batches](worker-delivery.en.md) for operations and evidence boundaries. Ordinary
+single responsibilities keep the commands below without a report schema or Dispatch.
+Historical acceptance sections retain their respective dates and versions.
+
 - `src/cli.mjs`: commands, private environment assembly, mutual exclusion, cancel
   control and exit codes.
 - `src/config.mjs`: explicitly named routes, argument and authorization validation,
@@ -71,6 +77,12 @@ rejected; no separate acpx queue is rebuilt.
 - `src/engine.mjs`: public runtime integration, same-session checks, results and cleanup.
 - `src/state.mjs`: a small amount of private binding/receipt, atomic writes, path and
   file-type checks.
+- `src/delivery.mjs`: bounded delivery collection and identity validation; reports
+  remain separate from runtime facts.
+- `src/batch.mjs`: finite independent CLI subprocesses, batch-local admission and
+  coverage of actual results.
+- `src/verify.mjs`: coordinator-confirmed argv checks, task environments, budgets and
+  evidence freshness; it never executes commands from a report.
 - `test/*.test.mjs`: integration-layer tests that run without dependencies; the runtime
   uses explicitly marked contract doubles.
 - `test/real-acpx.integration.mjs`: an integration test that actually loads the acpx

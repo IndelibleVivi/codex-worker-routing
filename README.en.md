@@ -14,7 +14,7 @@ their main-session personal context intact.
 [Your first delegated task](docs/first-delegated-task.en.md) · [Install the plugin](#installation) ·
 [Local Dispatch guide](docs/dispatch.en.md) · [Configure custom models](docs/native-model-picker.en.md)
 
-Current source version: 0.2.0. Routing is provided by an instruction-only
+Current source version: 0.3.0. Routing is provided by an instruction-only
 plugin; the optional ACP integration connects a registered external coding agent through
 `acpx/runtime`; and the optional main-session integration uses a native `SessionStart`
 hook to load local private instructions automatically. There is no additional MCP
@@ -118,7 +118,7 @@ flowchart LR
   Main -->|ACP work order| ACPBridge
   ACPBridge -->|ACP session| External
   External -->|result + evidence| ACPBridge
-  ACPBridge -->|receipt + excerpt| Main
+  ACPBridge -->|receipt + optional delivery| Main
   ACPBridge -->|private receipts| Dispatch
   Main -->|explicit review events| Dispatch
   Main -->|integrated delivery| User
@@ -217,6 +217,25 @@ narrow the remaining scope or take over part of the work. New requirements, phas
 and undelivered permissions are not quality failures. A missing final report first calls for
 consolidating existing artifacts and checks; confirm the old writer stopped before takeover.
 
+## Autonomous delivery and bounded swarm
+
+A worker's complete responsibility includes in-scope checks, repair and closeout. Ordinary
+check failures feed its own tool loop. After a critical decision or constrained operation,
+the coordinator can return remaining execution to the same session while preserving
+supported results. Stop at the stated criteria, without a default reviewer or reflection turn.
+
+Broad repository discovery, independent directions and repeated dirty work can trigger the
+packaged swarm method. The coordinator fixes a finite list, authority and shared resources;
+independent CLI processes execute it. Mechanical collection exposes coverage, duplicates,
+missing items and evidence. A peer can merge complex results; the main agent accepts key
+conclusions and concrete doubts rather than repeating every original investigation.
+
+Ordinary run/continue/close stays simple. Complex outcomes can opt into --deliver and finite
+lists into batch. Report failure repairs delivery without automatically replaying edits.
+Serialize unverified shared-HOME concurrency; read mode and separate worktrees are not
+isolation. See [worker delivery and finite batches](docs/worker-delivery.en.md) for interfaces,
+recovery and experimental boundaries.
+
 ## Behavior Scenarios
 
 Non-runtime observation scenarios and their evidence standards are recorded in
@@ -305,9 +324,10 @@ newer. The real schema and adapter capabilities still govern at call time. Older
 other hosts may not provide the same fields. See [input boundaries](docs/context.en.md) and
 the [ACP integration guide](docs/acp-integration.en.md) for more limitations.
 
-This repository is the independent canonical source. The five native runtime documents
-under `plugins/worker-routing` (`SKILL.md` and four references) are canonical in English;
-`acp-worker` is the optional external-route entry. The native documents keep the trigger
+This repository is the independent canonical source. The shared worker contract, routing
+entry and on-demand references under `plugins/worker-routing` are canonical in English.
+`acp-worker` owns optional channel operations; `swarm` owns authorized finite batches.
+The native documents keep the trigger
 examples `全权接住`, `从头做到位`, `solo`, `亲自做`, and `别派小弟`.
 Public setup, usage and boundary documents are available in Chinese and English.
 The [documentation index](docs/README.en.md) lists the paired guides; use the language

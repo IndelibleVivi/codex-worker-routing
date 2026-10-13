@@ -87,7 +87,10 @@ export function fakeAcpx(behavior={}) {
             events:{async *[Symbol.asyncIterator](){
               await started;
               if(behavior.streamError)throw Object.assign(new Error('stream failed'),{code:'STREAM_ERROR'});
-              for(const e of behavior.events??[{type:'text_delta',stream:'thought',text:'PRIVATE_THOUGHT'},{type:'text_delta',stream:'output',text:'Synthetic result.'}]){
+              // `events` may be a function of the start input, so a test can echo
+              // the actual per-turn ids back (e.g. a delivery block).
+              const list=typeof behavior.events==='function'?behavior.events(input):(behavior.events??[{type:'text_delta',stream:'thought',text:'PRIVATE_THOUGHT'},{type:'text_delta',stream:'output',text:'Synthetic result.'}]);
+              for(const e of list){
                 if(streamClosed)break;
                 yield e;
               }

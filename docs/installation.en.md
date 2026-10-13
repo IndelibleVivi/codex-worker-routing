@@ -14,7 +14,7 @@ do not overwrite another plugin.
 
 After updating source, inspect the marketplace and source directory through the current
 host's `codex plugin marketplace list --json`. Update the plugin manifest version
-(`0.2.0` for this update), then reinstall through
+(`0.3.0` for this update), then reinstall through
 `codex plugin add worker-routing@MARKETPLACE --json`. If the host provides bundled
 authoring helpers, they can verify the marketplace or update the cachebuster; do not
 assume an old helper path still exists. Never edit an installed cache in place. Check
@@ -25,6 +25,19 @@ an existing session does not reload its instructions automatically. Existing
 `routes.json` files and explicit `--route` remain usable. Once `routing.default` is configured, routine ACP channel changes
 only edit that private file; do not copy the current route name into SessionStart.
 See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration and revocation.
+
+## Delivery and swarm upgrade
+
+Update canonical ACP source and reinstall the plugin together. Version 0.3.0 adds the
+packaged shared worker contract and on-demand recovery/Dispatch/swarm methods. Native
+handoffs deliver that same contract; ACP assembles it in the actual order. Existing
+0.2.0 run/continue/control calls and historical receipts remain usable.
+
+Ordinary work needs no new settings or report block. Optional --deliver collection and
+finite batch manifests remain outside Git and do not alter runtime acceptance. Unknown
+shared-HOME concurrency is serialized within a batch; an actual route capability needs
+its own scoped validation. Do not copy credentials or change defaults to activate swarm.
+See [worker delivery](worker-delivery.en.md) for the optional interfaces and boundaries.
 
 ## Recovery upgrade compatibility
 

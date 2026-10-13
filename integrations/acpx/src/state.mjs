@@ -163,3 +163,22 @@ export async function loadBinding(stateDir, id) {
     throw new Fault('BAD_BINDING', 'Invalid integration binding.');
   return b;
 }
+
+// Shared nonce-bound cancellation writer; CLI and batch use the same primitive.
+export async function requestCancel(config, binding) {
+  const p = paths(config.stateDir, binding.id);
+  await privateDir(p.lock, { create:false });
+  const owner = await readJSON(path.join(p.lock, 'owner.json'), { privateFile:true });
+  if (typeof owner.nonce !== 'string') throw new Fault('BAD_LOCK', 'Invalid owner token.');
+  // Do not use atomicJSON here: a concurrent terminal cleanup must not recreate
+  // a deleted lock directory. Exclusive creation has no mkdir side effects.
+  let h;
+  try { h = await fs.open(path.join(p.lock, 'cancel.json'), 'wx', 0o600); }
+  catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    const old = await readJSON(path.join(p.lock,'cancel.json'), {privateFile:true});
+    if (old.nonce !== owner.nonce) throw new Fault('LOCK_CHANGED','Cancellation belongs to a different operation.');
+  }
+  if (h) try { await h.writeFile(JSON.stringify({nonce:owner.nonce})); await h.sync(); } finally { await h.close(); }
+  return { schema:'cwr.acp.control/1', session_id:binding.id, cancel_requested:true, stopped:false };
+}

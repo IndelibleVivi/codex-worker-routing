@@ -63,7 +63,8 @@ Stop and report if the fix would cross that boundary.`);
  <pre><code>${esc(workOrder)}</code></pre>
  <ul>
   <li>${tp('需要修正时优先继续原会话；同一缺口经过两次明确返修仍无进展时，先重新决定恢复方式。','Continue the same session for corrections. After two explicit reworks leave the same gap without progress, decide how to recover before repeating the order.')}</li>
-  <li>${tp('主 agent 交付前要检查真实 diff 与相关检查。worker 说「完成」只是它的结论，不等于工程验收。','Before delivery the main agent reviews the diff and checks. \u201cDone\u201d from a worker is a claim, not acceptance.')}</li>
+  <li>${tp('worker 在授权范围内自行检查、修正普通错误并复验；既定条件达标就交付，遇到关键判断缺口时提出精确问题。','Workers check and repair ordinary in-scope defects before delivery, stop when stated conditions are supported, and return precise questions for material decision gaps.')}</li>
+  <li>${tp('主 agent 按风险验收实际成果与证据；批量工作先看覆盖、关键结论与冲突，再定向展开疑点。worker 说「完成」仍是候选声明。','The main agent accepts actual artifacts and evidence by risk. For batches, inspect coverage, key conclusions and conflicts, then expand concrete doubts. A worker saying done is still a candidate declaration.')}</li>
   <li>${tp('说「自己来」或「solo」，工作就留在主会话，主 agent 也应避免重复实现已经交出的责任。','Say \u201csolo\u201d or \u201cdo not delegate\u201d to keep the work in the main session; the main agent should also avoid re-implementing work already delegated.')}</li>
  </ul>`;
 
@@ -74,6 +75,7 @@ Stop and report if the fix would cross that boundary.`);
   <li>${tp('自动备用只处理启动前的入口不可用或必要环境凭据缺失。启动后先恢复原执行；改默认保留旧会话，明确停用旧渠道则阻止后续续做。','Automatic backups handle only unavailable entries or missing required environment credentials before launch. After startup, recover the original execution first. Changing the default preserves existing sessions; disabling a channel blocks further continuation.')}</li>
   <li>${tp('每次 run / continue 都必须显式带 --permissions read|full，省略会在派工前拒绝；不会继承上一轮。这个参数只决定 ACP 权限应答，不是 OS 文件沙箱。','Every run / continue requires explicit --permissions read|full; omission is rejected before dispatch and no mode is inherited. This only selects ACP permission responses, not an OS sandbox.')}</li>
   <li>${tp('超时或取消不能被迟到的完成结果覆盖；已有输出与清理状态分开保留。能启动 route 或列出模型，仍不证明真实推理成功。','A late completed result cannot overwrite timeout or cancellation; output and cleanup stay separate. A route starting or a model listed still does not prove real inference succeeds.')}</li>
+  <li>${tp('复杂成果可选交付收集，已明确独立责任可使用有限 batch / swarm；日常一个小弟无需新表单。不同 worktree 不证明共享 HOME 安全，并发未知时串行该资源。','Complex outcomes can opt into delivery collection and approved independent items into a finite batch or swarm. Ordinary single-worker work needs no form. Separate worktrees do not establish shared-HOME safety; serialize that resource when concurrency is unknown.')}</li>
  </ul>
  <div class="guide-note"><p>${tp('第一次试用可以交出一个小而完整的任务：改一个函数、补一个检查，再看真实 diff 与检查结果。','For a first run, hand over a small, complete task: edit one function, add a check, then review the actual diff and result.')}</p></div>`;
 

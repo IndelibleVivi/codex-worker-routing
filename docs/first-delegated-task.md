@@ -128,6 +128,11 @@ cwr-acp 对 ACP permission request 的应答策略，不是 OS filesystem sandbo
 
 ## 出错时先定位哪一层
 
+普通工单实际送入共同 worker contract：在已授权范围内完成自检、自修与收尾，达到
+条件后及时停止。复杂结果才选择 [交付收集或有限 swarm](worker-delivery.md)，不把
+完整统计、恢复或批次方法塞进第一次日常派工。新的自然请求验收应从未绑定责任开始；
+已知 session 的正确续做只能证明续接行为，不能替首次通道选择作保。
+
 | 现象 | 先查 |
 | --- | --- |
 | picker 没有 model | `model_catalog_json`、catalog visibility、Codex restart |

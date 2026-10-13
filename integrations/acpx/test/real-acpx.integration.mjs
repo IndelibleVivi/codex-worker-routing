@@ -189,6 +189,79 @@ test('REAL recovery: operator cancel remains cancelled when adapter answers end_
 // Runs only on windows-latest. The unit contract double cannot prove that the
 // real spawn path and acpx's Windows command resolution see the relocated
 // profile/temp/launcher variables, so this asserts them from the child itself.
+// Two independent CLI processes share ONE route worker home and use different
+// registered workspaces. The synthetic fixture's lock-protected store is what
+// makes both sessions resumable; this exercises the REAL pinned acpx spawn path.
+async function sharedHomeSetup(t){
+ await loadAcpx();
+ const f=ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000}));
+ const cwdB=path.join(f.root,'workspace-b');await fs.mkdir(cwdB,{mode:0o700});
+ const orderB=path.join(f.root,'order-b.md');await fs.writeFile(orderB,'Second shared-home job.');
+ f.raw.routes.worker.workspaces=[f.cwd,cwdB];
+ await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ return {...f,cwdB,orderB};
+}
+test('REAL acpx: two overlapping processes sharing one worker HOME both resume after restart',async t=>{
+ const f=await sharedHomeSetup(t);
+ // Start both runs so their lifetimes overlap; each writes its own session.
+ const a=start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
+ const b=start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
+ const [ra,rb]=[await a.done,await b.done];
+ assert.equal(ra.code,0,ra.stderr);assert.equal(rb.code,0,rb.stderr);
+ assert.notEqual(ra.receipt.session_id,rb.receipt.session_id);
+ // Each original session must still continue in a fresh process (durable state).
+ const ca=await command(f,'continue',['--session',ra.receipt.session_id,'--file',f.orderFile]);assert.equal(ca.code,0,ca.stderr);
+ const cb=await command(f,'continue',['--session',rb.receipt.session_id,'--file',f.orderB]);assert.equal(cb.code,0,cb.stderr);
+ assert.equal(ca.receipt.acp_session_id,ra.receipt.acp_session_id);
+ assert.equal(JSON.parse(ca.receipt.output_excerpt).turn,2);
+ assert.equal(JSON.parse(cb.receipt.output_excerpt).turn,2);
+});
+test('REAL acpx: cancelling one shared-home turn does not cancel the other',async t=>{
+ const f=await sharedHomeSetup(t);
+ await fs.writeFile(f.orderFile,'FIXTURE_WAIT');
+ await fs.writeFile(f.orderB,'FIXTURE_WAIT');
+ const a=start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
+ const b=start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
+ // Wait until BOTH prompts reached the adapter before cancelling one.
+ const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
+ await until(async()=>{const log=await fs.readFile(audit,'utf8').catch(()=>'');return (log.match(/session\/prompt/g)??[]).length>=2},'both prompts never reached the adapter');
+ const bindings=path.join(f.config.stateDir,'bindings');
+ const ids=await until(async()=>{const out=[];for(const e of await fs.readdir(bindings).catch(()=>[])){try{await fs.stat(path.join(bindings,e,'active.lock','owner.json'));out.push(e)}catch{}}return out.length>=2?out:null},'both session locks never appeared');
+ const cancel=await command(f,'cancel',['--session',ids[0]]);assert.equal(cancel.code,0,cancel.stderr);
+ const done=await Promise.race([a.done.then(r=>({who:'a',r})),b.done.then(r=>({who:'b',r}))]);
+ const cancelledId=ids[0];
+ // Exactly the cancelled session reports cancelled; the other keeps running or
+ // completes on its own and is NOT cancelled.
+ assert.equal(done.r.receipt.session_id,cancelledId,`cancelled ${cancelledId} but ${done.r.receipt.session_id} returned first`);
+ assert.equal(done.r.receipt.runtime_status,'cancelled');
+ const other=done.who==='a'?b:a;
+ const otherDone=await other.done;
+ // The other turn must not have been cancelled by the first cancel.
+ assert.notEqual(otherDone.receipt.session_id,cancelledId);
+});
+test('REAL acpx: batch runs two independent jobs as real subprocesses with machine handles',async t=>{
+ await loadAcpx();
+ const f=ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000}));
+ const cwdB=path.join(f.root,'workspace-b');await fs.mkdir(cwdB,{mode:0o700});
+ const orderB=path.join(f.root,'order-b.md');await fs.writeFile(orderB,'Second batch job.');
+ f.raw.routes.worker.workspaces=[f.cwd,cwdB];
+ f.raw.routes.backup={...f.raw.routes.worker,workerHome:path.join(f.root,'backup-home')};
+ await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ const manifest=path.join(f.root,'batch.json');
+ await fs.writeFile(manifest,JSON.stringify({schema:'cwr.acp.batch-manifest/1',maxConcurrency:2,jobs:[
+  {id:'a',verb:'run',route:'worker',cwd:f.cwd,file:f.orderFile,permissions:'read'},
+  {id:'b',verb:'run',route:'backup',cwd:cwdB,file:orderB,permissions:'read'},
+ ]}));
+ const {code,stderr,receipt}=await command(f,'batch',['--manifest',manifest]);
+ assert.equal(code,0,stderr);
+ assert.equal(receipt.status,'complete');
+ assert.equal(receipt.jobs.length,2);
+ for(const j of receipt.jobs){assert.ok(j.start_handle,'each job must expose a machine start handle');assert.equal(j.runtime_status,'completed');assert.equal(j.cleanup,'confirmed');}
+});
+
+// Runs only on windows-latest. The unit contract double cannot prove that the
+// real spawn path and acpx's Windows command resolution see the relocated
+// profile/temp/launcher variables, so this asserts them from the child itself.
 test('REAL acpx on Windows: the adapter process sees relocated profile, temp and launcher variables',{skip:process.platform!=='win32'},async t=>{
  const f=await setup(t);const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);
  const text=JSON.parse(a.receipt.output_excerpt),home=f.selection.route.workerHome;
@@ -213,4 +286,27 @@ test('REAL acpx on Windows: a .cmd entry is launched through the batch-shim bran
  const text=JSON.parse(a.receipt.output_excerpt);
  assert.equal(text.turn,1);assert.equal(text.home,f.selection.route.workerHome);
  assert.equal(text.main_marker_present,false);assert.equal(a.receipt.cleanup,'confirmed');
+});
+
+
+test('REAL batch: a parent cancellation reaches its child through the canonical nonce mailbox', async t => {
+ const f=await setup(t,{timeoutMs:15000});
+ await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
+ const cwdB=path.join(f.root,'queued');await fs.mkdir(cwdB,{mode:0o700});
+ f.raw.routes.worker.workspaces=[f.cwd,cwdB];await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ const manifest=path.join(f.root,'batch-cancel.json');
+ await fs.writeFile(manifest,JSON.stringify({schema:'cwr.acp.batch-manifest/1',maxConcurrency:1,jobs:[
+  {id:'a',verb:'run',route:'worker',cwd:f.cwd,file:f.orderFile,permissions:'read',deliver:false},
+  {id:'b',verb:'run',route:'worker',cwd:cwdB,file:f.orderFile,permissions:'read',deliver:false},
+ ]}));
+ const result=await command(f,'batch',['--manifest',manifest],path.resolve('test/fixture-batch-cancel.mjs'));
+ assert.equal(result.code,1,result.stderr);
+ assert.equal(result.receipt.status,'partial');assert.equal(result.receipt.cancelled,true);
+ assert.equal(result.receipt.jobs.length,1,'queued work must not launch after cancellation');
+ assert.equal(result.receipt.jobs[0].runtime_status,'cancelled');
+ assert.equal(result.receipt.jobs[0].cleanup,'confirmed');
+ const audit=(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-audit.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
+ assert.equal(audit.filter(e=>e.method==='session/prompt').length,1);
+ assert.ok(audit.some(e=>e.method==='session/cancel'));
+ assert.equal(result.receipt.jobs[0].start_handle.phase,'locks_held');
 });

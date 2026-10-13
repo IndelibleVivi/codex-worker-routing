@@ -144,6 +144,12 @@ real sandbox are also distinct boundaries.
 
 ## Locate the failing layer first
 
+Ordinary orders deliver the shared worker contract: check, repair and close out within
+authority, then stop when conditions hold. Choose [delivery collection or finite
+swarm](worker-delivery.en.md) for complex results instead of loading statistics,
+recovery and batch methods on the first task. A fresh natural request starts without
+a bound responsibility; correct continuation alone cannot prove first channel choice.
+
 | Symptom | Check first |
 | --- | --- |
 | Model missing from picker | `model_catalog_json`, catalog visibility, and Codex restart |

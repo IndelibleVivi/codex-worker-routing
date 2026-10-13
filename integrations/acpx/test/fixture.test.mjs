@@ -41,3 +41,35 @@ test('synthetic ACP server self-test: CLI pipe EOF clears a parked prompt timer'
  const [code,signal]=await closed;
  assert.equal(code,0);assert.equal(signal,null);
 });
+
+// Regression for the shared-HOME stale-snapshot overwrite. The audited probe
+// (CWR_fixture_concurrency_probe.py) failed on the old whole-file save; this
+// test pins the fixture-side fix in the normal suite. Fixture-only: it proves
+// nothing about a real adapter, only that concurrent synthetic sessions survive.
+async function spawnAgent(home){
+ const p=spawn(process.execPath,[path.resolve('test/fixture-acp-agent.mjs')],{env:{HOME:home,PATH:process.env.PATH},stdio:['pipe','pipe','pipe']});
+ let seq=0;const pending=new Map();
+ const send=x=>p.stdin.write(JSON.stringify({jsonrpc:'2.0',...x})+'\n');
+ readline.createInterface({input:p.stdout}).on('line',line=>{const q=JSON.parse(line);if(!q.method)pending.get(q.id)?.(q)});
+ const request=(method,params={})=>new Promise(resolve=>{const id=++seq;pending.set(id,resolve);send({id,method,params})});
+ return {p,request,close:async()=>{try{if(p.exitCode===null&&p.signalCode===null){const exited=once(p,'close');p.kill('SIGTERM');await exited}}catch{}}};
+}
+test('synthetic ACP server self-test: two overlapping processes sharing one HOME keep both sessions', {timeout:15000},async t=>{
+ const f=await fixture();t.after(f.cleanup);
+ const home=f.selection.route.workerHome;await fs.mkdir(home,{mode:0o700});
+ const cwdA=path.join(f.root,'ws-a'),cwdB=path.join(f.root,'ws-b');await fs.mkdir(cwdA);await fs.mkdir(cwdB);
+ const a=await spawnAgent(home),b=await spawnAgent(home);
+ t.after(async()=>{await a.close();await b.close()});
+ await a.request('initialize',{protocolVersion:1});await b.request('initialize',{protocolVersion:1});
+ const aId=(await a.request('session/new',{cwd:cwdA})).result.sessionId;
+ const bId=(await b.request('session/new',{cwd:cwdB})).result.sessionId;
+ await a.close();
+ // A fresh process must observe BOTH durable sessions, not the last snapshot.
+ const reload=await spawnAgent(home);t.after(()=>reload.close());
+ await reload.request('initialize',{protocolVersion:1});
+ const aLoad=await reload.request('session/load',{sessionId:aId});const bLoad=await reload.request('session/load',{sessionId:bId});
+ assert.ok(!aLoad.error,`session A must reload: ${JSON.stringify(aLoad.error)}`);
+ assert.ok(!bLoad.error,`session B must reload: ${JSON.stringify(bLoad.error)}`);
+ const saved=JSON.parse(await fs.readFile(path.join(home,'fixture-sessions.json'),'utf8'));
+ assert.equal(saved[aId].cwd,cwdA);assert.equal(saved[bId].cwd,cwdB);
+});

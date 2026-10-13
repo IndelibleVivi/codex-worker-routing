@@ -7,6 +7,8 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
+**Delivery 0.3 candidate copy (2026-10-13):** this update adds worker self-repair, evidence-based acceptance and finite batch/swarm guidance in both languages. The 0.2 publication receipt below remains historical; 0.3 awaits this update's build, browser and publication acceptance.
+
 **Recovery 0.2 live (2026-10-13):** the bilingual guide now explains explicit
 per-turn permissions, channel choice and timeout/cancellation recovery. On that day the
 existing Pages workflow published public source

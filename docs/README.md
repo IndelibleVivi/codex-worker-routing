@@ -10,6 +10,7 @@
 | 安装、验证与恢复 | [中文](installation.md) | [English](installation.en.md) |
 | 原生自定义模型 | [中文](native-model-picker.md) | [English](native-model-picker.en.md) |
 | 可选 ACP 接入 | [中文](acp-integration.md) | [English](acp-integration.en.md) |
+| Worker 交付与有限批次 | [中文](worker-delivery.md) | [English](worker-delivery.en.md) |
 | ACP 与 provider 协议边界 | [中文](acp-provider-protocols.md) | [English](acp-provider-protocols.en.md) |
 | 经 Codex Router 使用 Command Code | [中文](commandcode-via-codex-router.md) | [English](commandcode-via-codex-router.en.md) |
 | 本机 Dispatch 与分享卡 | [中文](dispatch.md) | [English](dispatch.en.md) |
