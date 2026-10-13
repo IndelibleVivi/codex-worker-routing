@@ -453,6 +453,34 @@ host-detached descendant has been terminated.
 
 ## Acceptance gate
 
+### Layered Delivery 0.3.0 acceptance (2026-10-13)
+
+Source `18a62f9` passed all five [CI jobs](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38415570521).
+Ubuntu/macOS check: 337 pass + 4 Windows-only skips. Windows: 340 pass + 1 POSIX-only
+helper skip. Real acpx synthetic integration: 14 pass + 2 Windows-only skips on the
+first two platforms, 16 pass on Windows. acpx stays pinned at 0.15.1; no new production dependency.
+
+The local plugin was formally installed/enabled at 0.3.0, with exact canonical-source
+parity for all 15 packaged files. A fresh independent root began from a natural
+“delegate this” request, read the installed short entries, and selected the current
+configured ACP default with explicit full permission on its first responsibility.
+No CLI template or session was seeded; Dispatch/recovery/swarm was not loaded.
+The worker repaired the module, the original test file stayed byte-identical, independent
+checks passed, and the responsibility closed with history retained.
+
+Other controlled cases cover self-repair/already-correct input, a precise question
+followed by a same-session increment, stopping on missing capability, handback after
+a coordinator policy edit, independent cancellation and restart continuation of two
+real adapter sessions, and a three-item investigation with peer synthesis. The merger
+preserved duplicate identity, version distinctions, counterevidence and unknowns from
+inaccessible sources. Missing report identity led only to delivery repair in a new
+request, preserving the original failure; runtime completion never became acceptance.
+
+These observations do not establish universal model/provider/permission reliability.
+Shared-HOME capability covers the pertinent adapter/profile under controlled conditions.
+The 0.2 controls also completed small repairs, so no speed or success-rate improvement
+is claimed. Outer feedback remains test-only; evidence does not promote it to a default.
+
 The 2026-10-13 Recovery 0.2.0 source passed the complete `npm run check` on macOS
 (280 tests: 276 pass, 4 Windows-only skips). Subsequent changes only isolated the
 synthetic fixture and repaired failed-test teardown; all 4 fixture checks passed.

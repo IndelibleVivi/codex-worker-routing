@@ -7,7 +7,7 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
-**Delivery 0.3 candidate copy (2026-10-13):** this update adds worker self-repair, evidence-based acceptance and finite batch/swarm guidance in both languages. The 0.2 publication receipt below remains historical; 0.3 awaits this update's build, browser and publication acceptance.
+**Delivery 0.3 live acceptance (2026-10-13):** Source `18a62f9` passed build/deploy through the existing [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38417366590), publishing static dist only. All 29 HTTPS files returned HTTP200 with exact accepted-build bytes. Actual Chromium checks passed for English/Chinese home/guide ×1440/390, four no-JS pages, chart keyboard reset, themes/presets, SVG download and clipboard, with no overflow, broken images or console/page errors. The 0.2 receipts below remain historical.
 
 **Recovery 0.2 live (2026-10-13):** the bilingual guide now explains explicit
 per-turn permissions, channel choice and timeout/cancellation recovery. On that day the

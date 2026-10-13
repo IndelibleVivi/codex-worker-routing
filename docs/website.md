@@ -7,7 +7,7 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
-**Delivery 0.3 候选文案（2026-10-13）**：本轮站内双语指南补充 worker 自修、按证据验收和有限 batch / swarm。以下 0.2 发布回执保留为历史；0.3 仍待本次构建、浏览器与发布验收。
+**Delivery 0.3 上线验收（2026-10-13）**：源码 `18a62f9` 经既有 [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38417366590) build/deploy success，发布范围仅为静态 dist。29 个 HTTPS 文件全部 HTTP200，且与已验收构建逐字节一致；实际 Chromium 中英 home/guide ×1440/390、四页 no-JS、图表键盘复位、主题/预设、SVG 下载和剪贴板复制通过，无 overflow、坏图或 console/page errors。以下 0.2 回执保留为历史。
 
 **Recovery 0.2 已上线（2026-10-13）**：站内双语指南已同步每轮显式权限、通道选择与
 超时/取消恢复规则。当日既有 Pages workflow 发布了公开源码

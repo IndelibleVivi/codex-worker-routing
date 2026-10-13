@@ -331,6 +331,27 @@ cwr-acp 未实现自动恢复器，尤其不能将一个 dead PID 视为所有�
 
 ## 验收门
 
+### Delivery 0.3.0 分层验收（2026-10-13）
+
+源码 `18a62f9` 的 [CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38415570521)
+五个 jobs 全通过：Ubuntu/macOS 的 check 为 337 pass + 4 Windows-only skip，
+Windows 为 340 pass + 1 POSIX-only helper skip；真实 acpx 合成联调前两平台
+14 pass + 2 Windows-only skip，Windows 16 pass。acpx 仍固定 0.15.1，无新增生产依赖。
+
+本机 plugin 正式安装并启用 0.3.0，15 个包内文件与 canonical source 逐字节一致。
+新的独立主 root 从自然“派小弟”请求开始，实际读取该安装版短入口，首次选择当前配置
+默认 ACP 并显式 full；没有命令模板或预置 session，也没有加载 Dispatch/recovery/swarm。
+worker 完成修改、原测试保持逐字不变、独立检查通过，责任关闭且历史保留。
+
+其他受控样本覆盖自修/已正确输入、精确问题后的同 session 增量、能力缺失停止、
+协调者修改 policy 后交还、两个真实 adapter session 的独立取消和重启续接、三项有限
+调查及平级归并。归并保留重复身份、版本差异、反证与不可访问来源的 unknown。
+报告缺身份时只补交付，新 request 保留原失败记录；runtime 完成不改成工程验收。
+
+这些事实不证明所有模型、provider 或权限环境都同样可靠。共享 HOME 能力只覆盖对应
+adapter/profile 的受控场景；0.2 对照也能完成小型修复，因此不宣称性能或成功率提升。
+外层反馈保留为 test-only 实验，尚无证据将其晋升默认。
+
 2026-10-13 的 Recovery 0.2.0 源码在 macOS 通过完整 `npm run check`（280 项，
 276 pass、4 项 Windows-only skip）；随后只调整合成夹具隔离和失败收尾，夹具全部
 4 项检查通过。最终完整 `npm run test:acpx` 为 12 项（10 pass、2 项 Windows-only skip），
