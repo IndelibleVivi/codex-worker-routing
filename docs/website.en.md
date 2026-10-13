@@ -7,10 +7,20 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
-**Recovery 0.2 source update (2026-10-13):** the bilingual guide now explains explicit
-per-turn permissions, channel choice and timeout/cancellation recovery. This update covers
-source and local build verification; the September publication receipts below are
-historical and do not claim these new words are live.
+**Recovery 0.2 live (2026-10-13):** the bilingual guide now explains explicit
+per-turn permissions, channel choice and timeout/cancellation recovery. On that day the
+existing Pages workflow published public source
+`2194db4b4452d0f65aae74f6ef4d36ffc798f172`; build and deploy both succeeded
+([Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38345368341)),
+with `integrations/site/dist` as the only artifact. Coordinator acceptance record: all 29
+public static files returned 200 and were byte-for-byte identical to the locally accepted
+build; real headless Chromium at 1440 and 390 widths checked the English and Chinese home and
+guide pages with no horizontal overflow or broken images, the guides include the explicit
+per-turn permissions requirement, all four pages remained readable with JavaScript disabled,
+and homepage daily-bar selection and keyboard reset, themes/presets, actual SVG download and
+clipboard copy passed with no console/page errors. These are coordinator runtime observations,
+not extrapolation to other environments; the September publication receipts below are
+historical.
 
 **Historical update published** (2026-09-21): the ACP guide now explains one default worker,
 default changes and prelaunch fallbacks; the FAQ clarifies authorized paid routes.

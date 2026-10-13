@@ -331,6 +331,13 @@ cwr-acp 未实现自动恢复器，尤其不能将一个 dead PID 视为所有�
 6 秒任务预算的区分对照。它验证固定 acpx 的公开 API 行为，不证明真实 provider 健康、
 旧回执正确或当前聊天已加载新 skill；跨平台状态以对应提交 CI 为准。
 
+同日，真实 operator 配置的 ACP 责任先以显式 `--permissions read` 完成只读检查，再在
+同一 session 以显式 `--permissions full` 续做公开文档更新。两轮均返回完整最终报告，
+runtime 为 `completed/end_turn`，cleanup 为 `confirmed`；协调方已核对 runtime/cleanup
+并检查文档 diff、双语一致性、相对链接与 `git diff --check`。该本机验收只适用于此次
+已配置通道：permission-response policy 不是 OS sandbox，也不证明其他 adapter/provider/
+账号行为、provider 身份或普遍可靠性。新 CLI root 已读取安装版 0.2.0 的调度说明并正确
+续做原 ACP 责任；验收后正常 close，状态为 idle/closed，历史保留。
 
 2026-09-21 的默认与备用源码更新在 macOS 通过 256 项 integration 检查（252 pass、
 4 项 Windows-only skip），以及真实 acpx + synthetic ACP server 的 8 项检查

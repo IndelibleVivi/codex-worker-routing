@@ -7,9 +7,16 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
-**Recovery 0.2 源码更新（2026-10-13）**：站内双语指南已同步每轮显式权限、通道选择与
-超时/取消恢复规则。本轮只更新并验证本地构建；以下 2026-09 的发布回执属于历史版本，
-不代表这些新文案已经上线。
+**Recovery 0.2 已上线（2026-10-13）**：站内双语指南已同步每轮显式权限、通道选择与
+超时/取消恢复规则。当日既有 Pages workflow 发布了公开源码
+`2194db4b4452d0f65aae74f6ef4d36ffc798f172`；build 与 deploy 均成功
+（[Pages 发布](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38345368341)），
+发布 artifact 仅为 `integrations/site/dist`。协调方验收记录：全部 29 个公网静态文件返回
+200，且与本地已验收 build 逐字节一致；真实 headless Chromium 在 1440 与 390 宽度检查
+中英首页与指南，无横向溢出或图片损坏，指南包含每轮显式权限要求，四页在关闭 JavaScript
+时仍可读，首页日柱选择与键盘重置、主题/预设、实际 SVG 下载与 clipboard 复制均通过，
+无 console/page 错误。以上为协调方运行证据，不外推到其他环境；以下 2026-09 的发布
+回执属于历史版本。
 
 **历史更新已发布**（2026-09-21）：站内 ACP 指南已加入单一默认小工、默认切换与
 启动前备用的说明，FAQ 明确只使用获准付费路线。源码 `8f3c27b` 的

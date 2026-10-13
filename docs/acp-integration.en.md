@@ -450,6 +450,16 @@ and a 2-second inherited runtime timer versus a 6-second CWR task budget. This c
 the pinned public API, not real-provider health, old receipts or skill loading in an
 existing chat. Cross-platform status belongs to the corresponding commit's CI.
 
+On the same day, a real operator-configured ACP responsibility completed a read-only inspection
+with explicit `--permissions read`, then continued public documentation edits in the same
+session with explicit `--permissions full`. Both rounds returned complete final reports with
+runtime `completed/end_turn` and cleanup `confirmed`; the coordinator checked runtime/cleanup,
+the documentation diff, bilingual agreement, relative links and `git diff --check`. This local
+acceptance applies only to the configured channel exercised here: permission-response policy
+is not an OS sandbox and does not establish other adapter/provider/account behavior, provider
+identity or general reliability. A fresh CLI root read the installed 0.2.0 routing instructions
+and correctly continued the original ACP responsibility. After acceptance, normal close
+reported idle/closed with history retained.
 
 The 2026-09-21 default/fallback source update passed 256 integration checks on macOS
 (252 pass, 4 Windows-only skips) and 8 real-acpx plus synthetic-ACP-server checks
