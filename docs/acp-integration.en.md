@@ -1,19 +1,19 @@
-# Optional ACP execution route · v0.1
+# Optional ACP execution route · v0.2
 
 [中文](acp-integration.md) | English
 
 Status: the optional integration is implemented; the public runtime API of
 `acpx@0.15.1` has been exercised through a synthetic ACP server. Real adapters,
 models, providers, accounts and local context boundaries are still accepted
-separately by each operator. The existing native skill, collaboration tool
-documentation, SessionStart hook and installer are all unchanged.
+separately by each operator. The common routing skill honors the operator’s selected
+execution channel first; native tools, the SessionStart hook and installer are unchanged.
 
 ## What this changes
 
 Main Codex stays responsible for the goal, product judgment, integration and
 acceptance. The repository does not prescribe the priority between native and ACP;
 temporary provider/model preferences live in operator config outside Git. When a
-task explicitly selects a registered external ACP route, the new `acp-worker` skill
+standing operator default or task selects a registered external ACP route, the `acp-worker` skill
 can call `integrations/acpx/src/cli.mjs` and, through `acpx/runtime`, hand one whole
 responsibility to an independent coding agent.
 
@@ -54,11 +54,12 @@ decoder, without reading private modules or parsing ANSI output. The native path
 calling host tools directly, to avoid forcing different backends' cancel/close/continue
 semantics to be treated as equivalent.
 
-v0.1 uses a blocking CLI. It has no independent background service; there is no bridge
+cwr-acp uses a blocking CLI. It has no independent background service; there is no bridge
 that wakes main Codex automatically after completion; and it makes no "keeps running
 after the terminal closes" promise. The host shell tool's yield/wait is still used
 according to host rules. ACP operations for each exact workspace are conservatively
-serialized; different worktrees can execute independently. An ordinary busy request is
+serialized; different worktrees can execute independently only when write surfaces and
+shared resources do not overlap. An ordinary busy request is
 rejected; no separate acpx queue is rebuilt.
 
 ## Files
@@ -75,8 +76,8 @@ rejected; no separate acpx queue is rebuilt.
 - `test/real-acpx.integration.mjs`: an integration test that actually loads the acpx
   package and starts a synthetic ACP child process.
 - `test/fixture-acp-agent.mjs`: an ACP fixture with no model, no account and no network.
-- `plugins/worker-routing/skills/acp-worker/SKILL.md`: the explicit external-route entry
-  point; ordinary delegation does not trigger it.
+- `plugins/worker-routing/skills/acp-worker/SKILL.md`: the external-route entry
+  point for a standing operator ACP choice or an explicit task selection.
 
 ## Installation and one-time setup
 
@@ -236,7 +237,7 @@ the actual choice and bounded skip codes, without environment values or policy d
 entering the aggregate share.
 
 Change `routing.default` for new work and keep backup choices in the same location.
-Policy changes do not change existing session fingerprints; `continue` returns to
+Policy changes do not change existing session execution identities; `continue` returns to
 the original worker. To stop using an old channel, also set that route's `enabled`
 to `false`, denying subsequent runs and continuations. This does not terminate an
 already active turn; coordinate its stop through the original session. Status/cancel/
@@ -266,15 +267,15 @@ CONFIG=/absolute/private/routes.json
 
 # With routing.default configured; legacy config or an explicit channel uses --route NAME
 node "$ENTRY" run --config "$CONFIG" \
-  --cwd /absolute/approved/worktree --file /absolute/work-order.md
+  --cwd /absolute/approved/worktree --file /absolute/work-order.md --permissions read
 
 # Get session_id from the receipt; add conditions to the same worker
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
-  --file /absolute/increment.md
+  --file /absolute/increment.md --permissions read
 
 # Explicit rework (optional shortcut): record the reason for this correction, then continue; ordinary continuation needs no annotation
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
-  --file /absolute/rework-order.md --revision-reason requirement_missed
+  --file /absolute/rework-order.md --permissions read --revision-reason requirement_missed
 
 # Use only when both the route and the current task are authorized; this approves all ACP permission requests
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
@@ -332,6 +333,14 @@ COMSPEC/PATHEXT/SystemRoot. HOME separation does not restrict absolute-path acce
 Keychain, or the original CLI's own native tools. Project AGENTS, agent built-in config
 and local tools must also be accepted against the real profile.
 
+Every `run` and `continue` must explicitly pass `--permissions read|full`. Omission
+is rejected with `PERMISSIONS_REQUIRED` before adapter launch, prompt submission or
+private-state mutation. There is no default read mode or inheritance from the previous
+turn. `--category implementation` is metadata, not authorization. The coordinator supplies
+the flag from current task authority; an investigation-to-implementation transition updates
+both the work order and the mode, without asking for already-granted authorization again.
+Status/cancel/close and stats/dashboard/record/pending do not require the flag.
+
 `--permissions` selects cwr-acp's answer policy for ACP permission requests, not a
 filesystem boundary: `read` uses approve-reads + non-interactive deny, and `full` uses
 approve-all (which may include execution/network requests). Both constrain only requests
@@ -344,11 +353,24 @@ or use a disposable read-only environment; cwr-acp does not provide that boundar
 not claim process-level network isolation, and does not claim that every adapter's every
 native tool goes through the same permission mechanism.
 
-Continuation checks the route fingerprint, cwd, saved acpxRecordId/acpSessionId, argv and
-the persistent handle. The fingerprint includes the executable entry-point hash, arguments,
-profile revision, workspace/permission config and the explicit model choice. The entry-point
-hash does not cover the CLI's transitive dependencies and arbitrary profile files; profile
-changes must update the revision. When a model is explicitly specified, it must match the
+Continuation checks the versioned `executionIdentity`, fixed cwd, saved
+acpxRecordId/acpSessionId, argv and persistent handle. `cwr.acp.execution-identity/1`
+includes the route, canonical executable and its hash, arguments, workerHome, environment
+declarations, contextRevision and explicit model choice. It excludes the workspace list,
+permission ceiling and timeoutMs. Every continuation still rechecks route enabled state,
+current allowlist membership of the bound cwd and the requested permission ceiling. Adding
+or reordering unrelated workspaces or changing the task budget does not invalidate the new
+identity; revoking the cwd or full permission blocks the corresponding continuation. The
+entry-point hash does not cover transitive dependencies or arbitrary profile files; profile
+changes must update the revision.
+
+A legacy binding only has `routeFingerprint`, without separate evidence of its original
+identity. It migrates under lock only if the complete original fingerprint algorithm still
+matches and current authorization passes. A mismatch stops with `ROUTE_CHANGED`: do not
+guess that only an allowlist changed or blindly rewrite the hash. Do not restore revoked
+authority to make migration pass. Keep the old session available for status/cancel/close,
+inspect existing work and authorize the remaining responsibility separately. Historical
+receipts remain unchanged. When a model is explicitly specified, it must match the
 adapter's currently advertised model before the work order is sent; otherwise the work order
 is not sent. This check does not authenticate the actual upstream model; provider identity
 is still marked unverified. Credential values are not persisted and are not proof of identity
@@ -362,15 +384,41 @@ receipt; when diagnosis is needed it is written to a separate private diagnostic
 the receipt gives only the path. That file may contain provider-sensitive content and must
 be checked before sharing.
 
-The workspace lock only coordinates ACP commands that share this stateDir. It cannot see
-native workers, other installations, databases, ports, services and other shared resources.
+The workspace lock only coordinates the exact cwd among ACP commands sharing this
+stateDir; overlapping writes from different cwd values do not automatically conflict.
+Cross-project work orders must name the execution cwd, additional read roots, allowed write
+roots and shared resources. These declarations do not grant host capabilities. On a missing
+permission or tool, stop the affected operation and return partial work plus the concrete
+gap; the coordinator may repair the environment within authority or narrow/split remaining
+work, without broadening a parent-root allowlist or bypassing a denial. The lock cannot see
+native workers, other installations, databases, ports, services or other shared resources.
 The host must still obey one writer per overlapping write surface, or use a separate
 worktree; a worktree itself also does not isolate the non-file resources above.
 
 ## Crashes and failures
 
-The initial connect/handshake uses a control timeout of at most 30 seconds; each task turn
-uses route.timeoutMs. Cancelling initialization does not mean the underlying handshake has
+Initialization and prompt submission each have a setup deadline of
+`min(route.timeoutMs, 30000)` milliseconds, reported as `INIT_TIMEOUT` or
+`PROMPT_SETUP_TIMEOUT` respectively. The task budget of `route.timeoutMs` starts at the
+public runtime's `promptStarted` acknowledgement that the transport accepted the prompt,
+and runs through canonical `result`, including runtime finalization. Connection setup
+does not consume that task budget. Receipt `budget` retains `setup_ms`, `task_ms` and
+`prompt_started_at` (null when no acknowledgement was observed; this does not prove
+the prompt was never sent).
+
+CWR uses public `startTurn({timeoutMs: 0})` to disable the pinned acpx version's internal
+prompt RPC timer and owns the task deadline itself. This prevents internal recovery from
+turning progress without an RPC final into `end_turn`. The zero-value behavior depends on
+the pinned version and must be checked with the real package and a synthetic adapter when
+upgrading the dependency. Product code imports no private acpx modules.
+
+A timeout or operator cancellation fixes the failed/cancelled outcome before cleanup;
+a late completed/end_turn result cannot overwrite it. `TURN_TIMEOUT` never exits 0, and
+partial output remains available. Event drain, cancel acknowledgement, turn settlement and
+connection close each have an 8-second default cleanup bound; they do not extend an ended
+task budget. Cleanup is reported separately; success text cannot erase unknown/unconfirmed
+cleanup. Historical receipts are not recalculated.
+ Cancelling initialization does not mean the underlying handshake has
 exited; when cleanup cannot be confirmed through the interface, the lock and an uncertain
 state are kept. After startup there is no automatic retry or silent native/ACP fallback;
 limited preflight selection is described in [defaults and fallbacks](#defaults-and-fallbacks). When a
@@ -386,12 +434,22 @@ from PID reuse/leftover writers.
 Exception recovery is done by the local operator checking owner.json, the session receipt,
 the current adapter process and the actual diff. Only after confirming the old writer has
 terminated remove the corresponding operation lock and workspace lock; keep the binding and
-acpx store. v0.1 does not implement an automatic recoverer, and in particular a dead PID must
+acpx store. cwr-acp does not implement an automatic recoverer, and in particular a dead PID must
 not be treated as proof that all descendants have exited. Cleanup only confirms acpx-owned
 processes/connections; it does not guarantee that a malicious daemonized or otherwise
 host-detached descendant has been terminated.
 
 ## Acceptance gate
+
+The 2026-10-13 Recovery 0.2.0 source passed the complete `npm run check` on macOS
+(280 tests: 276 pass, 4 Windows-only skips). Subsequent changes only isolated the
+synthetic fixture and repaired failed-test teardown; all 4 fixture checks passed.
+The final complete `npm run test:acpx` passed 12 tests (10 pass, 2 Windows-only skips),
+covering normal completion, progress without a final, end_turn after cancellation,
+and a 2-second inherited runtime timer versus a 6-second CWR task budget. This checks
+the pinned public API, not real-provider health, old receipts or skill loading in an
+existing chat. Cross-platform status belongs to the corresponding commit's CI.
+
 
 The 2026-09-21 default/fallback source update passed 256 integration checks on macOS
 (252 pass, 4 Windows-only skips) and 8 real-acpx plus synthetic-ACP-server checks

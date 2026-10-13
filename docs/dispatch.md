@@ -100,7 +100,7 @@ Canon 是「折耳猫 + 默认鼠尾草」：[`brand.mjs`](../integrations/acpx/
 ```sh
 node integrations/acpx/src/cli.mjs run --config /absolute/private/routes.json \
   --route registered-worker --cwd /absolute/approved/worktree \
-  --file /absolute/work-order.md --title '修复空输入处理' --category implementation
+  --file /absolute/work-order.md --permissions full --title '修复空输入处理' --category implementation
 ```
 
 只有一次真正的返修值得留下原因时，在原续做命令上顺手带参数，无需另建 JSON：
@@ -108,7 +108,7 @@ node integrations/acpx/src/cli.mjs run --config /absolute/private/routes.json \
 ```sh
 node integrations/acpx/src/cli.mjs continue --config /absolute/private/routes.json \
   --session 22222222-2222-4222-8222-222222222222 --file /absolute/rework.md \
-  --revision-reason validation_failed
+  --permissions full --revision-reason validation_failed
 ```
 
 这是可选捷径，不要求每次续做分类。记录失败会给出提示，但不会阻断原工作。

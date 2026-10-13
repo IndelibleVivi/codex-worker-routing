@@ -10,7 +10,7 @@ Making the worker clear on the following facts is enough:
 
 - the observable outcome to deliver, and the behavior that must stay unchanged;
 - confirmed facts, unverified assumptions, and the canonical cwd, entry points, symbols, and tests;
-- the complete responsibility it owns, its allowed change scope, the dirty state, and the shared write surface;
+- the complete responsibility it owns, its exact execution cwd, any additional read roots and allowed write roots, the dirty state, and the shared write surface;
 - the verification that can distinguish failure from success, and the actual evidence to return;
 - all permission boundaries and stop conditions.
 
@@ -44,6 +44,9 @@ give the key error and an accessible pointer.
 
 A return is an evidence index, not automatic acceptance. The main coordinating agent
 checks the final state and whether the evidence can reject the relevant failure.
+If the final report is missing or vague, first ask the same worker to consolidate
+existing artifacts, actual checks, and remaining gaps. Do not repeat research merely
+to produce a cleaner report. Preserve useful partial results during any takeover.
 
 ## Continuing the same worker
 
@@ -52,6 +55,23 @@ rework should all send an increment to the original worker. State which accepted
 are preserved, the actual failing input or behavior, the correction standard, whether
 permissions changed, and the checks to add; do not re-explore the unchanged parts from
 scratch.
+
+Choose the next step from the actual gap. A failed check or missed requirement normally
+needs same-worker rework. A setup/deadline failure, undelivered permission, unavailable
+tool, new requirement, phase transition, or corrected coordinator premise needs its own
+remedy; none automatically proves poor worker quality. After two explicit reworks leave
+the same acceptance gap without material progress, make a new decision before a third
+equivalent order. Continue only with a concrete reason such as new evidence, a repaired
+environment, or a narrower remaining scope; otherwise take over the unresolved part or
+use an authorized replacement after stopping the original writer. There is no fixed
+turn budget and no mandatory collaboration annotation.
+
+For cross-project work, distinguish the declared roots from the host's actual filesystem
+and tool capabilities. An exact-cwd ACP lock does not cover overlapping writes launched
+from another cwd or state directory. Coordinate shared resources explicitly. When the
+host cannot grant the declared scope, stop that action and return the denied operation
+and boundary; narrow or split the responsibility, or let an authorized coordinator do
+that part. Do not broaden a parent-root allowlist or change channels to evade a denial.
 
 After context loss or compaction, recover the responsibility, the child identifier, and
 the existing evidence from the task record and native state before deciding whether to

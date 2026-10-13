@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { Fault, atomicJSON, privateDir, paths, lock, loadBinding, readJSON, digest } from './state.mjs';
-import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform } from './config.mjs';
+import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buildEnvironment, prepareHome, readOrder, replaceOwnEnvironment, assertSupportedPlatform, executionIdentity, assertBindingIdentity } from './config.mjs';
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
 
@@ -44,9 +44,9 @@ const REQUIRED = Object.freeze({
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
 
 const HELP = `cwr-acp (optional channel; does not replace native subagents)
-  run      --config FILE [--route NAME] --cwd DIR --file ORDER [--permissions read|full]
+  run      --config FILE [--route NAME] --cwd DIR --file ORDER --permissions read|full
            [--title TEXT] [--category investigation|implementation|review|other]
-  continue --config FILE --session UUID --file INCREMENT [--permissions read|full]
+  continue --config FILE --session UUID --file INCREMENT --permissions read|full
            [--revision-reason REASON]
   status   --config FILE --session UUID
   cancel   --config FILE --session UUID
@@ -59,6 +59,10 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
 claim the worker has stopped. No background wakeup and no post-launch retry.
+
+run and continue require an explicit --permissions read|full on EVERY turn.
+The category is metadata, never permission. A continuation does not inherit a
+previous full grant. These modes answer ACP permission requests, not an OS sandbox.
 
 run resolves its route fresh on every call. Omit --route when CONFIG declares a
 top-level routing.default; the default is read from the current config, not from
@@ -121,6 +125,8 @@ export function parseArgs(args) {
     out[name] = value; i++;
   }
   if (REQUIRED[command].some(k => !out[k])) throw new Fault('USAGE', 'Required option missing. Run --help.');
+  if ((command === 'run' || command === 'continue') && out.permissions === undefined)
+    throw new Fault('PERMISSIONS_REQUIRED', 'Choose --permissions read or --permissions full explicitly for this turn; category and earlier turns do not grant permission.');
   return out;
 }
 export async function loadAcpx() {
@@ -248,7 +254,7 @@ export async function main(args, deps = {}) {
   // Route resolution, freshly per call: explicit --route and continue stay pinned
   // to exactly one route (no fallback); run without --route resolves the current
   // routing.default and, only prelaunch, its authorized fallbacks.
-  const resolveOne = name => selectRoute(config, name, opt.cwd ?? binding?.cwd, opt.permissions ?? 'read');
+  const resolveOne = name => selectRoute(config, name, opt.cwd ?? binding?.cwd, opt.permissions);
   let selection, routeNote;
   if (opt.route !== undefined) {
     selection = await resolveOne(opt.route); routeNote = opt.route;
@@ -266,7 +272,7 @@ export async function main(args, deps = {}) {
   } else {
     throw new Fault('ROUTE_REQUIRED', 'No --route was given and the config has no routing.default. Add --route NAME or register a default route.');
   }
-  if (binding && selection.fingerprint !== binding.routeFingerprint) throw new Fault('ROUTE_CHANGED','Route/context revision changed. Start an explicit new responsibility.');
+  if (binding) assertBindingIdentity(binding, selection);
   const order = await readOrder(opt.file);
   // The child-only environment option in acpx is not assumed to be a scrubber.
   // Scrub this standalone CLI process BEFORE importing/executing that package.
@@ -278,7 +284,7 @@ export async function main(args, deps = {}) {
   await privateDir(config.stateDir);
   if (!binding) binding = {
     schema:'cwr.acp.binding/1',id:randomUUID(),route:selection.name,
-    routeFingerprint:selection.fingerprint,cwd:selection.cwd,closed:false,
+    executionIdentity:executionIdentity(selection),cwd:selection.cwd,closed:false,
     createdAt:new Date().toISOString(),handle:null,
   };
   const p = paths(config.stateDir,binding.id);
@@ -328,8 +334,21 @@ export async function main(args, deps = {}) {
     if (binding && opt.command === 'continue') {
       const current = await loadBinding(config.stateDir, binding.id);
       if (current.closed === true) throw new Fault('SESSION_CLOSED', 'The work order is closed.');
-      if (current.routeFingerprint !== selection.fingerprint)
-        throw new Fault('ROUTE_CHANGED', 'Route/context revision changed. Start an explicit new responsibility.');
+      if (current.route !== binding.route || current.cwd !== binding.cwd)
+        throw new Fault('ROUTE_CHANGED', 'The bound route/workspace changed while acquiring its locks; refusing to rebind.');
+      assertBindingIdentity(current, selection);
+      // Re-read current authorization under the locks too: revocation during
+      // environment/import preparation must not launch one more continuation.
+      const currentConfig = await loadConfig(opt.config, process.platform, { mainHome: config.mainHome });
+      if (currentConfig.stateDir !== config.stateDir)
+        throw new Fault('STATE_CHANGED', 'The configured state root changed during preflight; retry only after reconciling the original operation.');
+      selection = await selectRoute(currentConfig, current.route, current.cwd, opt.permissions);
+      const legacy = assertBindingIdentity(current, selection);
+      if (legacy) {
+        current.executionIdentity = executionIdentity(selection);
+        delete current.routeFingerprint;
+        await atomicJSON(p.binding, current);
+      }
       binding = current;
     }
     if (opt.command === 'run') await atomicJSON(p.binding,binding);

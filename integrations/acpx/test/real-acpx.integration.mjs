@@ -6,33 +6,49 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { loadAcpx } from '../src/cli.mjs';
 import { fixture, sleep } from './helpers.mjs';
-const execute=promisify(execFile);
 const cli=path.resolve('src/cli.mjs'),agent=path.resolve('test/fixture-acp-agent.mjs');
-async function setup(t,overrides={}){await loadAcpx();const f=await fixture({argv:[process.execPath,agent],timeoutMs:5000,...overrides});t.after(f.cleanup);return f}
+function ownFixture(t,f){
+ f.runs=new Set();
+ // Stop and reap a failed test's CLI BEFORE deleting its live state. Adapter
+ // stdin closes with the CLI; the synthetic server also clears parked timers.
+ t.after(async()=>{try{await Promise.all([...f.runs].map(run=>run.stop()))}finally{await f.cleanup()}});
+ return f;
+}
+async function setup(t,overrides={}){await loadAcpx();return ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000,...overrides}))}
 // Containment, not a raw string prefix: "<home>-other" must not count as being
 // under "<home>".
 const contained=(root,candidate)=>{const rel=path.relative(root,candidate);return rel!==''&&rel!=='..'&&!rel.startsWith(`..${path.sep}`)&&!path.isAbsolute(rel)};
-async function command(f,verb,extra=[]){
- const args=[cli,verb,'--config',f.configFile,...extra];
- try{const r=await execute(process.execPath,args,{timeout:25000,maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});return {code:0,...r,receipt:JSON.parse(r.stdout)}}
- catch(e){return {code:e.code,stdout:e.stdout,stderr:e.stderr,receipt:e.stdout?.trim()?JSON.parse(e.stdout):null}}
-}
+async function command(f,verb,extra=[],entry=cli){return start(f,verb,extra,entry).done}
 // A blocking `run` must be started without awaiting it so a second control
 // command can race it. Progress is detected by a real condition, never a fixed
 // sleep.
-function start(f,verb,extra=[]){
- const args=[cli,verb,'--config',f.configFile,...extra];
- const child=execFile(process.execPath,args,{timeout:25000,maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
+function start(f,verb,extra=[],entry=cli){
+ const mode=['run','continue'].includes(verb)&&!extra.includes('--permissions')?['--permissions','read']:[];
+ const args=[entry,verb,'--config',f.configFile,...mode,...extra];
+ const child=execFile(process.execPath,args,{timeout:25000,killSignal:'SIGKILL',maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
+ let closed=false;
  const done=new Promise(resolve=>{
-  let stdout='',stderr='';
+  let stdout='',stderr='',spawnError;
   child.stdout.on('data',d=>{stdout+=d});child.stderr.on('data',d=>{stderr+=d});
-  const settle=code=>resolve({code,stdout,stderr,receipt:stdout.trim()?JSON.parse(stdout):null});
-  child.on('error',e=>settle(e.code??'ERROR'));child.on('close',code=>settle(code));
+  child.on('error',e=>{spawnError=e.code??'ERROR'});
+  child.on('close',(code,signal)=>{
+   closed=true;let receipt=null;
+   try{receipt=stdout.trim()?JSON.parse(stdout):null}catch(error){stderr+=`\nInvalid receipt JSON: ${error.message}`}
+   resolve({code:code??spawnError??signal,stdout,stderr,receipt});
+  });
  });
- return {child,done};
+ const stop=async()=>{
+  if(!closed){
+   child.kill('SIGTERM');
+   const force=setTimeout(()=>{if(!closed)child.kill('SIGKILL')},2000);
+   try{await done}finally{clearTimeout(force)}
+  }
+ };
+ const run={child,done,stop};f.runs.add(run);
+ done.then(()=>f.runs.delete(run));
+ return run;
 }
 async function until(check,message,timeout=15000){
  const end=Date.now()+timeout;
@@ -46,8 +62,7 @@ const initial=f=>['--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 // registered backup before any adapter launch and issues exactly one prompt.
 async function routingSetup(t,{fallbacks=[],breakDefault=false}={}){
  await loadAcpx();
- const f=await fixture({argv:[process.execPath,agent],timeoutMs:5000});
- t.after(f.cleanup);
+ const f=ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000}));
  // Register a second, launchable route as the backup with a disjoint worker home.
  f.raw.routes.backup={...f.raw.routes.worker,argv:[process.execPath,agent],workerHome:path.join(f.root,'backup-home'),contextRevision:'synthetic-backup-v1'};
  if(breakDefault) f.raw.routes.worker={...f.raw.routes.worker,argv:[path.join(f.root,'missing-agent')]};
@@ -122,6 +137,54 @@ test('REAL acpx: cancelling a waiting turn yields a cancelled receipt and an idl
  assert.equal(a.receipt.session_id,id);assert.equal(a.receipt.runtime_status,'cancelled');assert.equal(a.receipt.cleanup,'confirmed');
  const s=await command(f,'status',['--session',id]);
  assert.equal(s.code,0,s.stderr);assert.equal(s.receipt.active,'idle');assert.equal(s.receipt.closed,false);
+});
+test('REAL recovery: normal final remains completed with CWR-owned task budget',async t=>{
+ const f=await setup(t);const a=await command(f,'run',initial(f));
+ assert.equal(a.code,0,a.stderr);assert.equal(a.receipt.runtime_status,'completed');
+ assert.equal(a.receipt.error_code,null);assert.equal(a.receipt.cleanup,'confirmed');
+ assert.equal(a.receipt.budget.task_ms,5000);assert.ok(a.receipt.budget.prompt_started_at);
+ assert.equal(JSON.parse(a.receipt.output_excerpt).turn,1);
+});
+test('REAL recovery: progress without RPC final reaches CWR deadline despite cooperative end_turn on cancel',async t=>{
+ const f=await setup(t,{timeoutMs:2000});
+ await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
+ const a=await command(f,'run',initial(f));
+ assert.equal(a.code,1,a.stderr);assert.equal(a.receipt.runtime_status,'failed');
+ assert.equal(a.receipt.error_code,'TURN_TIMEOUT');assert.equal(a.receipt.stop_reason,null);
+ assert.equal(a.receipt.cleanup,'confirmed');assert.match(a.receipt.output_excerpt,/Synthetic progress, no final response/);
+ assert.ok(Date.parse(a.receipt.finished_at)-Date.parse(a.receipt.budget.prompt_started_at)>=2000);
+ const audit=(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-audit.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
+ assert.equal(audit.filter(e=>e.method==='session/prompt').length,1);
+ assert.ok(audit.some(e=>e.method==='session/cancel'));
+ const s=await command(f,'status',['--session',a.receipt.session_id]);assert.equal(s.receipt.active,'idle');
+});
+test('REAL recovery: public zero turn timeout overrides a shorter inherited runtime timer',async t=>{
+ const f=await setup(t,{timeoutMs:6000});
+ // Use only public APIs. A 2s inherited runtime timer would recover this
+ // progress-only reply at about 3s, before CWR's 6s budget. Therefore failure
+ // specifically at CWR's deadline distinguishes honored timeoutMs:0 from a
+ // runtime that ignores zero or silently substitutes its default.
+ // Run in its own process just like the other real-runtime tests: acpx's
+ // agentProcessEnv is an overlay, so it is not a substitute for CLI scrubbing.
+ await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
+ const {code,stderr,receipt}=await command(f,'run',initial(f),path.resolve('test/fixture-inherited-timeout.mjs'));
+ const evidence=JSON.stringify({code,stderr,receipt});
+ assert.equal(code,1,evidence);assert.equal(receipt.runtime_status,'failed',evidence);assert.equal(receipt.error_code,'TURN_TIMEOUT',evidence);assert.equal(receipt.cleanup,'confirmed',evidence);
+ assert.match(receipt.output_excerpt,/Synthetic progress/);
+ assert.ok(Date.parse(receipt.finished_at)-Date.parse(receipt.budget.prompt_started_at)>=6000);
+ const s=await command(f,'status',['--session',receipt.session_id]);assert.equal(s.receipt.active,'idle');
+});
+test('REAL recovery: operator cancel remains cancelled when adapter answers end_turn',async t=>{
+ const f=await setup(t,{timeoutMs:15000});await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
+ const run=start(f,'run',initial(f));
+ const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
+ await until(async()=>{const log=await fs.readFile(audit,'utf8').catch(()=>'');return log.includes('session/prompt')},'the adapter never received the prompt');
+ const entries=await fs.readdir(path.join(f.config.stateDir,'bindings'));let id;
+ for(const entry of entries){try{await fs.stat(path.join(f.config.stateDir,'bindings',entry,'active.lock'));id=entry;break}catch{}}
+ assert.ok(id);const cancel=await command(f,'cancel',['--session',id]);assert.equal(cancel.code,0,cancel.stderr);
+ const a=await run.done;assert.equal(a.code,130,a.stderr);assert.equal(a.receipt.runtime_status,'cancelled');
+ assert.equal(a.receipt.error_code,'CANCEL_REQUESTED');assert.equal(a.receipt.cleanup,'confirmed');
+ assert.match(a.receipt.output_excerpt,/Synthetic progress/);
 });
 // Runs only on windows-latest. The unit contract double cannot prove that the
 // real spawn path and acpx's Windows command resolution see the relocated

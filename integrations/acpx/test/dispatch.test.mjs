@@ -505,8 +505,8 @@ test('CLI parser handles the boolean --json flag and new commands', () => {
   assert.equal(parseArgs(['stats', '--config', '/x', '--since', '7d']).since, '7d');
   assert.throws(() => parseArgs(['stats', '--config', '/x', '--json', '--json']), { code: 'USAGE' });
   assert.equal(parseArgs(['dashboard', '--config', '/x', '--port', '0']).port, '0');
-  assert.equal(parseArgs(['run', '--config', 'c', '--route', 'r', '--cwd', 'd', '--file', 'f', '--title', 'T', '--category', 'review']).category, 'review');
-  assert.throws(() => parseArgs(['run', '--config', 'c', '--route', 'r', '--cwd', 'd', '--file', 'f', '--json']), { code: 'USAGE' });
+  assert.equal(parseArgs(['run', '--permissions', 'read', '--config', 'c', '--route', 'r', '--cwd', 'd', '--file', 'f', '--title', 'T', '--category', 'review']).category, 'review');
+  assert.throws(() => parseArgs(['run', '--permissions', 'read', '--config', 'c', '--route', 'r', '--cwd', 'd', '--file', 'f', '--json']), { code: 'USAGE' });
 });
 test('dashboard resolves on server close and on SIGINT, removing handlers', async t => {
   const { EventEmitter } = await import('node:events');
@@ -548,10 +548,10 @@ test('run and continue retain each submitted work order in a private file', asyn
   const results = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
   await fs.writeFile(f.orderFile, 'Investigate the synthetic importer.');
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
   const id = results.at(-1).session_id;
   await fs.writeFile(f.orderFile, 'Now implement the fix.');
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
   const detail = await createProjectionReader(f.config.stateDir).detail(id);
   assert.equal(detail.turns.length, 2);
   assert.ok(detail.turns[0].work_order.includes('Investigate the synthetic importer'));
@@ -566,7 +566,7 @@ test('title/category/parent are visible while active and durable after', async t
   process.env.CODEX_THREAD_ID = 'synthetic-thread-id';
   let seenEnv = null, createdId, bindingAtRunStart;
   try {
-    const code = await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile, '--title', 'Synthetic', '--category', 'investigation'], {
+    const code = await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile, '--title', 'Synthetic', '--category', 'investigation'], {
       loadAcpx: async () => api,
       replaceEnvironment: env => { seenEnv = env; },
       output: r => results.push(r),
@@ -596,7 +596,7 @@ test('a failed order retention leaves runtime behavior intact but warns durably'
   // stateDir's requests path at a file.
   const requestsParent = path.join(f.config.stateDir, 'requests');
   await fs.writeFile(requestsParent, 'blocked', { mode: 0o600 });
-  const code = await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], {
+  const code = await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], {
     loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {},
   });
   assert.equal(code, 0);
@@ -612,10 +612,10 @@ test('run/continue/close still work and a title never fabricates acceptance', as
   const api = fakeAcpx();
   const results = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile, '--title', 'T', '--category', 'implementation'], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile, '--title', 'T', '--category', 'implementation'], deps), 0);
   const sent = results.at(-1);
   assert.equal(sent.task_acceptance, 'unverified');
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', sent.session_id, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', sent.session_id, '--file', f.orderFile], deps), 0);
   const binding = JSON.parse(await fs.readFile(paths(f.config.stateDir, sent.session_id).binding, 'utf8'));
   assert.equal(binding.dispatch.type, 'dispatched');
   assert.equal(binding.dispatch.category, 'implementation');
@@ -1008,9 +1008,9 @@ test('continue --revision-reason records a revision_requested without a separate
   const api = fakeAcpx();
   const results = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
   const id = results.at(-1).session_id;
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'requirement_missed'], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'requirement_missed'], deps), 0);
   const detail = await createProjectionReader(f.config.stateDir).detail(id);
   assert.equal(detail.events.filter(e => e.kind === 'revision_requested').length, 1);
   assert.equal(detail.session.revisions, 1);
@@ -1024,9 +1024,9 @@ test('a plain continue never fabricates a revision', async t => {
   const api = fakeAcpx();
   const results = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
   const id = results.at(-1).session_id;
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
   const detail = await createProjectionReader(f.config.stateDir).detail(id);
   assert.equal(detail.events.length, 0);
   assert.equal(detail.session.review_state, 'not_requested');
@@ -1037,10 +1037,10 @@ test('an invalid --revision-reason is rejected before any prompt', async t => {
   const api = fakeAcpx();
   const results = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} };
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
   const id = results.at(-1).session_id;
   const startsBefore = api.calls.filter(c => c[0] === 'start').length;
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'not_a_reason'], deps), { code: 'USAGE' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'not_a_reason'], deps), { code: 'USAGE' });
   assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
 });
 
@@ -1050,12 +1050,12 @@ test('a --revision-reason annotation write failure still runs the authorized tas
   const results = [];
   const progress = [];
   const deps = { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: s => progress.push(s) };
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], deps), 0);
   const id = results.at(-1).session_id;
   const startsBefore = api.calls.filter(c => c[0] === 'start').length;
   // Force the revision annotation write to fail: the events path is a file.
   await fs.writeFile(path.join(f.config.stateDir, 'events'), 'blocked', { mode: 0o600 });
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), 0);
   // Exactly one turn executed, the receipt exposes the additive warning, and the
   // owned locks were released.
   assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore + 1);
@@ -1072,7 +1072,7 @@ test('a continue whose binding becomes closed before lock acquisition does not p
   const f = await fixture(); t.after(f.cleanup);
   const api = fakeAcpx();
   const results = [];
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
   const id = results.at(-1).session_id;
   const startsBefore = api.calls.filter(c => c[0] === 'start').length;
   const deps = {
@@ -1082,7 +1082,7 @@ test('a continue whose binding becomes closed before lock acquisition does not p
       await writeBinding(f.config.stateDir, { ...stored, closed: true, closedAt: at(Date.now()) });
     },
   };
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'SESSION_CLOSED' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'SESSION_CLOSED' });
   // No adapter prompt happened and the owned locks were released.
   assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
   await fs.lstat(paths(f.config.stateDir, id).lock).then(() => { throw new Error('session lock retained'); }, e => assert.equal(e.code, 'ENOENT'));
@@ -1093,7 +1093,7 @@ test('a continue --revision-reason whose binding becomes closed adds no revision
   const f = await fixture(); t.after(f.cleanup);
   const api = fakeAcpx();
   const results = [];
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
   const id = results.at(-1).session_id;
   const deps = {
     loadAcpx: async () => api, output: r => results.push(r), progress: () => {},
@@ -1102,7 +1102,7 @@ test('a continue --revision-reason whose binding becomes closed adds no revision
       await writeBinding(f.config.stateDir, { ...stored, closed: true, closedAt: at(Date.now()) });
     },
   };
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), { code: 'SESSION_CLOSED' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile, '--revision-reason', 'uncertain'], deps), { code: 'SESSION_CLOSED' });
   const detail = await createProjectionReader(f.config.stateDir).detail(id);
   assert.equal(detail.events.length, 0); // no revision event was appended
 });
@@ -1111,17 +1111,17 @@ test('a continue whose route fingerprint changes before lock acquisition is refu
   const f = await fixture(); t.after(f.cleanup);
   const api = fakeAcpx();
   const results = [];
-  assert.equal(await main(['run', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
+  assert.equal(await main(['run', '--permissions', 'read', '--config', f.configFile, '--route', 'worker', '--cwd', f.cwd, '--file', f.orderFile], { loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} }), 0);
   const id = results.at(-1).session_id;
   const startsBefore = api.calls.filter(c => c[0] === 'start').length;
   const deps = {
     loadAcpx: async () => api, output: r => results.push(r), progress: () => {},
     replaceEnvironment: async () => {
       const stored = JSON.parse(await fs.readFile(paths(f.config.stateDir, id).binding, 'utf8'));
-      await writeBinding(f.config.stateDir, { ...stored, routeFingerprint: 'changed-fingerprint' });
+      await writeBinding(f.config.stateDir, { ...stored, executionIdentity: { ...stored.executionIdentity, fingerprint: 'changed-fingerprint' } });
     },
   };
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'ROUTE_CHANGED' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'ROUTE_CHANGED' });
   assert.equal(api.calls.filter(c => c[0] === 'start').length, startsBefore);
 });
 
@@ -1129,7 +1129,7 @@ test('a continue whose route fingerprint changes before lock acquisition is refu
 // CLI parser / removed commands
 // ---------------------------------------------------------------------------
 test('pending and optional revision reason use their documented parser contracts', () => {
-  assert.equal(parseArgs(['continue', '--config', 'c', '--session', 's', '--file', 'f', '--revision-reason', 'uncertain'])['revision-reason'], 'uncertain');
+  assert.equal(parseArgs(['continue', '--permissions', 'read', '--config', 'c', '--session', 's', '--file', 'f', '--revision-reason', 'uncertain'])['revision-reason'], 'uncertain');
   assert.equal(parseArgs(['pending', '--config', '/x.json']).command, 'pending');
   assert.throws(() => parseArgs(['pending']), { code: 'USAGE' });
   assert.throws(() => parseArgs(['pending', '--config', 'c', '--since', '7d']), { code: 'USAGE' });

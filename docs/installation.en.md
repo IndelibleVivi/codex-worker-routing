@@ -12,17 +12,42 @@ own personal marketplace. Keep one canonical source and one discovery entry.
 Check who owns an existing directory with the same name before changing it;
 do not overwrite another plugin.
 
-After updating source, use plugin-creator's `read_marketplace_name.py` to verify
-the marketplace, then run `update_plugin_cachebuster.py <plugin-path>` and the
-normal `codex plugin add` flow. Do not edit an installed cache in place. Verify
-discovery in a new main session after installation.
+After updating source, inspect the marketplace and source directory through the current
+host's `codex plugin marketplace list --json`. Update the plugin manifest version
+(`0.2.0` for this update), then reinstall through
+`codex plugin add worker-routing@MARKETPLACE --json`. If the host provides bundled
+authoring helpers, they can verify the marketplace or update the cachebuster; do not
+assume an old helper path still exists. Never edit an installed cache in place. Check
+version/source parity and verify discovery in a new main session after installation.
 
 Defaults and fallbacks require updated canonical ACP source and plugin instructions;
 an existing session does not reload its instructions automatically. Existing
-`routes.json` files and explicit `--route` remain compatible, without migrating
-receipts or sessions. Once `routing.default` is configured, routine ACP channel changes
+`routes.json` files and explicit `--route` remain usable. Once `routing.default` is configured, routine ACP channel changes
 only edit that private file; do not copy the current route name into SessionStart.
 See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration and revocation.
+
+## Recovery upgrade compatibility
+
+Update canonical ACP source, plugin instructions and operator-maintained command templates
+together. Every `run` / `continue` now requires explicit `--permissions read|full`;
+omission returns `PERMISSIONS_REQUIRED` without starting an adapter, submitting a prompt or
+writing state. Investigation-to-implementation continuations need `full` under current
+authority; category is not permission. This requires no provider, default-route, workspace
+authorization or private main-session instruction changes.
+
+New bindings use versioned execution identity with current cwd and permission checks.
+Legacy bindings migrate under the continuation lock only while the complete original
+`routeFingerprint` still matches. If configuration changes have already invalidated it,
+stop and retain status/cancel/close recovery; never blindly rewrite a hash or restore
+revoked authority. Confirm the old writer stopped, retain its work and establish an
+authorized session for the remainder. Historical receipts are not recalculated, and old
+completed entries have not been revalidated. New timeout/cancellation rules apply only
+to execution after the upgrade.
+
+Installed-file parity, skill discovery in the next main session and real route execution
+are separate acceptance layers. Installation does not replace instructions already loaded
+in an existing chat; supply current invocation requirements before continuing there.
+See [ACP integration](acp-integration.en.md) for identity, deadline and cleanup semantics.
 
 ## Local Dispatch dashboard
 

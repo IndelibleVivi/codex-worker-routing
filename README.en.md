@@ -14,7 +14,7 @@ their main-session personal context intact.
 [Your first delegated task](docs/first-delegated-task.en.md) · [Install the plugin](#installation) ·
 [Local Dispatch guide](docs/dispatch.en.md) · [Configure custom models](docs/native-model-picker.en.md)
 
-This is an early-stage implementation. Routing is provided by an instruction-only
+Current source version: 0.2.0. Routing is provided by an instruction-only
 plugin; the optional ACP integration connects a registered external coding agent through
 `acpx/runtime`; and the optional main-session integration uses a native `SessionStart`
 hook to load local private instructions automatically. There is no additional MCP
@@ -82,7 +82,7 @@ Codex quota saved. Coverage is explicitly ACP-only. See the [Dispatch guide](doc
 ```mermaid
 flowchart LR
   subgraph Source["Public canonical source / 公开真源"]
-    Policy["Worker Routing plugin<br/>native delegation policy"]
+    Policy["Worker Routing plugin<br/>delegation + channel policy"]
     ACPSource["Optional ACP integration<br/>acp-worker + cwr-acp"]
     Adapter["Optional SessionStart integration<br/>installer + adapter"]
   end
@@ -184,7 +184,9 @@ accounted separately, with no silent fallback to a higher-cost route. Model and 
 names stay in operator configuration; the plugin keeps no leaderboards, price lookups,
 or evaluation matrices.
 
-Use the default when it fits, without comparing models or filling in worker biographies.
+Honor the operator’s existing channel choice before invoking its tools; available native
+tools do not override a standing ACP selection. Use the default when it fits, without
+comparing models or filling in worker biographies.
 For registered ACP routes, add `routing.default` to the existing private `routes.json`
 and omit `--route` on ordinary runs; `routing.fallbacks` may be omitted or empty.
 Changing channels updates that one location, without editing public skills or reinstalling
@@ -199,6 +201,21 @@ execution, confirms it has stopped and preserves its work before authorized reco
 quality issues use same-worker rework. A default change affects new responsibilities;
 `enabled: false` revokes a route for subsequent runs and continuations while leaving
 status/cancel/close available. See [ACP defaults and fallbacks](docs/acp-integration.en.md#defaults-and-fallbacks).
+
+Every ACP `run` / `continue`, including an ordinary continuation, must explicitly pass
+`--permissions read|full`. Category does not infer permission and turns do not inherit
+it; omission is rejected before dispatch. Once a timeout or cancellation is established,
+a late completed result cannot overwrite it. Output remains progress evidence and cleanup
+is reported separately. Continuation separates execution identity from current policy:
+adding unrelated workspaces or changing the budget preserves the new identity, while
+revoking the bound cwd or requested permission still denies execution. Legacy bindings
+migrate only after a complete old-fingerprint match. See [installation and recovery](docs/installation.en.md).
+
+After two explicit reworks leave the same acceptance gap with no material progress, make
+a recovery decision before a third equivalent order. Repair a concrete environment problem,
+narrow the remaining scope or take over part of the work. New requirements, phase transitions
+and undelivered permissions are not quality failures. A missing final report first calls for
+consolidating existing artifacts and checks; confirm the old writer stopped before takeover.
 
 ## Behavior Scenarios
 

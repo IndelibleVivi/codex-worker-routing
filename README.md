@@ -11,7 +11,7 @@
 [从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
 [本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
 
-这是初版实现。调度由一个 instruction-only plugin 提供；可选 ACP integration
+当前源码版本为 0.2.0。调度由一个 instruction-only plugin 提供；可选 ACP integration
 通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
 proxy 或固定 planner/tester/reviewer 流水线。
@@ -72,7 +72,7 @@ Slogan 可从四组双语文案开始自由编辑，支持可选分享者署名�
 ```mermaid
 flowchart LR
   subgraph Source["Public canonical source / 公开真源"]
-    Policy["Worker Routing plugin<br/>native delegation policy"]
+    Policy["Worker Routing plugin<br/>delegation + channel policy"]
     ACPSource["Optional ACP integration<br/>acp-worker + cwr-acp"]
     Adapter["Optional SessionStart integration<br/>installer + adapter"]
   end
@@ -159,6 +159,7 @@ agent 执行。微小、接近完成或交接成本过高的工作也直接完�
 worker API 支出单独计算，不悄悄回退到更高成本路线。模型与 provider 名留在
 operator 配置里，插件不做排行榜、价格查询或评测矩阵。
 
+先尊重 operator 已有的通道选择，再调用对应工具；native 工具可用不覆盖常设 ACP 选择。
 默认小工适用时直接派，不需要每次比较模型或填写小工简介。对已登记的 ACP，在现有
 Git 外 `routes.json` 加入 `routing.default`，正常 `run` 即可省略 `--route`；
 `routing.fallbacks` 可不填或留空。换渠道只更新这一处，无需改公共 skill 或重装插件。
@@ -169,6 +170,17 @@ Native 继续使用宿主工具及本机授权选择；特长经验只有能改�
 启动后由主 agent 查回原执行、确认停止并保留成果，再按授权恢复；质量问题走原 worker 返修。
 换默认只影响新责任；明确停用旧渠道用其 `enabled: false` 阻止后续 run/continue，
 保留 status/cancel/close。配置和恢复细节见[ACP 默认与备用](docs/acp-integration.md#默认与备用)。
+
+ACP 的每次 `run` / `continue` 都必须显式带 `--permissions read|full`，包括普通续做；
+不根据 category 猜权限，也不继承上一轮。省略参数会在派工前拒绝。超时或取消一旦成立，
+迟到的完成结果不会改写终态；已有输出保留为进度证据，cleanup 单独报告。
+续做把 execution identity 与动态授权分开：新增无关 workspace 或调整预算不破坏新身份，
+撤回绑定 cwd 或本轮权限仍会拒绝；旧 binding 只在完整旧指纹匹配时安全迁移。
+升级步骤与兼容限制见[安装与恢复](docs/installation.md)。
+
+同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式。
+可以修复具体环境问题、缩小剩余责任或部分接管；新需求、阶段推进和未送达权限不计为质量失败。
+只有 final report 缺失时先整理已有成果与检查，避免重做调查；切换 writer 前须确认原执行停止。
 
 ## 行为场景
 

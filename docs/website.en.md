@@ -7,7 +7,12 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
-**Update published** (2026-09-21): the ACP guide now explains one default worker,
+**Recovery 0.2 source update (2026-10-13):** the bilingual guide now explains explicit
+per-turn permissions, channel choice and timeout/cancellation recovery. This update covers
+source and local build verification; the September publication receipts below are
+historical and do not claim these new words are live.
+
+**Historical update published** (2026-09-21): the ACP guide now explains one default worker,
 default changes and prelaunch fallbacks; the FAQ clarifies authorized paid routes.
 The [Pages deployment](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35553778616)
 from `8f3c27b` succeeded. Public English/Chinese homepages, guides, scripts, styles and

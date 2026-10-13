@@ -10,14 +10,33 @@
 personal marketplace。保留一个 canonical source 和一个 discovery 入口；先核对
 同名目录归属，不能覆盖其他插件。
 
-更新源码后，用 plugin-creator 的 `read_marketplace_name.py` 验证 marketplace，
-再运行 `update_plugin_cachebuster.py <plugin-path>` 与正常 `codex plugin add`。
-不要热改 installed cache。安装后用新的主 session 验收 discovery。
+更新源码后，先用当前宿主的 `codex plugin marketplace list --json` 核对 marketplace
+和源目录；为插件 manifest 更新版本（本次为 `0.2.0`），再通过正式
+`codex plugin add worker-routing@MARKETPLACE --json` 重装。宿主若提供 bundled authoring
+helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设旧 helper 路径仍存在。
+不要热改 installed cache。安装后核对版本与源文件，并用新的主 session 验收 discovery。
 
 默认与备用功能需要同时更新 canonical ACP source 和 plugin instructions；旧会话已加载的
-说明不会自动刷新。已有 `routes.json` 与显式 `--route` 继续兼容，无需迁移回执或会话。
+说明不会自动刷新。已有 `routes.json` 与显式 `--route` 继续可用。
 可选加入 `routing.default` 后，日常换 ACP 渠道只修改这份 Git 外配置；不要在
 SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接入](acp-integration.md#默认与备用)。
+
+## Recovery 升级兼容事项
+
+同时更新 canonical ACP source、插件和 operator 自己维护的命令模板。每次 `run` / `continue`
+现在都必须显式带 `--permissions read|full`；缺省调用返回 `PERMISSIONS_REQUIRED`，不会启动
+adapter、提交工单或写 state。已有调查转实施的续做需按当前授权带 `full`，category 不代替权限。
+不要为此修改 provider、路由默认、workspace 授权或私人主会话说明。
+
+新 binding 用版本化 execution identity，动态检查当前 cwd 授权和权限上限。旧 binding 只在
+完整旧 `routeFingerprint` 仍匹配时于续做锁内迁移。若旧指纹已因配置变化失配，停止并保留
+status/cancel/close 恢复能力；不要盲改 hash 或恢复已撤回的权限。确认原 writer 停止、保留
+成果后，再为剩余责任建立获准会话。历史 receipts 不重算；以前的 completed 记录不能据此
+被宣称已经重新验证。新超时/取消规则只影响升级后的执行。
+
+安装后的文件一致、下一主 session 的 skill discovery、真实 route 的执行是独立验收层。
+已有聊天已加载的旧说明不会被安装动作替换；operator 应在续做前送入当前调用要求。
+完整身份、deadline 和清理边界见[ACP 接入](acp-integration.md)。
 
 ## Dispatch 本地面板
 

@@ -1,6 +1,6 @@
 ---
 name: acp-worker
-description: Run or continue an operator-authorized external ACP worker through cwr-acp, using a configured default or an explicitly selected route. Use when the operator has selected ACP for this responsibility; native workers and merely discovering an ACP-capable CLI do not trigger it.
+description: Run or continue an operator-authorized external ACP worker through cwr-acp when ACP is the operator's standing default or explicit task selection. Use the configured default or selected route with an explicit per-turn permission policy; native workers and merely discovering an ACP-capable CLI do not trigger it.
 ---
 
 # Optional external ACP worker
@@ -36,9 +36,9 @@ prerequisite and keep the existing native route available.
 Use the trusted, operator-supplied paths in place of ENTRY and CONFIG:
 
 ```sh
-node ENTRY run --config CONFIG --cwd WORKSPACE --file ORDER --title TITLE --category implementation
-node ENTRY continue --config CONFIG --session UUID --file INCREMENT
-node ENTRY continue --config CONFIG --session UUID --file REWORK --revision-reason REASON
+node ENTRY run --config CONFIG --cwd WORKSPACE --file ORDER --permissions full --title TITLE --category implementation
+node ENTRY continue --config CONFIG --session UUID --file INCREMENT --permissions full
+node ENTRY continue --config CONFIG --session UUID --file REWORK --permissions full --revision-reason REASON
 node ENTRY status --config CONFIG --session UUID
 node ENTRY cancel --config CONFIG --session UUID
 node ENTRY pending --config CONFIG
@@ -52,8 +52,13 @@ task/operator choice or an authorized recovery, not a remembered old default.
 Legacy configs without routing still require that flag. An explicit route never
 automatically falls back. Use `docs/acp-integration.md` for the small config example.
 `continue` resumes that exact conversation; it cannot silently create a fresh one.
-`--permissions` selects this integration's ACP permission-response policy, not a
-filesystem boundary. The default `read` answers requests with approve-reads plus
+Every `run` and `continue` must explicitly pass `--permissions read|full` for the
+current authorized work. Omission is rejected before adapter launch; category is
+metadata and no permission mode is inherited from a previous turn. Supply the flag
+from existing task authority, without asking the user to approve it again. The full
+examples above assume authorized implementation; use read for a read-only work order.
+This selects the integration's ACP permission-response policy, not a filesystem
+boundary. `read` answers requests with approve-reads plus
 non-interactive denial; `full` uses approve-all, which answers ACP permission
 requests including execution and network requests. Both cover only requests that
 actually reach the adapter's permission flow: an adapter can expose operations that
@@ -87,6 +92,12 @@ infer quota expiry, HTTP status or retry timing from generic runtime errors. A f
 test or missed requirement normally continues the same worker for correction.
 
 Changing `routing.default` or its fallback order does not migrate an existing session.
+Execution identity binds the route, executable/arguments, worker home, declared
+environment, context revision and selected model; continuation also validates the
+original cwd and persistent handle. Workspace inventory and timeout budget are not
+identity. Every turn rechecks route enabled state, the bound cwd's current allowlist
+membership and the requested permission ceiling. Legacy bindings migrate under lock
+only when their complete original fingerprint still matches; a mismatch fails closed.
 To revoke a channel, set its existing route's `enabled` to false under the user's
 authorization as well as selecting the new default; subsequent runs and continuations
 on that channel are denied. Status/cancel/close remain available for safe recovery.
@@ -95,6 +106,11 @@ Do not disable a still-authorized old route merely because a new default was sel
 The CLI blocks until its turn result and owned-connection cleanup. Use the host's
 normal shell execution/wait semantics. Do not short-poll a healthy worker, restart
 it because the shell tool yielded, or promise an automatic background wakeup.
+The task budget starts at the public runtime's prompt-start acknowledgement and ends
+at its canonical result, including finalization. Setup and cleanup have separate
+bounds. Local timeout or cancellation is terminal even if a late completed result
+arrives; retained output is evidence of progress, not a successful finish. Unconfirmed
+cleanup still requires reconciliation. Historical receipts are not rewritten.
 
 `cancel` only acknowledges a cancellation request. Wait for the running command's
 terminal result and cleanup before taking over. A lost reply is ambiguous: use
@@ -121,10 +137,10 @@ Two optional, genuinely useful moments:
 
 - **A real correction worth recording**: when you actually send rework, you may pass the
   reason with the continuation itself:
-  `node ENTRY continue --config CONFIG --session UUID --file REWORK --revision-reason
+  `node ENTRY continue --config CONFIG --session UUID --file REWORK --permissions full --revision-reason
   REASON` (one of requirement_missed, validation_failed, scope_changed,
   constraint_added, environment_blocked, uncertain). This is a shortcut, not required
-  for ordinary continuation, and a plain `continue` never records a revision. If the
+  for ordinary continuation, and `continue` without `--revision-reason` never records a revision. If the
   annotation cannot be written, the authorized task still runs exactly once and the
   interruption is reported through the existing additive warning; never rerun the
   worker to repair telemetry.

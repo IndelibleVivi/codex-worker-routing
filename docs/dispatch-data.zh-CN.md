@@ -37,6 +37,12 @@ legacy 续做开始纳入追踪的时刻。既有的 `dispatch.type='dispatched'
 选中的路线建立责任和 turn。该本地回执字段不进入 Dispatch 投影或 share 白名单，
 不含环境变量值、原始错误或路径；显式 run、continue 与旧回执可没有该字段。
 
+新增执行回执还保留 `budget`：`setup_ms`、`task_ms` 与 `prompt_started_at`（未观察到提交确认时
+为 null，不证明 prompt 没有发送）。它是本机 deadline 证据，不是 provider 计算时间或计费指标，不进入 Dispatch
+投影或 aggregate share。旧回执保持原样，新 deadline 行为不证明历史结果正确。
+Binding 的 `executionIdentity` 属于执行层，复查注记不能改变它；迁移与当前授权规则见
+[ACP 接入](acp-integration.md)。
+
 ## 协调者事件
 
 `record --session UUID --file FILE` 的输入是含以下字段的对象。未知字段被拒绝；
@@ -136,7 +142,7 @@ busy/conflict 错误，必须重读并重试同一操作 id；锁不会自动删
 `continue --revision-reason REASON` 是对一次真实修正的可选快捷方式：它在提示词之前
 追加一条 `revision_requested` 事件（使用已记录的原因枚举，带内部 event UUID 与
 null request id，因为尚无回执），因此返修无需单独 JSON 文件即可归属。普通续做
-永不需要它，单纯的 `continue` 也从不记录修正。原因在普通续做 preflight 期间校验，
+永不需要它，不带 `--revision-reason` 的 `continue` 也从不记录修正（仍须显式提供本轮 `--permissions`）。原因在普通续做 preflight 期间校验，
 因此无效值不会启动 adapter 轮次。若注记无法记录，已授权任务仍恰好运行一次，中断
 通过既有的 additive `dispatch_warning` 路径暴露（`REVIEW_NOT_RECORDED`，保留任何
 先前警告）。对于刻意深入的复查，独立的 `record` 命令仍然可用；它在普通流程中不是必需的。

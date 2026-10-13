@@ -125,7 +125,9 @@ export async function loadControlConfig(file, platform = process.platform, deps 
 export async function loadConfig(file, platform = process.platform, deps = {}) {
   const { configPath, raw, stateDir } = await loadConfigDocument(file, platform, deps);
   const realpath = deps.realpath ?? (p => fs.realpath(p));
-  const mainHome = await fs.realpath(os.homedir());
+  // A standalone CLI scrubs HOME before importing the runtime. A continuation
+  // recheck may reuse only the already-validated original home for this check.
+  const mainHome = deps.mainHome ?? await fs.realpath(os.homedir());
   const routing = parseRouting(raw);
   const routes = {};
   for (const [name, r] of Object.entries(raw.routes)) {
@@ -175,7 +177,7 @@ export async function loadConfig(file, platform = process.platform, deps = {}) {
 export const SUPPORTED_PLATFORMS = Object.freeze(['darwin', 'linux', 'win32']);
 export function assertSupportedPlatform(platform = process.platform) {
   if (!SUPPORTED_PLATFORMS.includes(platform))
-    throw new Fault('UNSUPPORTED_PLATFORM', `v0.1 supports ${SUPPORTED_PLATFORMS.join(', ')} on local filesystems.`);
+    throw new Fault('UNSUPPORTED_PLATFORM', `cwr-acp supports ${SUPPORTED_PLATFORMS.join(', ')} on local filesystems.`);
   return platform;
 }
 // POSIX execute bits and the Windows executable-extension set are different
@@ -206,8 +208,29 @@ export async function selectRoute(config, name, cwd, permissions = 'read', ambie
   // adapter, so a symlinked/aliased entry keeps one stable identity for an
   // existing persisted session.
   const argv = [executable, ...route.argv.slice(1)];
-  const identity = { name, argv, workerHome: route.workerHome, passEnv: route.passEnv, contextRevision: route.contextRevision, sessionOptions: route.sessionOptions, maxPermissions: route.maxPermissions, workspaces: route.workspaces, timeoutMs: route.timeoutMs, executableHash };
-  return { name, route: { ...route, argv: identity.argv }, cwd: realCwd, permissions, fingerprint: digest(identity) };
+  // Keep the old algorithm byte-for-byte for bindings that have no identity
+  // version/snapshot. A failed legacy comparison can never be weakened by
+  // dropping policy fields from its opaque hash.
+  const legacyIdentity = { name, argv, workerHome: route.workerHome, passEnv: route.passEnv, contextRevision: route.contextRevision, sessionOptions: route.sessionOptions, maxPermissions: route.maxPermissions, workspaces: route.workspaces, timeoutMs: route.timeoutMs, executableHash };
+  const identity = { schema: 'cwr.acp.execution-identity/1', name, argv,
+    workerHome: route.workerHome, passEnv: [...route.passEnv].sort(),
+    contextRevision: route.contextRevision, sessionOptions: route.sessionOptions, executableHash };
+  return { name, route: { ...route, argv }, cwd: realCwd, permissions,
+    fingerprint: digest(identity), legacyFingerprint: digest(legacyIdentity) };
+}
+export function executionIdentity(selection) {
+  return { schema: 'cwr.acp.execution-identity/1', fingerprint: selection.fingerprint };
+}
+// Returns true only for a fully matching legacy binding. The caller may migrate
+// it under its held operation locks after all current authorization checks.
+export function assertBindingIdentity(binding, selection) {
+  const current = binding.executionIdentity;
+  const matches = current !== undefined
+    ? current?.schema === 'cwr.acp.execution-identity/1' && current.fingerprint === selection.fingerprint
+    : typeof binding.routeFingerprint === 'string' && binding.routeFingerprint === selection.legacyFingerprint;
+  if (binding.route !== selection.name || binding.cwd !== selection.cwd || !matches)
+    throw new Fault('ROUTE_CHANGED', 'Execution identity or bound workspace changed. Legacy bindings require their complete original fingerprint; preserve history and start a new responsibility explicitly.');
+  return current === undefined;
 }
 // Resolve only the SELECTED route's entry and required credentials. A run that
 // selects one route must not be blocked by a routine, stale, unrelated route

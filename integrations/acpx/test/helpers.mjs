@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { atomicJSON, paths } from '../src/state.mjs';
-import { loadConfig, selectRoute } from '../src/config.mjs';
+import { loadConfig, selectRoute, executionIdentity } from '../src/config.mjs';
 export const sleep = ms => new Promise(r => setTimeout(r,ms));
 export function deferred() { let resolve,reject; const promise = new Promise((a,b)=>{resolve=a;reject=b;}); return {promise,resolve,reject}; }
 // A synthetic worker home under the fixture root, disjoint from every other
@@ -33,7 +33,7 @@ export async function fixture(overrides={}) {
   await fs.writeFile(configFile,JSON.stringify(raw),{mode:0o600});
   const config=await loadConfig(configFile);
   const selection=await selectRoute(config,'worker',cwd);
-  const binding={schema:'cwr.acp.binding/1',id:randomUUID(),route:'worker',routeFingerprint:selection.fingerprint,cwd:selection.cwd,closed:false,handle:null};
+  const binding={schema:'cwr.acp.binding/1',id:randomUUID(),route:'worker',executionIdentity:executionIdentity(selection),cwd:selection.cwd,closed:false,handle:null};
   await atomicJSON(paths(config.stateDir,binding.id).binding,binding);
   const orderFile=path.join(root,'order.md');await fs.writeFile(orderFile,'Investigate the synthetic importer.');
   return {root,cwd,raw,configFile,config,selection,binding,orderFile,cleanup:()=>fs.rm(root,{recursive:true,force:true})};

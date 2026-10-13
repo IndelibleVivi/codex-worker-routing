@@ -6,7 +6,7 @@ import { parseArgs,main,localStatus,requestCancel } from '../src/cli.mjs';
 import { loadBinding,paths,privateDir,lock } from '../src/state.mjs';
 import { fixture,fakeAcpx,sleep,deferred } from './helpers.mjs';
 async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);const api=fakeAcpx(behavior),results=[];return {...f,api,results,deps:{loadAcpx:async()=>api,replaceEnvironment:()=>{},output:r=>results.push(r),progress:()=>{}}}}
-const args=f=>['run','--config',f.configFile,'--route','worker','--cwd',f.cwd,'--file',f.orderFile];
+const args=f=>['run','--permissions', 'read', '--config',f.configFile,'--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 
 test('CLI parser refuses unknown/duplicate flags and unknown verbs',()=>{for(const a of [['forget'],['run','--route','x'],['status','--config','a','--session','b','--oops','x'],['status','--config','a','--config','b']])assert.throws(()=>parseArgs(a),{code:'USAGE'})});
 test('bare --help and <known-command> --help both return help',()=>{
@@ -36,11 +36,11 @@ test('dashboard startup prints the URL, foreground guidance and JSON handle',asy
 });
 test('CLI full lifecycle keeps native channel untouched',async t=>{
  const f=await setup(t);assert.equal(await main(args(f),f.deps),0);const r=f.results.at(-1);
- assert.equal(await main(['continue','--config',f.configFile,'--session',r.session_id,'--file',f.orderFile],f.deps),0);
+ assert.equal(await main(['continue','--permissions', 'read', '--config',f.configFile,'--session',r.session_id,'--file',f.orderFile],f.deps),0);
  assert.equal(f.api.calls.filter(c=>c[0]==='ensure').length,1);
  assert.equal(await main(['status','--config',f.configFile,'--session',r.session_id],f.deps),0);assert.equal(f.results.at(-1).active,'idle');
  assert.equal(await main(['close','--config',f.configFile,'--session',r.session_id],f.deps),0);assert.equal(f.results.at(-1).history_deleted,false);
- await assert.rejects(main(['continue','--config',f.configFile,'--session',r.session_id,'--file',f.orderFile],f.deps),{code:'SESSION_CLOSED'});
+ await assert.rejects(main(['continue','--permissions', 'read', '--config',f.configFile,'--session',r.session_id,'--file',f.orderFile],f.deps),{code:'SESSION_CLOSED'});
 });
 test('route disabled is checked before importing/executing runtime',async t=>{
  const f=await setup(t);f.raw.routes.worker.enabled=false;await fs.writeFile(f.configFile,JSON.stringify(f.raw));let imported=false;
@@ -93,7 +93,8 @@ test('unconfirmed adapter cleanup preserves locks and returns failure',async t=>
  await assert.rejects(main(args(f),f.deps),{code:'BUSY_OR_UNRECONCILED'});
 });
 test('nonce-bound cancel control requests cancellation without claiming stopped',async t=>{
- const f=await setup(t,{delay:1200});let id;
+ const gate=deferred();const f=await setup(t,{firstTurnGate:gate.promise});let id;
+ t.after(()=>gate.resolve());
  const p=main(args(f),{...f.deps,progress:s=>{id=s.match(/session ([a-f0-9-]+)/)[1]}});
  while(!id||!f.api.calls.some(c=>c[0]==='start'))await sleep(5);
  const b=await loadBinding(f.config.stateDir,id);const request=await requestCancel(f.config,b);

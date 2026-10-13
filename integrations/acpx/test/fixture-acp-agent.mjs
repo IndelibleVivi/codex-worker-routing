@@ -20,7 +20,16 @@ async function complete(id,params,text,stopReason='end_turn'){
  if(stopReason!=='cancelled')send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text}}}});
  reply(id,{stopReason});pending.delete(params.sessionId);
 }
-readline.createInterface({input:process.stdin}).on('line',line=>{
+const input=readline.createInterface({input:process.stdin});
+let inputClosed=false;
+input.on('close',()=>{
+ // A failed integration test can terminate its CLI before cancellation arrives.
+ // EOF must end this synthetic adapter, including FIXTURE_WAIT's parked timer.
+ inputClosed=true;
+ for(const item of pending.values())clearTimeout(item.timer);
+ pending.clear();
+});
+input.on('line',line=>{
  (async()=>{
   const q=JSON.parse(line);
   if(!q.method){const p=permissions.get(q.id);if(p){permissions.delete(q.id);p(q.result)}return}
@@ -33,6 +42,13 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
    const s=sessions[params.sessionId];if(!s)return fail(id,'Unknown synthetic session');
    const text=params.prompt.filter(p=>p.type==='text').map(p=>p.text).join('\n');
    s.turn++;await save();
+   if(inputClosed)return;
+   if(text.includes('FIXTURE_PROGRESS_ONLY')){
+    send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Synthetic progress, no final response.'}}}});
+    // Deliberately no prompt response. Tests cancel through the real public
+    // runtime; some adapters acknowledge cancellation with end_turn instead.
+    pending.set(params.sessionId,{id,params,timer:null,cancelStopReason:text.includes('CANCEL_END_TURN')?'end_turn':'cancelled'});return;
+   }
    if(text.includes('FIXTURE_WAIT')){const timer=setTimeout(()=>complete(id,params,'finished'),30000);pending.set(params.sessionId,{id,params,timer});return}
    if(text.includes('FIXTURE_WRITE')){
     const requestId=randomUUID();
@@ -50,7 +66,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     comspec:process.env.COMSPEC??null,pathext:process.env.PATHEXT??null,systemroot:process.env.SystemRoot??null}));
   }
   if(method==='session/cancel'){
-   const p=pending.get(params.sessionId);if(p){clearTimeout(p.timer);await complete(p.id,p.params,'','cancelled')}
+   const p=pending.get(params.sessionId);if(p){clearTimeout(p.timer);await complete(p.id,p.params,'',p.cancelStopReason??'cancelled')}
    if(id!==undefined)reply(id,{});return;
   }
   if(method==='session/close'){delete sessions[params.sessionId];await save();if(id!==undefined)reply(id,{});return}

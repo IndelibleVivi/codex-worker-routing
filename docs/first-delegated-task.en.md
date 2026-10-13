@@ -2,15 +2,17 @@
 
 English | [中文](first-delegated-task.md)
 
-This guide separates five layers that are easy to confuse. You do not need ACP or
-a custom agent file to start; native Codex subagents are enough for most users.
+This guide separates models, plugins, execution channels and acceptance. You can start
+with native Codex subagents; if the operator has selected ACP, use that authorized entry
+without requiring a native delegation first.
 
 ```mermaid
 flowchart TD
-  Model["1. Model/provider works"] --> Native["2. Native subagent works"]
-  Native --> Policy["3. Worker Routing plugin is installed"]
-  Policy --> Task["4. A complete responsibility is delegated and accepted"]
-  Native --> ACP["Optional: external ACP route"]
+  Model["Main model/provider works"] --> Policy["Worker Routing plugin loaded"]
+  Policy --> Channel["Operator-authorized channel choice"]
+  Channel --> Native["Native Codex worker"]
+  Channel --> ACP["External ACP route"]
+  Native --> Task["Complete responsibility + evidence → coordinator acceptance"]
   ACP --> Task
 ```
 
@@ -101,11 +103,11 @@ A good first run has observable behavior:
 session. Tiny tasks may also stay local because handoff costs more than it saves.
 Plugin activation does not mean every request should spawn a worker.
 
-## Path C: explicitly use an external ACP worker
+## Path C: use the selected external ACP worker
 
 Use this path only when an external ACP agent is already registered and its own
-persistent session is useful. It sits beside native subagents rather than replacing
-paths A or B.
+persistent session is useful. It sits beside native subagents and shares the plugin’s
+handoff and acceptance rules; establishing a native child first is not required.
 
 ```text
 Delegation without an ACP selection
@@ -134,8 +136,10 @@ through the same integration session. The coordinator inspects the real diff. Do
 use a private main checkout, hidden context, or an expensive write task merely to see
 whether a route connects.
 
-`--permissions read|full` chooses how cwr-acp answers ACP permission requests; it is
-not an OS filesystem sandbox. A dedicated `workerHome`, a separate worktree, and a
+Every `run` / `continue` must explicitly pass `--permissions read|full`; omission is
+rejected before dispatch. Select full for authorized implementation; category is metadata
+and permission is not inherited from the previous turn. The flag chooses how cwr-acp
+answers ACP permission requests; it is not an OS filesystem sandbox. A dedicated `workerHome`, a separate worktree, and a
 real sandbox are also distinct boundaries.
 
 ## Locate the failing layer first
@@ -147,7 +151,7 @@ real sandbox are also distinct boundaries.
 | Main request works but a child cannot spawn | `[agents]`, host multi-agent tools, and model inventory |
 | Native child works but delegation policy is absent | Plugin installation, new-session loading, and whether the task repays handoff |
 | ACP route is missing or rejects the workspace | Operator route config, enabled state, and exact workspace allowlist |
-| ACP `continue` fails | Original session handle, route fingerprint, and adapter session recovery |
+| ACP `continue` fails | Original handle, execution identity, current cwd/permission authorization, and adapter recovery; legacy migration needs a complete old-fingerprint match |
 | Worker says done but the repository did not change | Permission/work directory, actual diff, and coordinator acceptance |
 
 Use complete state labels. Source changed, commit created, push completed, plugin

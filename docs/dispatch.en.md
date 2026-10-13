@@ -112,7 +112,7 @@ A title and category can accompany the original dispatch:
 ```sh
 node integrations/acpx/src/cli.mjs run --config /absolute/private/routes.json \
   --route registered-worker --cwd /absolute/approved/worktree \
-  --file /absolute/work-order.md --title 'Fix empty input handling' --category implementation
+  --file /absolute/work-order.md --permissions full --title 'Fix empty input handling' --category implementation
 ```
 
 When a real correction is worth recording, add an optional reason to that continuation,
@@ -121,7 +121,7 @@ without creating a separate JSON file:
 ```sh
 node integrations/acpx/src/cli.mjs continue --config /absolute/private/routes.json \
   --session 22222222-2222-4222-8222-222222222222 --file /absolute/rework.md \
-  --revision-reason validation_failed
+  --permissions full --revision-reason validation_failed
 ```
 
 This is optional, not a classification step for every continuation. A recording failure warns

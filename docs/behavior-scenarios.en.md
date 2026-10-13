@@ -94,6 +94,45 @@ backup; a separate responsibility fails after submission or has an ambiguous rec
 - No claim: runtime codes do not prove subscription expiry, exhausted credit or HTTP
   429; a historically used channel is not current fallback authorization.
 
+## 7. Separate permissions from continuation identity
+
+Investigation becomes implementation; another turn omits permissions; the route then
+adds an unrelated workspace or lowers its permission ceiling.
+
+- Expected: authorized implementation continues the same session with explicit full mode.
+  Omission is rejected before dispatch, regardless of category. With the new identity,
+  unrelated workspace or budget changes preserve continuation; revoking the bound cwd or
+  requested permission denies it. Legacy migration requires the complete old fingerprint.
+- Evidence: preflight errors and zero-launch/prompt/state-mutation controls, bound identity,
+  and continuation/revocation outcomes. A permission mode is not OS sandbox evidence.
+- No claim: configuration matching proves neither that every adapter tool asks permission
+  nor the actual upstream model's identity.
+
+## 8. Make a recovery decision before repeating stalled rework
+
+Two explicit reworks leave the same acceptance gap with no material progress. Compare a
+normal phase transition, a missing final report and a host capability gap.
+
+- Expected: decide again before a third equivalent order. Continue with new evidence,
+  a repaired environment or narrowed scope; preserve accepted work and allow partial
+  takeover after stopping the original writer. Phase transitions are not quality failures,
+  missing reports first consolidate existing evidence, and host denials are not bypassed.
+- Evidence: the actual acceptance gap before/after, usable artifacts, and the new decision
+  with its basis; no mandatory record/revision annotations are required.
+- No claim: revision counts, elapsed time or completed status automatically prove quality.
+
+## 9. Distinguish a host wait timeout from an execution deadline
+
+A host wait yields during healthy work; another worker emits progress but never a
+canonical final result.
+
+- Expected: keep waiting on the first execution. The second fails at the CWR deadline
+  and cleans up; a late end_turn cannot turn it into success. Cancellation also stays
+  cancelled. Partial output and cleanup remain separately visible.
+- Evidence: time boundaries, real acpx synthetic integration, result/receipt/exit status,
+  cleanup and lock state, with normal completion as a control.
+- No claim: synthetic tests establish real-provider reliability or reclassify old receipts.
+
 ## Explicit non-goals
 
 - Do not claim proven triggering reliability, net quota savings, less rework or speed.

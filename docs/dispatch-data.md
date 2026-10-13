@@ -42,6 +42,15 @@ and turn. This local receipt field is outside both the Dispatch projection and s
 allowlists. It contains no environment values, raw errors or paths; explicit runs,
 continuations and older receipts need not contain it.
 
+New execution receipts also retain `budget`: `setup_ms`, `task_ms` and
+`prompt_started_at` (null if no prompt-start acknowledgement was observed, not proof
+that no prompt was sent). This is local deadline evidence,
+not provider compute time or a billing metric. It does not enter the Dispatch projection
+or aggregate share. Legacy receipts remain unchanged; do not infer historical correctness
+from the new deadline behavior. Binding `executionIdentity` belongs to the execution layer,
+not review annotations; its migration and current authorization rules are in
+[ACP integration](acp-integration.en.md).
+
 ## Coordinator events
 
 The `record --session UUID --file FILE` input is an object with the following fields.
@@ -155,7 +164,8 @@ filesystem path. `pending` loads no adapter.
 appends one `revision_requested` event (using the documented reason enum, with an
 internal event UUID and null request id, because no receipt exists yet) before the prompt, so the rework is attributed without a
 separate JSON file. It is never required for an ordinary continuation, and a plain
-`continue` never records a revision. The reason is validated during normal continuation
+`continue` without `--revision-reason` never records a revision (explicit per-turn
+`--permissions` is still required). The reason is validated during normal continuation
 preflight, so an invalid value starts no adapter turn. If the annotation cannot be
 recorded, the authorized task still runs exactly once and the interruption is surfaced
 through the existing additive `dispatch_warning` path (`REVIEW_NOT_RECORDED`, preserving

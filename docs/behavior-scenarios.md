@@ -69,6 +69,30 @@ worker 仍在工作时，等待出现 timeout、静默或 active yield。
 - 需要的证据：preflight 跳过原因、实际 launch/prompt 次数、receipt 与 cleanup、恢复后的 diff。该任务内未变化的已知故障不反复试探；没有备用时，在任务允许的范围内由主线程直接做。
 - 不作断言：runtime 错误码不证明套餐到期、余额不足或 HTTP 429；历史上用过的渠道不是当前备用授权。
 
+## 场景七：权限与续做身份分开
+
+调查转入实施；另一轮漏填权限；原 route 又增加一个无关 workspace 或降低权限上限。
+
+- 期望可观察行为：获准实施沿用同 session 并显式带 full；遗漏参数在派工前拒绝，category 不推断权限。新身份下增加无关 workspace 或调整预算不拒绝续做，撤回原 cwd 或降低权限上限则拒绝相应续做。旧 binding 只在完整旧指纹匹配时迁移。
+- 需要的证据：preflight 错误与零 launch/prompt/state mutation 对照、绑定身份、续做与撤回后的结果；权限模式不是 OS sandbox 的证据。
+- 不作断言：配置匹配不证明 adapter 的所有工具都会请求权限，也不证明真实模型身份。
+
+## 场景八：恢复有判断，不重复空转
+
+同一验收缺口经过两次明确返修仍无实质进展；另有一个正常阶段推进、一份缺失的 final report 和一个 host 能力缺口作对照。
+
+- 期望可观察行为：第三次等价工单前重新决定；有新证据、环境修复或缩小后的范围才继续。保留合格产物，可部分接管；更换 writer 前确认停止。阶段推进不计质量失败，缺 final report 先整理已有证据，host 拒绝不靠换渠道绕过。
+- 需要的证据：前后实际验收缺口、可用成果、新决定及其依据；无需强制 record/revision 标注。
+- 不作断言：返修次数、时长或 completed 状态不自动证明任务质量。
+
+## 场景九：等待超时与执行 deadline 不混同
+
+宿主 wait yield 是健康等待；另一个 worker 有 progress 却一直没有 canonical final。
+
+- 期望可观察行为：前者继续等原执行；后者到 CWR deadline 后失败并清理，迟到 end_turn 不翻成成功。取消同样保留取消终态；partial output 与 cleanup 独立可见。
+- 需要的证据：时间边界、真实 acpx 合成联调、result/receipt/退出码、清理与锁状态，以及正常完成对照。
+- 不作断言：合成测试不证明真实 provider 稳定性；旧 completed 回执没有被重新判定。
+
 ## 明确不做
 
 - 不据此声称已证明稳定触发、净省 quota、低返工或更快。

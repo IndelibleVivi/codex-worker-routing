@@ -1,16 +1,16 @@
-# 可选 ACP 执行通道 · v0.1
+# 可选 ACP 执行通道 · v0.2
 
 [English](acp-integration.en.md) | 中文
 
 状态：可选接入已实现；`acpx@0.15.1` 的公开 runtime API 已通过合成 ACP server
 联调。真实 adapter、模型、provider、账号和本机上下文边界仍由各 operator 单独验收。
-现有原生 skill、协作工具说明、SessionStart hook 和 installer 都不修改。
+共同调度 skill 先尊重 operator 已选的执行通道；原生工具、SessionStart hook 和 installer 不变。
 
 ## 这次改变什么
 
 主 Codex 继续负责目标、产品判断、整合与验收。仓库不规定 native 与 ACP 的
-优先级；临时的 provider/model 偏好留在 Git 外的 operator config。当任务明确
-选择已登记的外部 ACP route 时，新增 `acp-worker` skill 可以调用
+优先级；临时的 provider/model 偏好留在 Git 外的 operator config。当 operator 的日常默认或当前任务
+选择已登记的外部 ACP route 时，`acp-worker` skill 可以调用
 `integrations/acpx/src/cli.mjs`，通过 `acpx/runtime` 将一整块责任交给独立 coding agent。
 
 同样的“调查→实施→自测→局部返修”责任可以跨多轮进行。`run` 建立 session；
@@ -38,9 +38,9 @@ provider 当前按 Responses wire format 发请求，一个只讲 `/chat/complet
 `startTurn`、`getStatus`、`close` 与公开 handle decoder，不读取私有模块、不解析 ANSI 输出。
 原生路径保持直接调用宿主工具，避免不同后端取消/关闭/续做语义被强行等同。
 
-v0.1 使用阻塞 CLI。它没有独立后台服务；没有完成后自动唤醒主 Codex 的桥；也不提供
+cwr-acp 使用阻塞 CLI。它没有独立后台服务；没有完成后自动唤醒主 Codex 的桥；也不提供
 “终端关闭后继续运行”的承诺。主机 shell tool 的 yield/wait 仍按宿主规则使用。
-每个 exact workspace 的 ACP 操作保守串行；不同工作树可独立执行。
+每个 exact cwd 的 ACP 操作保守串行；不同工作树仅在写入面与共享资源不重叠时可独立执行。
 普通 busy 请求被拒绝，不另外重造 acpx 队列。
 
 ## 文件
@@ -52,7 +52,7 @@ v0.1 使用阻塞 CLI。它没有独立后台服务；没有完成后自动唤�
 - `test/*.test.mjs`：可无依赖运行的接入层测试；runtime 使用明确标记的合约替身。
 - `test/real-acpx.integration.mjs`：实际加载 acpx 包并启动合成 ACP 子进程的联调测试。
 - `test/fixture-acp-agent.mjs`：无模型、无账号、无网络的 ACP 夹具。
-- `plugins/worker-routing/skills/acp-worker/SKILL.md`：显式外部路线入口；普通委派不触发。
+- `plugins/worker-routing/skills/acp-worker/SKILL.md`：外部路线入口；operator 的常设 ACP 选择或当前任务选择均适用。
 
 ## 安装与一次性设置
 
@@ -169,7 +169,7 @@ state，不加载 adapter。投影为每个责任派生互斥的 `review_state`�
 不保存环境变量的值，也不把这些私有信息放进 aggregate share。
 
 换默认只改 `routing.default`；备用列表也在同一处更新。policy 变化不会改变既有
-session 的 route fingerprint，`continue` 仍回原 worker。若明确要求“不再用旧渠道”，
+session 的 execution identity，`continue` 仍回原 worker。若明确要求“不再用旧渠道”，
 同时将旧 route 的 `enabled` 设为 `false`，后续 run/continue 都会拒绝；这不会自动
 终止已在运行的 turn，需通过原 session 协调停止。status/cancel/close 保留恢复能力。
 无需为换默认改 skill、plugin cache 或复制一份 SessionStart 偏好。Native 的默认选择
@@ -193,15 +193,15 @@ CONFIG=/absolute/private/routes.json
 
 # 配置 routing.default 后；旧配置或明确指定渠道时加 --route NAME
 node "$ENTRY" run --config "$CONFIG" \
-  --cwd /absolute/approved/worktree --file /absolute/work-order.md
+  --cwd /absolute/approved/worktree --file /absolute/work-order.md --permissions read
 
 # 从回执取 session_id；给同一个 worker 追加条件
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
-  --file /absolute/increment.md
+  --file /absolute/increment.md --permissions read
 
 # 明确返修（可选快捷方式）：记录本次修正原因再续做；普通续做无需任何标注
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
-  --file /absolute/rework-order.md --revision-reason requirement_missed
+  --file /absolute/rework-order.md --permissions read --revision-reason requirement_missed
 
 # 只有路线和当前任务都授权时使用；此项会批准所有 ACP 权限请求
 node "$ENTRY" continue --config "$CONFIG" --session UUID \
@@ -248,6 +248,12 @@ Windows 上另外重设 TEMP/TMP/APPDATA/LOCALAPPDATA，并保留 COMSPEC/PATHEX
 HOME 分离不限制绝对路径访问、Keychain 或原 CLI 自己的原生工具。
 项目 AGENTS、agent 内置配置与本地工具也必须按真实 profile 验收。
 
+每次 `run` 和 `continue` 都必须显式提供 `--permissions read|full`。省略会在 adapter 启动、
+工单提交与私有 state 写入之前以 `PERMISSIONS_REQUIRED` 拒绝；不会默认为 read，也不继承上一轮。
+`--category implementation` 只是 metadata，不授予权限。协调者根据当前已有授权填入参数，
+调查转实施时同时更新工单和权限，无需为已经批准的工作再询问用户。status/cancel/close、
+stats/dashboard/record/pending 不要求这个参数。
+
 `--permissions` 选择的是 cwr-acp 对 ACP permission request 的应答策略，不是文件系统边界：
 `read` 使用 approve-reads + 非交互 deny，`full` 使用 approve-all（可含执行/网络请求）。
 两者都只约束真正到达 adapter 权限流程的请求。adapter 可能暴露不产生 ACP permission request
@@ -256,9 +262,18 @@ HOME 分离不限制绝对路径访问、Keychain 或原 CLI 自己的原生工�
 独立配置 host/OS sandbox 或使用一次性的只读环境；cwr-acp 不提供该边界，也不宣称进程级
 网络隔离，也不声称每个 adapter 的所有原生工具都会走同一权限机制。
 
-续做核对 route fingerprint、cwd、保存的 acpxRecordId/acpSessionId、argv 和 persistent handle。
-指纹包含可执行入口 hash、参数、profile revision、workspace/权限配置与明确的 model 选择。
-入口 hash 不涵盖 CLI 传递依赖和任意 profile 文件；profile 修改须更新 revision。
+续做核对版本化的 `executionIdentity`、固定 cwd、保存的 acpxRecordId/acpSessionId、argv 和
+persistent handle。`cwr.acp.execution-identity/1` 包含 route、规范化入口及其 hash、参数、
+workerHome、环境声明、contextRevision 与明确的 model 选择；不包含 workspace 列表、
+权限上限或 timeoutMs。每次续做仍重新检查 route enabled、绑定 cwd 的当前 allowlist 资格
+与本轮权限上限。增加或重排无关 workspace、改变任务预算不会使新身份失效，撤回 cwd
+或 full 许可则立即阻止相应续做。入口 hash 不涵盖 CLI 传递依赖和任意 profile 文件；
+profile 修改须更新 revision。
+
+旧 binding 只有 `routeFingerprint`，缺少可以证明原身份的分项信息。只有原完整指纹算法
+仍匹配且本轮授权通过时，才在持锁后迁移到新身份；不匹配以 `ROUTE_CHANGED` 停止，不猜测
+是不是只变了 allowlist，也不直接重写 hash。不要为迁移恢复已撤回的许可；保留旧会话供
+status/cancel/close 恢复，检查已有成果后重新授权剩余责任。历史回执保持原样。
 明确指定 model 时，开工前必须与 adapter 当前 advertised model 一致，否则不发送工单。
 这一检查不认证真正的上游模型；provider identity 仍标记为未验证。
 凭据值不落盘，不作为身份真实性证明。记录中的 model/usage 都只是 adapter 报告。
@@ -268,13 +283,32 @@ HOME 分离不限制绝对路径访问、Keychain 或原 CLI 自己的原生工�
 success 文字掩盖。原始 agent 错误文本不直接写进结构化错误回执；需要诊断时写入单独的私有 diagnostic 文件，
 回执只给出路径。该文件可能含 provider 敏感内容，分享前必须检查。
 
-workspace lock 仅协调共享本 stateDir 的 ACP 命令。它看不到 native worker、其他安装、
+workspace lock 只按 exact cwd 协调共享本 stateDir 的 ACP 命令；不同 cwd 的重叠写入面
+不会自动冲突。跨项目工单须列明执行 cwd、额外 read roots、允许的 write roots 与共享资源；
+这些声明不改变 host 能力。缺少权限或工具时停止受阻操作、返回已有成果和具体缺口，由
+协调者在原授权内修环境、缩小或拆分剩余责任，不扩大父目录 allowlist 或绕过拒绝。
+它看不到 native worker、其他安装、
 数据库、端口、服务和其他共享资源。主机仍须遵守一个重叠写入面一个 writer，或用独立
 worktree；worktree 本身也不隔离上述非文件资源。
 
 ## 崩溃与失败
 
-初始连接/握手使用至多 30 秒控制超时；每轮任务使用 route.timeoutMs。
+初始化和 prompt 提交各有 `min(route.timeoutMs, 30000)` 毫秒 setup deadline；分别报告
+`INIT_TIMEOUT` 与 `PROMPT_SETUP_TIMEOUT`。公共 runtime 的 `promptStarted` 确认传输已接收
+prompt 后，才开始 `route.timeoutMs` 的任务预算；预算到 canonical `result` 为止，包含
+runtime finalization。连接建立所用时间不消耗任务预算。回执的 `budget` 保留
+`setup_ms`、`task_ms`、`prompt_started_at`（未观察到确认时为 null，不能据此断言未发送）。
+
+CWR 通过公开 `startTurn({timeoutMs: 0})` 关闭所固定 acpx 版本内部的 prompt RPC timer，
+由自身 deadline 管理任务，避免 acpx 把“已有 progress 但没有 RPC final”的内部超时恢复成
+`end_turn`。这个 0 值语义依赖当前固定版本，必须以真实包和合成 adapter 联调守住，升级
+依赖时重新验证。产品代码不导入 acpx 私有模块。
+
+超时或 operator 取消先确定本轮失败/取消，再执行清理；迟到的 completed/end_turn 不能
+覆盖它。`TURN_TIMEOUT` 不会返回退出码 0，partial output 继续保存。事件流排空、取消
+应答、执行结算和连接关闭各有默认 8 秒收尾上限；它们不延长已经结束的任务预算。
+清理结果单独记录，unknown/unconfirmed 不能被成功文本抹掉。历史回执不重算。
+
 初始化取消不代表底层握手已退出；在接口无法确认清理时会保留锁和不确定状态。
 启动后没有自动重试或 native/ACP 静默 fallback；启动前的有限选择见[默认与备用](#默认与备用)。提交后丢失回执时，先查 status 与已保存 receipt。
 不要靠再次发送同一写工单来“确认”。正常停止和代码失败会尝试关闭 ACP-owned 连接；
@@ -285,10 +319,18 @@ status 的 `owner_process_present` 仅表示 PID 探针命中，不是该 PID �
 
 异常恢复由本机操作者核对 owner.json、session receipt、当前 adapter 进程和实际 diff。
 确认旧 writer 已终止后，才移除对应 operation 锁和 workspace 锁；保留 binding 和 acpx store。
-v0.1 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后代已退出的证明。
+cwr-acp 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后代已退出的证明。
 清理只确认 acpx-owned 进程/连接；不保证恶意 daemon 化或脱离宿主的任意后代已被终止。
 
 ## 验收门
+
+2026-10-13 的 Recovery 0.2.0 源码在 macOS 通过完整 `npm run check`（280 项，
+276 pass、4 项 Windows-only skip）；随后只调整合成夹具隔离和失败收尾，夹具全部
+4 项检查通过。最终完整 `npm run test:acpx` 为 12 项（10 pass、2 项 Windows-only skip），
+涵盖正常完成、progress 无 final、取消后 end_turn，以及 runtime 2 秒内部预算与 CWR
+6 秒任务预算的区分对照。它验证固定 acpx 的公开 API 行为，不证明真实 provider 健康、
+旧回执正确或当前聊天已加载新 skill；跨平台状态以对应提交 CI 为准。
+
 
 2026-09-21 的默认与备用源码更新在 macOS 通过 256 项 integration 检查（252 pass、
 4 项 Windows-only skip），以及真实 acpx + synthetic ACP server 的 8 项检查

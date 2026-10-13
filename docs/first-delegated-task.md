@@ -2,15 +2,16 @@
 
 [English](first-delegated-task.en.md) | 中文
 
-这页把最容易混在一起的五层拆开。你不需要先安装 ACP，也不需要先写自定义 agent；
-多数使用者从 native Codex subagent 开始就够了。
+这页把模型、插件、执行通道与验收几层拆开。可以从 native Codex subagent 开始；
+若 operator 已选择 ACP，就使用已授权的 ACP 入口，不要求先走 native。
 
 ```mermaid
 flowchart TD
-  Model["1. model/provider 可用"] --> Native["2. native subagent 可用"]
-  Native --> Policy["3. Worker Routing plugin 已安装"]
-  Policy --> Task["4. 一块完整责任被委派并验收"]
-  Native --> ACP["可选：外部 ACP route"]
+  Model["主 model/provider 可用"] --> Policy["Worker Routing plugin 已加载"]
+  Policy --> Channel["operator 已授权的通道选择"]
+  Channel --> Native["native Codex worker"]
+  Channel --> ACP["外部 ACP route"]
+  Native --> Task["完整责任的成果与证据 → 主 agent 验收"]
   ACP --> Task
 ```
 
@@ -93,10 +94,10 @@ codex plugin list --marketplace personal --json
 `solo`、`亲自做`、`别派小弟` 会让主 agent 保持本线程执行。微小工作也可能不派，
 因为交接成本会超过收益。plugin 生效不等于每条请求都应该 spawn。
 
-## 路线 C：显式使用外部 ACP worker
+## 路线 C：使用已选的外部 ACP worker
 
 只有在你已经登记外部 ACP agent，并希望保留它自己的 persistent session 时，才需要
-这条路线。它与 native subagent 并列，不替换路线 A/B。
+这条路线。它与 native subagent 并列，共用 plugin 的交接与验收规则；不要求先建立 native child。
 
 ```text
 未另选 ACP 的派工
@@ -121,8 +122,9 @@ Git 外。先完成 `integrations/acpx` 的无账号合成测试，再登记真�
 运行测试，再用同一个 integration session 增加一条返修要求。主 agent 检查实际 diff。
 不要拿私人主 checkout、隐藏上下文或昂贵写任务当作“看看 route 通不通”的探针。
 
-`--permissions read|full` 只是 cwr-acp 对 ACP permission request 的应答策略，不是 OS
-filesystem sandbox。独立 `workerHome`、独立 worktree 与真正 sandbox 也是三件不同的事。
+每次 `run` / `continue` 都必须显式带 `--permissions read|full`，省略会在派工前拒绝；
+调查转实施按当前已有授权选 full，category 不代替权限，上一轮权限不会继承。该参数只是
+cwr-acp 对 ACP permission request 的应答策略，不是 OS filesystem sandbox。独立 `workerHome`、独立 worktree 与真正 sandbox 也是三件不同的事。
 
 ## 出错时先定位哪一层
 
@@ -133,7 +135,7 @@ filesystem sandbox。独立 `workerHome`、独立 worktree 与真正 sandbox 也
 | 主请求成功，但不能 spawn child | `[agents]`、当前 host 的 multi-agent tools 与 model inventory |
 | native child 可用，但主 agent 从不按预期派工 | plugin 是否安装、是否在新 session 加载、任务是否值得交接 |
 | ACP route 找不到或拒绝 workspace | Git 外 route config、enabled 状态、exact workspace allowlist |
-| ACP `continue` 失败 | 原 session handle、route fingerprint、adapter 是否能恢复旧 session |
+| ACP `continue` 失败 | 原 handle、execution identity、当前 cwd/权限授权、adapter 续接能力；旧 binding 需完整旧指纹匹配才能迁移 |
 | worker 说完成但 repo 没变化 | 权限/工作目录、worker 实际 diff，以及主 agent 是否做了验收 |
 
 把状态词说完整：source 已改、commit 已产生、push 已完成、plugin 已安装、当前 session

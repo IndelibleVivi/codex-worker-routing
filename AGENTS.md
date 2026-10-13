@@ -10,7 +10,13 @@ plugin and its optional main-session context integration.
   `config.mjs` owns optional `routing.default`/`routing.fallbacks` in that same private
   config. Automatic fallback ends before adapter launch and cannot bypass permission,
   workspace or disabled-route checks. Default changes do not alter a bound session's
-  fingerprint; revocation blocks continuation but leaves control recovery available.
+  execution identity; revocation blocks continuation but leaves control recovery available.
+  Require explicit per-turn permissions on run/continue. Versioned execution identity
+  excludes mutable workspace/permission/budget policy; validate those authorizations on
+  every continuation. Legacy bindings migrate only after an exact old-fingerprint match
+  under lock. Preserve historical receipts and monotonic timeout/cancellation outcomes.
+  Keep setup, prompt-start task budget, and cleanup boundaries independently testable
+  against the pinned public acpx runtime, including progress without a final response.
   Keep one selected launch and truthful selection evidence without extra dispatch tasks.
 - Dispatch source lives in `integrations/acpx/src/dispatch.mjs`, `dashboard.mjs`,
   `share.mjs` and `dashboard/`. `time.mjs` owns shared calendar bucketing;

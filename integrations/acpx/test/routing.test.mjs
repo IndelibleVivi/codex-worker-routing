@@ -39,7 +39,7 @@ async function writeConfig(f, { routes, routing }) {
   return loadConfig(f.configFile);
 }
 const cliDeps = (api, results) => ({ loadAcpx: async () => api, replaceEnvironment: () => {}, output: r => results.push(r), progress: () => {} });
-const runArgs = (f, extra = []) => ['run', '--config', f.configFile, '--cwd', f.cwd, '--file', f.orderFile, ...extra];
+const runArgs = (f, extra = []) => ['run', '--config', f.configFile, '--cwd', f.cwd, '--file', f.orderFile, ...(extra.includes('--permissions') ? [] : ['--permissions', 'read']), ...extra];
 const startCalls = api => api.calls.filter(c => c[0] === 'start').length;
 
 // ---------------------------------------------------------------------------
@@ -219,19 +219,19 @@ test('a policy edit never invalidates a bound session; disabling its route block
   const api = fakeAcpx(), results = [], deps = cliDeps(api, results);
   assert.equal(await main(runArgs(f), deps), 0);
   const id = results.at(-1).session_id;
-  const fingerprintBefore = (await loadBinding(f.config.stateDir, id)).routeFingerprint;
+  const fingerprintBefore = (await loadBinding(f.config.stateDir, id)).executionIdentity.fingerprint;
 
   // Change ONLY the routing policy (default -> b, add fallback a). The bound
   // session keeps its fingerprint and continuation reuses route a.
   await writeConfig(f, { routes, routing: { default: 'b', fallbacks: ['a'] } });
-  assert.equal(await main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
+  assert.equal(await main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), 0);
   assert.equal(results.at(-1).route, 'a');
-  assert.equal((await loadBinding(f.config.stateDir, id)).routeFingerprint, fingerprintBefore);
+  assert.equal((await loadBinding(f.config.stateDir, id)).executionIdentity.fingerprint, fingerprintBefore);
   assert.equal(api.calls.filter(c => c[0] === 'ensure').length, 1);
 
   // Revoke route a: continue is refused, but status/cancel/close still work.
   await writeConfig(f, { routes: { ...routes, a: routeFor(f.root, f.cwd, { __name: 'a', argv: [a], enabled: false }) }, routing: { default: 'b' } });
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'ROUTE_DISABLED' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'ROUTE_DISABLED' });
   assert.equal(await main(['status', '--config', f.configFile, '--session', id], deps), 0);
   assert.equal(results.at(-1).active, 'idle');
   assert.equal(await main(['close', '--config', f.configFile, '--session', id], deps), 0);
@@ -250,7 +250,7 @@ test('continue never selects the default or a fallback, even when the bound rout
   // target a and fail, never silently rebind to b.
   const goneA = await removeEntry(f.root, 'a');
   await writeConfig(f, { routes: { a: routeFor(f.root, f.cwd, { __name: 'a', argv: [goneA] }), b: routeFor(f.root, f.cwd, { __name: 'b', argv: [b] }) }, routing: { default: 'b' } });
-  await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'BAD_EXECUTABLE' });
+  await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], deps), { code: 'BAD_EXECUTABLE' });
   assert.equal(startCalls(api), 1);
   assert.equal((await loadBinding(f.config.stateDir, id)).route, 'a');
 });
@@ -376,7 +376,7 @@ test('a registered unused route with a vanished workspace does not block a good 
   // the raw ENOENT from the selected-cwd realpath (not a fallback code).
   const missingCwd = path.join(f.root, 'not-there');
   const before = startCalls(api);
-  await assert.rejects(main(['run', '--config', f.configFile, '--cwd', missingCwd, '--file', f.orderFile], cliDeps(api, results)), { code: 'ENOENT' });
+  await assert.rejects(main(['run', '--permissions', 'read', '--config', f.configFile, '--cwd', missingCwd, '--file', f.orderFile], cliDeps(api, results)), { code: 'ENOENT' });
   assert.equal(startCalls(api), before);
 });
 
@@ -457,7 +457,7 @@ test('revoked route still allows cancel against a genuinely held operation lock'
   const unlock = await lock(p.lock, { nonce: 'synthetic-held', pid: process.pid });
   try {
     // Continue is refused, but status and cancel remain usable for recovery.
-    await assert.rejects(main(['continue', '--config', f.configFile, '--session', id, '--file', f.orderFile], cliDeps(api, results)), { code: 'ROUTE_DISABLED' });
+    await assert.rejects(main(['continue', '--permissions', 'read', '--config', f.configFile, '--session', id, '--file', f.orderFile], cliDeps(api, results)), { code: 'ROUTE_DISABLED' });
     assert.equal(await main(['status', '--config', f.configFile, '--session', id], cliDeps(api, results)), 0);
     assert.equal(results.at(-1).active, 'owner_process_present');
     assert.equal(await main(['cancel', '--config', f.configFile, '--session', id], cliDeps(api, results)), 0);

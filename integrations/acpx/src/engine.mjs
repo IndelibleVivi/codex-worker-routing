@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Fault, atomicJSON, privateDir, paths } from './state.mjs';
+import { assertBindingIdentity } from './config.mjs';
 import { classifyTurn, planSessionMetadata, planContinuation } from './dispatch.mjs';
 import { createObservationCollector } from './observations.mjs';
 
@@ -14,10 +15,23 @@ function compactUsage(usage) {
   if (usage.cost && typeof usage.cost === 'object') compact.cost = usage.cost;
   return Object.keys(compact).length ? compact : null;
 }
-function deadline(promise, ms, code) {
-  let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Fault(code, 'Operation did not settle before its deadline.')), ms); });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+function deadline(promise, ms, code, signal) {
+  let timer, abort;
+  const interrupted = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Fault(code, 'Operation did not settle before its deadline.')), ms);
+    abort = () => reject(new Fault('CANCEL_REQUESTED', 'Cancellation requested.'));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+  });
+  // An adapter may resolve end_turn cooperatively on abort. An observed local
+  // cancellation still wins; result prose/stopReason cannot revoke that request.
+  const completed = Promise.resolve(promise).then(value => {
+    if (signal?.aborted) throw new Fault('CANCEL_REQUESTED', 'Cancellation requested.');
+    return value;
+  });
+  return Promise.race([completed, interrupted]).finally(() => {
+    clearTimeout(timer); signal?.removeEventListener('abort', abort);
+  });
 }
 // `read`/`full` select how cwr-acp answers ACP permission requests. They are
 // authorization wording plus an adapter-facing response policy, never a
@@ -38,8 +52,7 @@ export function workOrder(text, permissions) {
 }
 export function validateResume(binding, selection, record) {
   if (binding.closed) throw new Fault('SESSION_CLOSED', 'This work order is closed; start a new responsibility explicitly.');
-  if (binding.route !== selection.name || binding.routeFingerprint !== selection.fingerprint || binding.cwd !== selection.cwd)
-    throw new Fault('ROUTE_CHANGED', 'Route, context revision or workspace changed; refusing to silently rebind.');
+  assertBindingIdentity(binding, selection);
   const h = binding.handle;
   if (!h || h.backend !== 'acpx' || !h.acpxRecordId || !h.backendSessionId || !h.runtimeSessionName)
     throw new Fault('CONTINUITY_LOST', 'No complete saved ACP handle. A continuation never calls ensureSession.');
@@ -118,13 +131,16 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   const runtime = acpx.createAcpRuntime(runtimeOptions(selection, store, lifecycle));
   let handle = binding.handle, turn, terminal, status, caught;
   let excerpt = '', truncated = false, eventCount = 0;
-  let cleanup = 'unconfirmed', touchedRuntime = false;
+  let cleanup = 'unconfirmed', touchedRuntime = false, acceptingEvents = true;
+  let stream, promptStartedAt = null;
+  const setupMs = Math.min(selection.route.timeoutMs, 30000);
   const startedAt = now();
   // A bounded, nonthrowing observation collector for THIS turn. It mirrors only
   // verified structured runtime fields and never changes the terminal result.
   const observations = createObservationCollector({ requestId, now });
   const observe = async () => {
     for await (const event of turn.events) {
+      if (!acceptingEvents) return;
       eventCount++;
       // Never dump thought/tool payloads into the coordinating model's context.
       if (event.type === 'text_delta' && event.stream !== 'thought' && event.tag !== 'agent_thought_chunk' && typeof event.text === 'string') {
@@ -146,7 +162,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
         sessionOptions: selection.route.sessionOptions,
       });
       initialization.then(() => { initSettled = true; }, () => { initSettled = true; });
-      handle = await deadline(initialization, Math.min(selection.route.timeoutMs, 30000), 'INIT_TIMEOUT');
+      handle = await deadline(initialization, setupMs, 'INIT_TIMEOUT', signal);
       binding.handle = handle;
       // Commit the identity before asking the agent to perform side effects.
       await atomicJSON(p.binding, binding);
@@ -156,7 +172,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
       throw new Fault('UNSAFE_HANDLE', 'The handle must encode a persistent, strictly resumable session.');
     validateResume(binding, selection, await store.load(handle?.acpxRecordId ?? ''));
     if (selection.route.sessionOptions.model) {
-      const controls = await deadline(runtime.getStatus({ handle }), cleanupMs, 'STATUS_TIMEOUT');
+      const controls = await deadline(runtime.getStatus({ handle }), cleanupMs, 'STATUS_TIMEOUT', signal);
       if (controls.models?.currentModelId !== selection.route.sessionOptions.model)
         throw new Fault('MODEL_UNVERIFIED', 'The adapter did not confirm the explicitly requested model; no prompt was sent.');
     }
@@ -174,18 +190,33 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     // startTurn is registered too late to observe an already-aborted signal).
     if (signal?.aborted) throw new Fault('CANCELLED_BEFORE_START', 'Cancelled before prompting.');
     turn = runtime.startTurn({ handle, text: workOrder(text, selection.permissions),
-      mode: 'prompt', requestId, timeoutMs: selection.route.timeoutMs, signal });
+      // acpx 0.15.1 can recover its own prompt timeout from progress text as
+      // end_turn without an RPC final. Disable that timer through its public
+      // turn option. CWR owns setup and task deadlines below; the real fixture
+      // suite verifies zero semantics against the pinned installed runtime.
+      mode: 'prompt', requestId, timeoutMs: 0, signal });
     // Consume all promises immediately to avoid unhandled rejections on startup.
-    const send = turn.promptStarted;
+    const send = Promise.resolve(turn.promptStarted);
+    send.catch(() => {});
     turnSettled = false;
-    const result = turn.result;
+    const result = Promise.resolve(turn.result);
     result.then(() => { turnSettled = true; }, () => { turnSettled = true; });
-    const stream = observe();
-    await deadline(Promise.all([send, stream, result]).then(([, , r]) => { terminal = r; }),
-      selection.route.timeoutMs + cleanupMs, 'TURN_TIMEOUT');
+    stream = observe();
+    // Consume stream failures immediately, even while reconnect/submission is
+    // pending. This promise never resolves successfully and owns no state.
+    const streamFailure = new Promise((_, reject) => { stream.catch(reject); });
+    streamFailure.catch(() => {});
+    await deadline(Promise.race([send, streamFailure]), setupMs, 'PROMPT_SETUP_TIMEOUT', signal);
+    promptStartedAt = now();
+    // The budget starts only after the public prompt-written acknowledgement
+    // and includes canonical result finalization. Stream drain has a separate
+    // bounded allowance; no losing Promise callback can overwrite terminal.
+    const resultValue = await deadline(Promise.race([result, streamFailure]), selection.route.timeoutMs, 'TURN_TIMEOUT', signal);
+    await deadline(stream, cleanupMs, 'STREAM_TIMEOUT', signal);
+    terminal = resultValue;
     if (!terminal || !['completed','cancelled','failed'].includes(terminal.status))
       throw new Fault('BAD_TERMINAL_RESULT', 'Missing canonical runtime result.');
-    status = await deadline(runtime.getStatus({ handle }), cleanupMs, 'STATUS_TIMEOUT');
+    status = await deadline(runtime.getStatus({ handle }), cleanupMs, 'STATUS_TIMEOUT', signal);
     if (status.backendSessionId && status.backendSessionId !== handle.backendSessionId)
       throw new Fault('CONTINUITY_LOST', 'The runtime reported a different conversation.');
     // Save agentSessionId only as opaque adapter metadata, never provider proof.
@@ -193,14 +224,19 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     await atomicJSON(p.binding, binding);
   } catch (e) {
     caught = e;
+    acceptingLaunches = false;
+    // Decide BEFORE asynchronous cancellation/cleanup. A later abort or late
+    // runtime success must never rewrite a deadline/error that already won.
+    terminal = { status: ['CANCEL_REQUESTED', 'CANCELLED_BEFORE_START'].includes(e.code) ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
     if (turn) {
       await deadline(Promise.resolve().then(() => turn.cancel({ reason: 'integration interrupted or failed' })), cleanupMs, 'CANCEL_TIMEOUT').catch(() => {});
       // cancel() acknowledges a request; wait separately for the turn to settle.
       await deadline(turn.result, cleanupMs, 'CANCEL_SETTLEMENT_TIMEOUT').catch(() => {});
+      await deadline(Promise.resolve().then(() => turn.closeStream()), cleanupMs, 'STREAM_CLOSE_TIMEOUT').catch(() => {});
     }
-    terminal = { status: signal?.aborted ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
   } finally {
     acceptingLaunches = false;
+    acceptingEvents = false;
     // The turn has settled (any terminal outcome). Clear the active-turn marker so
     // the projection never reads a stale "started" as an unfinished turn.
     if (binding.active_turn?.request_id === requestId) delete binding.active_turn;
@@ -229,6 +265,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     stop_reason: terminal?.stopReason ?? null,
     error_code: caught ? safeCode(caught) : terminal?.status === 'failed' ? safeCode(terminal.error) : null,
     cleanup, started_at: startedAt, finished_at: now(), permissions: selection.permissions,
+    budget: { setup_ms: setupMs, task_ms: selection.route.timeoutMs, prompt_started_at: promptStartedAt },
     acpx_record_id: handle?.acpxRecordId ?? null,
     acp_session_id: handle?.backendSessionId ?? null,
     agent_session_id: binding.handle?.agentSessionId ?? null,

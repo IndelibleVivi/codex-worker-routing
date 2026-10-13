@@ -62,18 +62,18 @@ Stop and report if the fix would cross that boundary.`);
  const delegBody=`<p>${tp('值得委托的是一块能独立收尾的责任：调查、修改、自测一起交给同一个 worker。工单写清目标、边界，以及完成时要交回什么。小任务或临近完成的工作留在主会话——交接也有成本。','Delegate a responsibility that can finish on its own: investigation, change and self-check for one worker. A work order names the outcome, boundaries and what to return; small or nearly finished tasks can stay with the main agent.')}</p>
  <pre><code>${esc(workOrder)}</code></pre>
  <ul>
-  <li>${tp('需要修正时，优先在原会话继续，而不是新起一个 worker。','For a correction, continue the same session, not a new worker.')}</li>
+  <li>${tp('需要修正时优先继续原会话；同一缺口经过两次明确返修仍无进展时，先重新决定恢复方式。','Continue the same session for corrections. After two explicit reworks leave the same gap without progress, decide how to recover before repeating the order.')}</li>
   <li>${tp('主 agent 交付前要检查真实 diff 与相关检查。worker 说「完成」只是它的结论，不等于工程验收。','Before delivery the main agent reviews the diff and checks. \u201cDone\u201d from a worker is a claim, not acceptance.')}</li>
   <li>${tp('说「自己来」或「solo」，工作就留在主会话，主 agent 也应避免重复实现已经交出的责任。','Say \u201csolo\u201d or \u201cdo not delegate\u201d to keep the work in the main session; the main agent should also avoid re-implementing work already delegated.')}</li>
  </ul>`;
 
- const acpBody=`<p>${tp('可以从一个默认小工开始，不需要比较模型或填写特长。原生 worker 使用宿主工具；你也可以把已登记的 ACP route 设为日常默认，交给它自己的独立会话。','Start with one default worker, without comparing models or writing capability profiles. Native workers use host tools; a registered ACP route can also be your everyday default with its own separate session.')}</p>
+ const acpBody=`<p>${tp('可以从一个默认小工开始，不需要比较模型或填写特长。先尊重已有通道选择：原生 worker 使用宿主工具；已登记的 ACP route 也可以是日常默认，使用自己的独立会话。','Start with one default worker, without comparing models or writing capability profiles. Honor the existing channel choice first: native workers use host tools; a registered ACP route can be the everyday default with its own separate session.')}</p>
  <ul>
   <li>${tp('route 配置、worker home、workspace 白名单、provider 与账号选择都留在 Git 外，由你掌握。','Route config, worker home, workspace allowlist and provider/account choices stay outside Git, under your control.')}</li>
   <li>${tp('在现有 ACP 配置里设 routing.default，正常 run 就能省略 --route；换渠道只改这一处。routing.fallbacks 可留空，备用必须预先获准。','Set routing.default in the existing ACP config and omit --route on ordinary runs. Change channels in that one place; routing.fallbacks may stay empty and backups require prior authorization.')}</li>
   <li>${tp('自动备用只处理启动前的入口不可用或必要环境凭据缺失。启动后先恢复原执行；改默认保留旧会话，明确停用旧渠道则阻止后续续做。','Automatic backups handle only unavailable entries or missing required environment credentials before launch. After startup, recover the original execution first. Changing the default preserves existing sessions; disabling a channel blocks further continuation.')}</li>
-  <li>${tp('工单通过你可配置的 agent 传出去；--permissions read|full 只决定 cwr-acp 如何应答 ACP 权限请求，它不是 OS 文件沙箱，也不构成隔离。','The work order goes to your configured agent. --permissions read|full only decides how cwr-acp answers ACP permission requests; it is not an OS sandbox and gives no isolation.')}</li>
-  <li>${tp('能启动 route 或列出模型，不等于真实推理成功；初始化与执行是两个观测层。','A route starting or a model listed does not prove real inference succeeds; initialization and execution are separate.')}</li>
+  <li>${tp('每次 run / continue 都必须显式带 --permissions read|full，省略会在派工前拒绝；不会继承上一轮。这个参数只决定 ACP 权限应答，不是 OS 文件沙箱。','Every run / continue requires explicit --permissions read|full; omission is rejected before dispatch and no mode is inherited. This only selects ACP permission responses, not an OS sandbox.')}</li>
+  <li>${tp('超时或取消不能被迟到的完成结果覆盖；已有输出与清理状态分开保留。能启动 route 或列出模型，仍不证明真实推理成功。','A late completed result cannot overwrite timeout or cancellation; output and cleanup stay separate. A route starting or a model listed still does not prove real inference succeeds.')}</li>
  </ul>
  <div class="guide-note"><p>${tp('第一次试用可以交出一个小而完整的任务：改一个函数、补一个检查，再看真实 diff 与检查结果。','For a first run, hand over a small, complete task: edit one function, add a check, then review the actual diff and result.')}</p></div>`;
 
