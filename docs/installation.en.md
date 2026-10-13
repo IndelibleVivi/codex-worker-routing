@@ -32,8 +32,8 @@ Update canonical ACP source, plugin instructions and operator-maintained command
 together. Every `run` / `continue` now requires explicit `--permissions read|full`;
 omission returns `PERMISSIONS_REQUIRED` without starting an adapter, submitting a prompt or
 writing state. Investigation-to-implementation continuations need `full` under current
-authority; category is not permission. This requires no provider, default-route, workspace
-authorization or private main-session instruction changes.
+authority; category is not permission. This requires no changes to providers, default routes,
+workspace authorization or private context isolation rules.
 
 New bindings use versioned execution identity with current cwd and permission checks.
 Legacy bindings migrate under the continuation lock only while the complete original

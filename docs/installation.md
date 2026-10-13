@@ -26,7 +26,7 @@ SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接�
 同时更新 canonical ACP source、插件和 operator 自己维护的命令模板。每次 `run` / `continue`
 现在都必须显式带 `--permissions read|full`；缺省调用返回 `PERMISSIONS_REQUIRED`，不会启动
 adapter、提交工单或写 state。已有调查转实施的续做需按当前授权带 `full`，category 不代替权限。
-不要为此修改 provider、路由默认、workspace 授权或私人主会话说明。
+本次迁移不要求改动 provider、路由默认、workspace 授权或私人上下文隔离规则。
 
 新 binding 用版本化 execution identity，动态检查当前 cwd 授权和权限上限。旧 binding 只在
 完整旧 `routeFingerprint` 仍匹配时于续做锁内迁移。若旧指纹已因配置变化失配，停止并保留
