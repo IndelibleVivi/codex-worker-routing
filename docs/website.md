@@ -7,6 +7,15 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
+**0.4 协作架构展示已上线（2026-10-14）**：源码 `3bf59f4` 经既有
+[Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564620990)
+发布，build/deploy 均成功；同一提交的[五项 CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564578149)通过。
+29 个公网静态文件均返回 HTTP200，并与验收 build 逐字节一致。真实 Chromium 检查中英
+home/guide ×1440/390：协作图、有限 batch 路径、七个指南锚点与语言跳转、图表键盘/复位、
+四套主题/预设、实际 SVG 下载及复制通过；无 JS 时中英首页/指南仍可读，模拟 clipboard
+拒绝时准确选中安装提示，无横向溢出或 console/page errors。插件与 ACP 行为保持 0.4.1。
+下方 0.3、0.2 与 2026-09 验收均为历史记录。
+
 **Delivery 0.3 上线验收（2026-10-13）**：源码 `18a62f9` 经既有 [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38417366590) build/deploy success，发布范围仅为静态 dist。29 个 HTTPS 文件全部 HTTP200，且与已验收构建逐字节一致；实际 Chromium 中英 home/guide ×1440/390、四页 no-JS、图表键盘复位、主题/预设、SVG 下载和剪贴板复制通过，无 overflow、坏图或 console/page errors。以下 0.2 回执保留为历史。
 
 **Recovery 0.2 已上线（2026-10-13）**：站内双语指南已同步每轮显式权限、通道选择与

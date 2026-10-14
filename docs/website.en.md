@@ -7,6 +7,17 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
+**0.4 cooperation architecture presentation live (2026-10-14):** Source `3bf59f4`
+was published through the existing [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564620990),
+with build/deploy success and [all five CI jobs](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564578149) passing for that commit.
+All 29 public static files returned HTTP200 and matched the accepted build byte for byte.
+Actual Chromium checks covered English/Chinese home/guide at 1440/390: cooperation and finite-batch
+views, seven guide anchors and language links, chart keyboard/reset, four themes/presets,
+actual SVG download and clipboard. Both languages' home/guide remained readable without JavaScript;
+a simulated clipboard denial selected the exact install prompt. No horizontal overflow or console/page
+errors were observed. Plugin and ACP behaviour remain at 0.4.1. The 0.3, 0.2 and September 2026
+acceptance records below are historical.
+
 **Delivery 0.3 live acceptance (2026-10-13):** Source `18a62f9` passed build/deploy through the existing [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38417366590), publishing static dist only. All 29 HTTPS files returned HTTP200 with exact accepted-build bytes. Actual Chromium checks passed for English/Chinese home/guide ×1440/390, four no-JS pages, chart keyboard reset, themes/presets, SVG download and clipboard, with no overflow, broken images or console/page errors. The 0.2 receipts below remain historical.
 
 **Recovery 0.2 live (2026-10-13):** the bilingual guide now explains explicit
