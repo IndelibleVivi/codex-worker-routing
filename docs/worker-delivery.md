@@ -88,7 +88,8 @@ start handle 记录 `locks_held`；adapter 初始化与 prompt acknowledgement �
 
 父进程停止时不再启动新项，向已拥有的 CLI 发出取消请求，并有界等待其 cleanup；
 超过等待期限的执行保持 unconfirmed。有界等待结束时对尚未捕获句柄的子进程做最后一次
-实际读取：迟到发布的句柄经身份核对后持久化进索引供恢复，cleanup 仍保持 unconfirmed。
+实际读取：观察到的迟到句柄作为恢复线索保留在索引；只有与 job 身份匹配的句柄进入结果中的
+可信 start_handle，cleanup 仍保持 unconfirmed。不匹配的句柄不能用作获准的控制目标。
 含糊提交与未知清理保留原状态供恢复；不能因为没有拿到最终报告就再派同一写工单。
 健康进度留在工具等待里，主脑接收有意义的异常或批次概览。
 
@@ -136,7 +137,9 @@ node ENTRY collect --config CONFIG --batch BATCH_ID
 - `delivery_excerpt`：worker 自述交付的有界逐字投影（`source:"worker_reported"`）：
   带截断标记的摘要、条件总数与未满足清单、检查计数与失败名单、前几条问题。程序不做
   语义扩写；worker 自述与运行器观察保持分开。
-- `next_actions`：仅从受信运行器状态推导的候选提示，固定词表：`reconcile_session`、
+- `next_actions`：运行器根据受信 runtime/句柄事实及明确归属的 worker 自述生成候选提示。
+  `answer_questions` 使用自述的 needs_input 与 questions，不表示问题或 blocker 已独立证实。
+  固定词表：`reconcile_session`、
   `inspect_receipt`、`consolidate_report`、`answer_questions`。continue 类提示只在
   session 已知、runtime 已终态、cleanup confirmed 且句柄匹配时出现。候选是供协调者
   判断的提示，不是命令，从不自动执行。

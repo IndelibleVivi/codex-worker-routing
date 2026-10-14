@@ -222,8 +222,8 @@ export function deliveryExcerpt(block) {
   };
 }
 
-// Candidate next actions derived ONLY from trusted runner state (receipt,
-// handle identity, collection status). They are a fixed vocabulary of hints for
+// Candidate next actions combine trusted runtime/handle facts with attributed
+// worker-reported delivery status. They are a fixed vocabulary of hints for
 // the coordinator — never commands, never worker text, never auto-executed.
 // A continue-class hint additionally requires a known session whose runtime is
 // terminal with confirmed cleanup and a matching handle.

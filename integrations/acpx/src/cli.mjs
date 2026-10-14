@@ -128,9 +128,9 @@ order or any runtime/dependency failure, and never retries post-launch. A
 fallback launch is exactly one responsibility/prompt. The receipt reports the
 requested route, the actual route and bounded skipped-route codes.
 
-stats, record and pending read the private state root only; they never load,
-import or scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
-record appends one collaboration event and never rewrites a runtime receipt.
+stats and pending read the private state root; record appends one collaboration
+event and never rewrites a runtime receipt. These commands never load, import or
+scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
 Dashboard data is read-only; theme, language and time zone are local display preferences.
 
 dashboard prints a private loopback URL (ephemeral port by default; use --port to fix

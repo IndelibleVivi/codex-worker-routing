@@ -105,7 +105,9 @@ happens to parse as valid JSON, and the job lands in missing.
 When a parent stops, launch no new items and request cancellation from its owned CLI processes,
 then wait boundedly for cleanup. Unsettled operations remain unconfirmed. At the end of the bounded
 wait, children without a captured handle get one final real read: a late-published handle is
-persisted to the index for recovery after an identity check, and cleanup stays unconfirmed. Ambiguous submission or unknown cleanup preserves recoverable state;
+retained in the index as an observed recovery clue. Only a handle matching the job identity
+enters the trusted result start_handle; cleanup stays unconfirmed. A mismatched handle must
+not be used as an authorized control target. Ambiguous submission or unknown cleanup preserves recoverable state;
 a missing report does not authorize replaying a write order. Healthy progress stays in
 tool-owned waits, with meaningful exceptions or a batch overview reaching the coordinator.
 
@@ -161,7 +163,9 @@ pass. Each settled record carries two coordination aids:
   with the unsatisfied list, check totals with failing names, and the first few questions.
   The program adds no semantic judgment; worker declarations stay separate from
   runner-observed facts.
-- `next_actions`: candidate hints derived only from trusted runner state, from a fixed
+- `next_actions`: runner-generated hints based on trusted runtime/handle facts and attributed
+  worker-reported delivery status. answer_questions uses the reported needs_input and
+  questions; it does not independently verify the blocker. Hints use a fixed
   vocabulary: `reconcile_session`, `inspect_receipt`, `consolidate_report`,
   `answer_questions`. A continue-class hint appears only for a known session whose runtime
   is terminal with confirmed cleanup and a matching handle. Candidates are hints for the

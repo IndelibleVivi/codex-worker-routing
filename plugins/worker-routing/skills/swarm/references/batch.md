@@ -50,8 +50,10 @@ Every settled result is published into the batch's durable index as it lands, so
 read-only collect verb returns what is known SO FAR without waiting for outstanding items;
 the index always carries the full batch size, so settled and outstanding stay distinguishable.
 Each result carries a bounded worker-reported delivery excerpt (marked worker_reported, a
-verbatim clipped projection, never runner judgment) and candidate next actions derived only
-from trusted runner state. Candidates are a fixed hint vocabulary — reconcile the session,
+verbatim clipped projection, never runner judgment). The runner generates candidate next
+actions from trusted runtime/handle facts and attributed worker-reported delivery status;
+answer_questions uses the worker's needs_input declaration and questions, not an independently
+verified blocker. Candidates are a fixed hint vocabulary — reconcile the session,
 inspect the receipt, consolidate the report on the same session, answer the worker's
 questions — for the coordinator to judge. They are never commands, never worker text and
 never auto-executed; a continue-class hint is offered only for a known session with terminal
@@ -67,8 +69,10 @@ A parent cancellation stops launching new items: admission re-checks the live ba
 after every asynchronous admission step and before each launch, so a cancelled batch starts
 nothing new — the same admission stop applies when index publication fails. Owned active
 operations get a cancellation request and a bounded wait for actual cleanup; at the end of
-that wait one final real handle read preserves a handle a launched child published late,
-without upgrading its cleanup beyond unconfirmed. A mid-batch admission or launch failure
+that wait one final real handle read preserves a handle a launched child published late.
+The index retains observed handles as recovery clues; only a job-identity match enters
+the trusted result start_handle. Cleanup stays unconfirmed, and a mismatched handle must
+not be used as an authorized control target. A mid-batch admission or launch failure
 closes admission yet still settles and reports the partial batch. On interrupted/ambiguous
 submission, recover the recorded handles and receipts before deciding another action.
 No bare nohup or detached

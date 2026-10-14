@@ -72,6 +72,7 @@ then change the default from A to B and continue the existing responsibility on 
 - Expected: ordinary delegation requires no catalog scan or capability biography.
   New work uses the current default; the existing session stays on A. Explicitly
   revoking A blocks further use while leaving stop/recovery operations available.
+  Other execution-identity and current-authorization checks still apply.
 - Evidence: the selected route, same-session continuation, and run/continue/control
   outcomes before and after the change. ACP resolves the default inside the normal
   run call, without a mandatory discovery round trip.
@@ -191,7 +192,7 @@ supplying a manifest or filling in any JSON.
 
 - Expected: the main coordinator makes the organizing judgment itself and delegates
   complete responsibilities when useful; tiny or nearly completed work may finish directly.
-  When a finite independent batch fits, it authors the order spec, mechanically generates
+  When a finite independent batch fits the authorized ACP channel, it authors the order spec, mechanically generates
   orders and the manifest with prepare, and launches the batch. Between its own waits it
   reads settled results with collect. It decides closeout or continuation from the real receipt,
   the delivery_excerpt and the candidate next_actions, without auto-executing candidates.
