@@ -14,7 +14,7 @@ do not overwrite another plugin.
 
 After updating source, inspect the marketplace and source directory through the current
 host's `codex plugin marketplace list --json`. Update the plugin manifest version
-(`0.4.1` for this update), then reinstall through
+(`0.4.2` for this update), then reinstall through
 `codex plugin add worker-routing@MARKETPLACE --json`. If the host provides bundled
 authoring helpers, they can verify the marketplace or update the cachebuster; do not
 assume an old helper path still exists. Never edit an installed cache in place. Check
@@ -27,6 +27,20 @@ only edit that private file; do not copy the current route name into SessionStar
 See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration and revocation.
 
 ## Delivery and swarm upgrade
+
+Version 0.4.2 closes the finite-batch consumption interface while keeping existing calls
+compatible. `batch --start-handle FILE` writes this batch's identity (`batch_id` and index
+location) after the initial index exists and before any child launches, so no caller scans
+the private state directory for a batch id; a failed handle write aborts the batch before
+launch. Plain `batch` and `collect` still return the complete legacy receipts and are not
+subject to a budget. The new optional `batch --compact` and `collect --compact` give a
+whole-response UTF-8 byte-bounded, cursor-paged read (default 32 KiB, minimum 8 KiB, maximum
+256 KiB; item limit default 8, maximum 32); only optional detail is reduced and named, while
+minimal detail retains provenance and criterion/check counts. When results remain, a
+successful page includes a locatable item or explicitly rejects an insufficient budget. `collect --job JOB_ID` expands one full result from the index and
+`delivery --session/--request` expands the sidecar; the cursor is validated strictly for
+shape, encoding, batch, range and revision and is not an authenticity tag. Existing
+manifests, run/continue calls and historical receipts remain usable.
 
 Version 0.4.1 aligns packaged swarm instructions and bilingual evidence claims:
 worker declarations, trusted results and indexed recovery clues remain distinct;

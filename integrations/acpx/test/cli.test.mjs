@@ -115,6 +115,10 @@ test('parser accepts --deliver and delivery/batch/start-handle verbs and refuses
  assert.equal(parseArgs(['continue','--config','c','--session','s','--file','/o','--permissions','full','--start-handle','/h'])['start-handle'],'/h');
  assert.equal(parseArgs(['delivery','--config','c','--session','s','--json']).json,true);
  assert.equal(parseArgs(['batch','--config','c','--manifest','/m']).manifest,'/m');
+ const b=parseArgs(['batch','--config','c','--manifest','/m','--start-handle','/h','--compact','--limit','2','--max-bytes','8192']);
+ assert.equal(b['start-handle'],'/h');assert.equal(b.compact,true);assert.equal(b.limit,'2');assert.equal(b['max-bytes'],'8192');
+ const c=parseArgs(['collect','--config','c','--batch','b','--compact','--cursor','tok','--limit','1','--max-bytes','8192','--job','j']);
+ assert.equal(c.compact,true);assert.equal(c.cursor,'tok');assert.equal(c.job,'j');
  for(const bad of [['delivery','--config','c'],['batch','--config','c'],['run','--config','c','--cwd','/w','--file','/o','--permissions','read','--deliver','x']])assert.throws(()=>parseArgs(bad),{code:'USAGE'});
 });
 test('--deliver collects a sidecar from the real CLI turn and delivery prints a path-free view',async t=>{

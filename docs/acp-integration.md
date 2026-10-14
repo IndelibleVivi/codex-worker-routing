@@ -46,15 +46,19 @@ cwr-acp 使用阻塞 CLI。它没有独立后台服务；没有完成后自动�
 ## 文件
 
 0.3 增加共同 worker contract 的实际装配、可选交付 sidecar、有限 batch 与任务范围
-验收辅助。操作与证据边界见 [Worker 交付与有限批次](worker-delivery.md)。普通单责任
-调用继续使用下方原命令，不必加载报告 schema 或 Dispatch。历史验收保留各自日期与版本。
+验收辅助；0.4.2 收口 batch 消费接口：`--start-handle` 在启动前发布本批 identity，默认
+`batch`/`collect` 完整返回保持兼容，可选的 `--compact` 分页有界读取、`collect --job`
+展开索引中的单条完整记录。操作与证据边界见 [Worker 交付与有限批次](worker-delivery.md)。
+普通单责任调用继续使用下方原命令，不必加载报告 schema 或 Dispatch。历史验收保留各自
+日期与版本。
 
 - `src/cli.mjs`：命令、私有环境装配、互斥、取消控制与退出码。
 - `src/config.mjs`：显式命名路线、参数与授权校验、独立 worker home。
 - `src/engine.mjs`：公开 runtime 接入、同会话校验、结果与清理。
 - `src/state.mjs`：少量私有 binding/receipt、原子写、路径与文件类型检查。
 - `src/delivery.mjs`：有界交付收集和身份校验；报告声明与 runtime 事实分开。
-- `src/batch.mjs`：有限独立 CLI 子进程、批次本地资源准入与实际结果覆盖。
+- `src/batch.mjs`：有限独立 CLI 子进程、批次本地资源准入、启动前 batch handle 与受预算约束的
+  compact 读取；完整旧终态默认保留。
 - `src/verify.mjs`：协调者确认的 argv 检查、任务环境、预算和证据新鲜度；不执行报告命令。
 - `test/*.test.mjs`：可无依赖运行的接入层测试；runtime 使用明确标记的合约替身。
 - `test/real-acpx.integration.mjs`：实际加载 acpx 包并启动合成 ACP 子进程的联调测试。

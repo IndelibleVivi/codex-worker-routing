@@ -3,13 +3,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { parseManifest, runBatch, collectBatch, MANIFEST_SCHEMA, HANDLE_SCHEMA } from '../src/batch.mjs';
+import { parseManifest, runBatch, collectBatch, collectBatchCompact, collectBatchJob, deliveryExcerpt, projectResult, MANIFEST_SCHEMA, HANDLE_SCHEMA, COMPACT_MIN_BYTES } from '../src/batch.mjs';
 import { writeDeliverySidecar, deliveryFile } from '../src/delivery.mjs';
+import { atomicJSON } from '../src/state.mjs';
 import { fixture } from './helpers.mjs';
+
+const CLI = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+// Invoke the REAL public CLI entry (never an in-process copy) and capture the
+// raw stdout bytes, so a budget assertion measures the actual command output.
+function runCli(args, maxBuffer = 16 * 1024 * 1024) {
+  return new Promise(resolve => {
+    execFile(process.execPath, [CLI, ...args], { maxBuffer }, (error, stdout, stderr) => {
+      resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr });
+    });
+  });
+}
+const encodeTestCursor = payload => Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 
 function job(over = {}) {
   return { id: 'j1', verb: 'run', route: 'worker', cwd: '/abs/ws', file: '/abs/o.md', permissions: 'read', ...over };
@@ -613,12 +628,31 @@ test('batch results carry a bounded worker-reported delivery excerpt and candida
   assert.equal(ex.source, 'worker_reported');
   assert.equal(ex.summary, 'investigated the importer; one contract conflict remains');
   assert.equal(ex.summary_truncated, false);
-  assert.deepEqual(ex.criteria, { total: 2, unsatisfied: 1, unsatisfied_list: ['decide which contract wins'] });
+  // The DEFAULT terminal keeps the full legacy excerpt AND every full field, so
+  // existing consumers lose nothing.
+  assert.deepEqual(ex.criteria, { total: 2, unsatisfied: 1, unsatisfied_list: ['decide which contract wins'], unsatisfied_truncated: [false] });
   assert.equal(ex.checks.total, 2);
   assert.deepEqual(ex.checks.by_state, { passed: 1, blocked: 1 });
   assert.deepEqual(ex.checks.failing, ['contract probe']);
   assert.deepEqual(ex.questions, ['Which of the two conflicting contracts should win?']);
+  assert.deepEqual(ex.questions_truncated, [false]);
   assert.equal(ex.questions_total, 1);
+  assert.deepEqual(j.delivery_questions, ['Which of the two conflicting contracts should win?']);
+  assert.ok(Array.isArray(j.artifact_references), 'the legacy artifact_references field is preserved');
+  const compact = await collectBatchCompact({ config: { stateDir: f.config.stateDir }, batchId: out.at(-1).batch_id });
+  const citem = compact.items.find(r => r.id === 'a');
+  assert.equal(citem.detail, 'full');
+  const cex = citem.delivery_excerpt;
+  assert.equal(cex.source, 'worker_reported');
+  assert.deepEqual(cex.criteria, { total: 2, unsatisfied: 1, unsatisfied_list: ['decide which contract wins'], unsatisfied_truncated: [false] });
+  assert.equal(cex.checks.total, 2);
+  assert.deepEqual(cex.checks.by_state, { passed: 1, blocked: 1 });
+  assert.deepEqual(cex.checks.failing, ['contract probe']);
+  assert.deepEqual(cex.checks.evidence, [
+    { name: 'contract probe', name_truncated: false, state: 'blocked', detail: 'needs a decision', detail_truncated: false },
+    { name: 'npm run check', name_truncated: false, state: 'passed', detail: 'all green', detail_truncated: false },
+  ]);
+  assert.deepEqual(cex.questions, ['Which of the two conflicting contracts should win?']);
   assert.deepEqual(j.next_actions, [{ action: 'answer_questions', session_id: j.session_id, reason: 'worker returned precise questions or a blocker' }]);
 });
 
@@ -636,6 +670,16 @@ test('the delivery excerpt is bounded: long fields are clipped, never expanded',
   assert.equal(ex.summary_truncated, true);
   assert.equal(ex.questions.length, 4);
   assert.equal(ex.questions_total, 5);
+  assert.equal(ex.omitted.questions, 1);
+  // The legacy full question list is still present on the default terminal.
+  assert.deepEqual(out.at(-1).jobs[0].delivery_questions, ['q1', 'q2', 'q3', 'q4', 'q5']);
+  // The compact read clips the same way and never expands long text.
+  const compact = await collectBatchCompact({ config: { stateDir: f.config.stateDir }, batchId: out.at(-1).batch_id });
+  const cex = compact.items[0].delivery_excerpt;
+  assert.equal(cex.summary.length, 400);
+  assert.equal(cex.summary_truncated, true);
+  assert.equal(cex.questions.length, 4);
+  assert.equal(cex.questions_total, 5);
 });
 
 test('candidate next actions follow trusted state only', async t => {
@@ -672,14 +716,23 @@ test('settled results publish to the index mid-batch and collect reads them with
     job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
     job({ id: 'b', cwd: cwdB, file: path.join(cwdB, 'o.md') }),
   ]);
-  const p = run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, { stateDir: f.config.stateDir, delays: { a: 10, b: 600 } }));
-  const batchesDir = path.join(f.config.stateDir, 'batches');
+  // The batch id comes from its OWN published start handle, not a scan of the
+  // private state directory.
+  const startHandle = path.join(f.root, 'batch.handle.json');
+  const p = runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile, 'start-handle': startHandle },
+    deps: { loadConfig: async () => f.config, spawnJob: fakeSpawner({ active: 0, maxActive: 0 }, { stateDir: f.config.stateDir, delays: { a: 10, b: 600 } }) },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
   let mid = null;
+  let batchId = null;
   for (let i = 0; i < 160 && !mid; i++) {
-    const ids = await fs.readdir(batchesDir).catch(() => []);
-    if (ids.length === 1) {
+    if (!batchId) {
+      try { batchId = JSON.parse(await fs.readFile(startHandle, 'utf8')).batch_id; } catch { /* not published yet */ }
+    }
+    if (batchId) {
       try {
-        const idx = JSON.parse(await fs.readFile(path.join(batchesDir, ids[0], 'index.json'), 'utf8'));
+        const idx = JSON.parse(await fs.readFile(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), 'utf8'));
         if (idx.results?.some(r => r.id === 'a')) {
           assert.ok(!idx.results.some(r => r.id === 'b'), 'the slow job must not have settled yet');
           mid = idx;
@@ -698,7 +751,7 @@ test('settled results publish to the index mid-batch and collect reads them with
   assert.equal(midA.delivery_excerpt.summary, 'ok');
   assert.equal(await p, 0);
   // collectBatch is a read-only view over the final index.
-  const batchId = out.at(-1).batch_id;
+  assert.equal(batchId, out.at(-1).batch_id, 'the published handle names the same batch the batch reports');
   const collected = await collectBatch({ config: { stateDir: f.config.stateDir }, batchId });
   assert.equal(collected.schema, 'cwr.acp.batch-collect/1');
   assert.equal(collected.status, 'complete');
@@ -719,4 +772,465 @@ test('collect refuses a corrupted or unknown index instead of fabricating a pass
   await assert.rejects(collectBatch({ config: { stateDir: f.config.stateDir }, batchId: randomUUID() }), { code: 'BATCH_NOT_FOUND' });
   await fs.writeFile(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), '{"schema":"wrong"}\n', { mode: 0o600 });
   await assert.rejects(collectBatch({ config: { stateDir: f.config.stateDir }, batchId }), { code: 'CORRUPT_INDEX' });
+});
+
+// --- Initial batch handle, compact read and identity expansion -----------------
+
+test('batch --start-handle publishes the batch id before any launch', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md'), deliver: false }),
+  ]);
+  const startHandle = path.join(f.root, 'batch.handle.json');
+  let handleAtFirstSpawn = null, indexAtFirstSpawn = null;
+  const baseSpawn = fakeSpawner(state, { stateDir: f.config.stateDir });
+  const spawner = args => {
+    if (handleAtFirstSpawn === null) {
+      // The spawner is called synchronously right before a child is launched:
+      // both the handle and the initial index must already be on disk.
+      handleAtFirstSpawn = JSON.parse(fsSync.readFileSync(startHandle, 'utf8'));
+      indexAtFirstSpawn = JSON.parse(fsSync.readFileSync(handleAtFirstSpawn.index_path, 'utf8'));
+    }
+    return baseSpawn(args);
+  };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile, 'start-handle': startHandle },
+    deps: { loadConfig: async () => f.config, spawnJob: spawner },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 0);
+  const handle = JSON.parse(await fs.readFile(startHandle, 'utf8'));
+  assert.equal(handle.schema, 'cwr.acp.batch-handle/1');
+  assert.equal(handle.batch_id, out.at(-1).batch_id);
+  assert.equal(handle.total, 1);
+  assert.ok(handle.index_path.endsWith('index.json'));
+  // The handle (and the initial index) existed with the SAME id before the first
+  // child launch, so no caller has to guess the id from the state directory.
+  assert.ok(handleAtFirstSpawn, 'the handle exists before any launch');
+  assert.equal(handleAtFirstSpawn.batch_id, handle.batch_id);
+  assert.equal(handleAtFirstSpawn.status, 'running');
+  assert.equal(indexAtFirstSpawn.batch_id, handle.batch_id);
+  assert.equal(indexAtFirstSpawn.status, 'running');
+  assert.deepEqual(indexAtFirstSpawn.planned, ['a']);
+  assert.deepEqual(indexAtFirstSpawn.results, []);
+});
+
+test('a failed batch start-handle write aborts before any child launches', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const { f, manifestFile, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md'), deliver: false }),
+  ]);
+  // A directory at the handle path cannot be atomically replaced.
+  const handleDir = path.join(f.root, 'handle-as-dir');
+  await fs.mkdir(handleDir, { mode: 0o700 });
+  let spawned = 0;
+  await assert.rejects(runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile, 'start-handle': handleDir },
+    deps: { loadConfig: async () => f.config, spawnJob: () => { spawned++; return { done: Promise.resolve({}), stop: () => {} }; } },
+    output: () => {}, text: () => {}, cliPath: 'cli.mjs',
+  }), { code: 'UNSAFE_FILE' });
+  assert.equal(spawned, 0, 'an unaddressable batch must launch nothing');
+  // Inspect only this synthetic failed-start fixture, which owns one index;
+  // successful callers obtain identity through the public handle instead.
+  const batchIds = await fs.readdir(path.join(f.config.stateDir, 'batches'));
+  assert.equal(batchIds.length, 1);
+  const index = JSON.parse(await fs.readFile(path.join(f.config.stateDir, 'batches', batchIds[0], 'index.json'), 'utf8'));
+  assert.equal(index.status, 'partial', 'failed startup must not leave a running index');
+  assert.deepEqual(index.missing, ['a']);
+});
+
+const compactResult = (id, summary, rev = 1) => ({
+  id, session_id: randomUUID(), request_id: randomUUID(), route: 'worker',
+  rev,
+  start_handle: null, handle_mismatch: false, runtime_status: 'completed', cleanup: 'confirmed',
+  receipt_path: `/receipts/${id}.json`, exit_code: 0, output_received: true,
+  output_truncated: false, stderr_truncated: false, error_code: null,
+  delivery_status: 'ready', delivery_questions: ['q'.repeat(8)], artifact_references: [],
+  delivery_problem: null, next_actions: [],
+  delivery_excerpt: {
+    source: 'worker_reported', summary, summary_truncated: false,
+    criteria: { total: 0, unsatisfied: 0, unsatisfied_list: [] },
+    checks: { total: 0, by_state: {}, failing: [], evidence: [] },
+    questions: [], questions_total: 0, omitted: {},
+  },
+});
+
+test('compact collect pages by change cursor, distinguishes recorded-handle/awaiting-handle/missing and rejects bad cursors', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID(), otherId = randomUUID();
+  const cfg = { stateDir: f.config.stateDir };
+  const indexFor = over => ({
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'running', revision: 2,
+    started_at: new Date().toISOString(), total: 4, planned: ['j0', 'j1', 'j2', 'j3'],
+    jobs: [{ id: 'j2', start_handle: { session_id: randomUUID(), request_id: randomUUID() } }],
+    results: [compactResult('j0', 's0', 1), compactResult('j1', 's1', 2)], ...over,
+  });
+  await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), indexFor());
+  await atomicJSON(path.join(f.config.stateDir, 'batches', otherId, 'index.json'), indexFor({ batch_id: otherId }));
+
+  // Page 1 (item limit): j0 only, more to come, running/not-started classified.
+  const p1 = await collectBatchCompact({ config: cfg, batchId, limit: 1 });
+  assert.equal(p1.schema, 'cwr.acp.batch-collect-compact/1');
+  assert.equal(p1.changed, true);
+  assert.equal(p1.items.length, 1);
+  assert.equal(p1.items[0].id, 'j0');
+  assert.equal(p1.page.has_more, true);
+  assert.equal(p1.page.limited_by, 'limit');
+  assert.deepEqual(p1.unresolved.running, ['j2']);
+  assert.deepEqual(p1.unresolved.awaiting_handle, ['j3']);
+  assert.deepEqual(p1.unresolved.missing, []);
+  assert.equal(p1.unresolved.terminal, false);
+  assert.ok(p1.budget.used_bytes <= p1.budget.max_bytes);
+
+  // Page 2 via the issued cursor: the remaining settled item, then no change.
+  const p2 = await collectBatchCompact({ config: cfg, batchId, limit: 1, cursor: p1.next_cursor });
+  assert.equal(p2.changed, true);
+  assert.deepEqual(p2.items.map(i => i.id), ['j1']);
+  assert.equal(p2.page.has_more, false);
+  const p3 = await collectBatchCompact({ config: cfg, batchId, limit: 1, cursor: p2.next_cursor });
+  assert.equal(p3.changed, false, 'no change since the cursor must not re-transfer results');
+  assert.deepEqual(p3.items, []);
+
+  // A later revision: the SAME cursor returns ONLY the newly settled item.
+  await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'),
+    indexFor({ status: 'complete', revision: 3, results: [compactResult('j0', 's0', 1), compactResult('j1', 's1', 2), compactResult('j2', 's2', 3)], jobs: [], missing: ['j3'] }));
+  const p4 = await collectBatchCompact({ config: cfg, batchId, limit: 5, cursor: p2.next_cursor });
+  assert.deepEqual(p4.items.map(i => i.id), ['j2']);
+  assert.equal(p4.unresolved.terminal, true);
+  assert.deepEqual(p4.unresolved.missing, ['j3']);
+  assert.deepEqual(p4.unresolved.running, []);
+  assert.deepEqual(p4.unresolved.awaiting_handle, []);
+
+  // A small result set still fits one page in the default budget.
+  const onePage = await collectBatchCompact({ config: cfg, batchId, limit: 32 });
+  assert.equal(onePage.page.has_more, false);
+  assert.equal(onePage.items.length, 3);
+
+  // Cursor rejections: cross-batch, malformed, future revision, out of range.
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId: otherId, cursor: p4.next_cursor }), { code: 'CROSS_BATCH_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: 'not-a-cursor' }), { code: 'BAD_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: encodeTestCursor({ v: 1, b: batchId, r: 999, o: 0 }) }), { code: 'FUTURE_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: encodeTestCursor({ v: 1, b: batchId, r: 3, o: 99 }) }), { code: 'CURSOR_OUT_OF_RANGE' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: encodeTestCursor({ v: 2, b: batchId, r: 3, o: 0 }) }), { code: 'BAD_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: encodeTestCursor({ v: 1, b: batchId, r: 3, o: 0, x: 1 }) }), { code: 'BAD_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, cursor: `${p4.next_cursor}=` }), { code: 'BAD_CURSOR' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, maxBytes: 128 }), { code: 'BAD_BUDGET' });
+  await assert.rejects(collectBatchCompact({ config: cfg, batchId, limit: 0 }), { code: 'BAD_LIMIT' });
+
+  // Mentioning a planned-but-unsettled job vs truly missing is distinct.
+  await assert.rejects(collectBatchJob({ config: cfg, batchId, jobId: 'j9' }), { code: 'JOB_NOT_FOUND' });
+  const full = await collectBatchJob({ config: cfg, batchId, jobId: 'j2' });
+  assert.equal(full.schema, 'cwr.acp.batch-job/1');
+  assert.deepEqual(full.job.delivery_questions, ['q'.repeat(8)]);
+});
+
+test('a 32-job maximal-delivery batch stays bounded at the public CLI and expands in full', async t => {
+  const base = await jobRoot(t);
+  const jobs = [];
+  for (let i = 0; i < 32; i++) {
+    const cwd = path.join(base, `j${i}`);
+    jobs.push(job({ id: `j${String(i).padStart(2, '0')}`, cwd, file: path.join(cwd, 'o.md') }));
+  }
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 8 });
+  // Each block is a legal delivery: 32 questions of 1800 chars + a long artifact
+  // note, still under the 64 KiB delivery-block bound.
+  const big = () => ({
+    status: 'ready', summary: 'bulk delivery', criteria: [], checks: [],
+    questions: Array.from({ length: 32 }, () => 'Q'.repeat(1800)),
+    artifacts: [{ kind: 'file', ref: 'absent.txt', note: 'N'.repeat(1000) }],
+  });
+  const code = await run(f, manifestFile, out, fakeSpawner(state, { stateDir: f.config.stateDir, block: big }));
+  assert.equal(code, 0);
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'complete');
+  assert.equal(batch.job_count, 32);
+
+  // DEFAULT terminal = the FULL legacy receipt: the old fields are not lost.
+  const first = batch.jobs.find(j => j.id === 'j00');
+  assert.equal(first.delivery_questions.length, 32, 'the legacy full question list is preserved');
+  assert.equal(first.delivery_questions[0].length, 1800);
+  assert.ok(Array.isArray(first.artifact_references), 'the legacy artifact_references field is preserved');
+  assert.equal(first.artifact_references[0].note.length, 1000);
+  assert.equal(first.delivery_excerpt.questions_total, 32, 'the legacy excerpt total is preserved');
+
+  // The REAL CLI compact read respects the byte budget and pages over all 32.
+  const budget = 16 * 1024;
+  const seen = new Map();
+  let cursor = null, pages = 0, resp = null;
+  for (;;) {
+    const args = ['collect', '--config', f.configFile, '--batch', batch.batch_id, '--compact', '--max-bytes', String(budget), '--limit', '32'];
+    if (cursor) args.push('--cursor', cursor);
+    const r = await runCli(args);
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(Buffer.byteLength(r.stdout) <= budget, `page ${pages} stdout ${Buffer.byteLength(r.stdout)} must be within ${budget}`);
+    resp = JSON.parse(r.stdout);
+    assert.equal(resp.schema, 'cwr.acp.batch-collect-compact/1');
+    assert.equal(resp.budget.max_bytes, budget);
+    assert.ok(resp.budget.used_bytes <= budget, 'the self-reported size must fit the budget');
+    for (const item of resp.items) seen.set(item.id, item);
+    pages++;
+    if (!resp.page.has_more) break;
+    cursor = resp.next_cursor;
+    assert.ok(pages <= 32, 'pagination must terminate');
+  }
+  assert.equal(seen.size, 32, 'paging reaches every settled job');
+  assert.equal(resp.unresolved.missing.length, 0);
+  assert.equal(resp.unresolved.terminal, true);
+  // The compact read (not the terminal) carries the bounded short evidence.
+  const compactFirst = seen.get('j00');
+  assert.equal(compactFirst.delivery_excerpt.source, 'worker_reported');
+  assert.equal(compactFirst.delivery_excerpt.questions_total, 32);
+  assert.equal(compactFirst.delivery_excerpt.questions.length, 4);
+  assert.equal(compactFirst.delivery_excerpt.questions[0].length, 300);
+  assert.equal(compactFirst.artifacts.total, 1);
+  assert.equal(compactFirst.artifacts.notable[0].note.length, 120);
+  assert.equal(compactFirst.artifacts.notable[0].note_truncated, true);
+
+  // Full expansion by job identity, then by session/request sidecar.
+  const expanded = await runCli(['collect', '--config', f.configFile, '--batch', batch.batch_id, '--job', 'j00']);
+  assert.equal(expanded.code, 0, expanded.stderr);
+  const jobFull = JSON.parse(expanded.stdout).job;
+  assert.equal(jobFull.delivery_questions.length, 32);
+  assert.equal(jobFull.delivery_questions[0].length, 1800);
+  assert.equal(jobFull.artifact_references[0].observed.status, 'missing');
+  const side = await runCli(['delivery', '--config', f.configFile, '--session', jobFull.session_id, '--request', jobFull.request_id, '--json']);
+  assert.equal(side.code, 0, side.stderr);
+  const sidecar = JSON.parse(side.stdout);
+  assert.equal(sidecar.worker.block.questions.length, 32);
+  assert.equal(sidecar.worker.block.questions[0].length, 1800);
+
+  // A caller requesting a compact budget must never receive an unbounded job
+  // expansion because conflicting view options were silently ignored.
+  for (const view of [['--compact'], ['--cursor', cursor], ['--limit', '1'], ['--max-bytes', '8192']]) {
+    const conflict = await runCli(['collect', '--config', f.configFile, '--batch', batch.batch_id, '--job', 'j00', ...view]);
+    assert.equal(conflict.code, 2);
+    assert.match(conflict.stderr, /cannot be combined/);
+  }
+
+  // --compact-only options without --compact are a usage error, not silent.
+  const misuse = await runCli(['collect', '--config', f.configFile, '--batch', batch.batch_id, '--limit', '1']);
+  assert.equal(misuse.code, 2);
+  assert.match(misuse.stderr, /require --compact/);
+  const batchMisuse = await runCli(['batch', '--config', f.configFile, '--manifest', path.join(f.root, 'missing.json'), '--limit', '2']);
+  assert.equal(batchMisuse.code, 2);
+  assert.match(batchMisuse.stderr, /require --compact/);
+});
+
+test('batch --compact keeps the whole terminal (metadata included) within budget and pages to every job', async t => {
+  const base = await jobRoot(t);
+  const jobs = [];
+  for (let i = 0; i < 32; i++) {
+    const cwd = path.join(base, `c${i}`);
+    jobs.push(job({ id: `k${String(i).padStart(2, '0')}`, cwd, file: path.join(cwd, 'o.md') }));
+  }
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 8 });
+  const big = () => ({
+    status: 'ready', summary: 'bulk delivery', criteria: [], checks: [],
+    questions: Array.from({ length: 32 }, () => 'Q'.repeat(1800)),
+    artifacts: [{ kind: 'file', ref: 'absent.txt', note: 'N'.repeat(1000) }],
+  });
+  const budget = 16 * 1024;
+  const code = await runBatch({
+    config: { configPath: f.configFile },
+    opt: { manifest: manifestFile, compact: true, limit: '32', 'max-bytes': String(budget) },
+    deps: { loadConfig: async () => f.config, spawnJob: fakeSpawner(state, { stateDir: f.config.stateDir, block: big }) },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 0);
+  const page = out.at(-1);
+  assert.equal(page.schema, 'cwr.acp.batch-collect-compact/1');
+  assert.ok(Buffer.byteLength(JSON.stringify(page)) + 1 <= budget, 'the whole compact terminal, metadata included, fits the budget');
+  assert.equal(page.batch.admission_scope, 'batch_local_only');
+  assert.ok(page.batch.index_path.endsWith('index.json'));
+  assert.equal(page.batch.cancelled, false);
+  assert.equal(page.status, 'complete');
+  assert.ok(page.page.returned >= 1, 'the compact terminal returns at least one locatable item');
+  assert.equal(page.items[0].detail, 'full');
+  // Continue with the issued cursor until every settled job is covered.
+  const seen = new Set(page.items.map(i => i.id));
+  let cursor = page.next_cursor, lastOffset = page.page.next_offset, guard = 0, resp = page;
+  while (resp.page.has_more) {
+    resp = await collectBatchCompact({ config: { stateDir: f.config.stateDir }, batchId: page.batch_id, cursor, limit: 32, maxBytes: budget });
+    assert.ok(Buffer.byteLength(JSON.stringify(resp)) + 1 <= budget, 'every continuation page fits the budget');
+    assert.ok(resp.page.next_offset > lastOffset, 'each page makes forward progress');
+    lastOffset = resp.page.next_offset;
+    for (const item of resp.items) seen.add(item.id);
+    cursor = resp.next_cursor;
+    guard++;
+    assert.ok(guard <= 32, 'pagination terminates');
+  }
+  assert.equal(seen.size, 32, 'the compact terminal plus cursors reach every job');
+  assert.equal(resp.unresolved.missing.length, 0);
+});
+
+test('compact collect advances under the minimum budget by degrading the optional excerpt, never stalling', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID(), sid = randomUUID(), req = randomUUID();
+  const cfg = { stateDir: f.config.stateDir };
+  // A LEGAL delivery (real normalizeDelivery via writeDeliverySidecar) whose
+  // Chinese text makes the full short-evidence projection exceed 8 KiB.
+  const zh = n => '汉'.repeat(n);
+  const block = {
+    status: 'ready', summary: zh(400),
+    criteria: Array.from({ length: 8 }, () => ({ criterion: zh(160), state: 'unsatisfied' })),
+    checks: Array.from({ length: 6 }, () => ({ name: zh(120), state: 'failed', detail: zh(200) })),
+    questions: Array.from({ length: 4 }, () => zh(300)),
+    artifacts: Array.from({ length: 6 }, () => ({ kind: 'file', ref: zh(200), note: zh(120) })),
+  };
+  const text = '```cwr-delivery\n' + JSON.stringify({ schema: 'cwr.acp.delivery/1', ...block, request_id: req, session_id: sid }) + '\n```';
+  assert.ok(Buffer.byteLength(text, 'utf8') < 64 * 1024, 'the counterexample block is a legal delivery');
+  const { sidecar } = await writeDeliverySidecar({ stateDir: f.config.stateDir, session: sid, requestId: req, finishedAt: new Date().toISOString(), text });
+  assert.equal(sidecar.worker.status, 'ready');
+  const result = {
+    id: 'zh', rev: 1, session_id: sid, request_id: req, route: 'worker',
+    start_handle: { session_id: sid, request_id: req, phase: 'locks_held' }, handle_mismatch: false,
+    runtime_status: 'completed', cleanup: 'confirmed', receipt_path: null, exit_code: 0,
+    output_received: true, output_truncated: false, stderr_truncated: false, error_code: null,
+    delivery_status: 'ready', delivery_questions: sidecar.worker.block.questions,
+    artifact_references: sidecar.worker.block.artifacts.map(a => ({ ...a, observed: { status: 'unknown' } })),
+    delivery_problem: null, delivery_excerpt: deliveryExcerpt(sidecar.worker.block), next_actions: [],
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(projectResult(result, { detail: 'full' }))) > COMPACT_MIN_BYTES, 'the full evidence projection exceeds the minimum budget');
+  await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), {
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'complete', revision: 1,
+    started_at: new Date().toISOString(), total: 1, planned: ['zh'], jobs: [], results: [result], missing: [],
+  });
+  const page = await collectBatchCompact({ config: cfg, batchId, limit: 2, maxBytes: COMPACT_MIN_BYTES });
+  assert.ok(Buffer.byteLength(JSON.stringify(page)) + 1 <= COMPACT_MIN_BYTES, 'the whole response respects the minimum budget');
+  assert.equal(page.items.length, 1, 'the minimum budget still returns a locatable item');
+  assert.ok(page.page.next_offset >= 1, 'the page advances, never a zero-progress page');
+  const item = page.items[0];
+  assert.ok(['full', 'reduced', 'minimal'].includes(item.detail));
+  assert.notEqual(item.detail, 'full', 'the optional evidence was reduced to fit the minimum budget');
+  // Identity, status, counts and expansion survive every reduction tier.
+  assert.equal(item.id, 'zh');
+  assert.equal(item.delivery_status, 'ready');
+  assert.equal(item.expand.session_id, sid);
+  assert.equal(item.expand.request_id, req);
+  assert.equal(item.delivery_questions_total, 4);
+  if (item.detail === 'reduced') {
+    assert.equal(item.delivery_excerpt.source, 'worker_reported');
+    assert.equal(item.delivery_excerpt.criteria.unsatisfied, 8);
+    assert.equal(item.delivery_excerpt.checks.by_state.failed, 6);
+    assert.ok(item.delivery_excerpt.omitted_fields.includes('checks.evidence'), 'dropped fields are named, not silently lost');
+  }
+  // The continuation reads PAST this item (no stall on the same offset).
+  const next = await collectBatchCompact({ config: cfg, batchId, cursor: page.next_cursor, limit: 2, maxBytes: COMPACT_MIN_BYTES });
+  assert.ok(next.page.next_offset >= page.page.next_offset);
+  assert.equal(next.changed, false);
+});
+
+test('a compact cursor re-delivers a SAME-ID result update instead of silently missing it', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID();
+  const cfg = { stateDir: f.config.stateDir };
+  const rec = (summary, status, rev) => ({
+    ...compactResult('one', summary, rev), delivery_status: status,
+  });
+  const write = over => atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), {
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'running', revision: 1,
+    started_at: new Date().toISOString(), total: 1, planned: ['one'], jobs: [],
+    results: [rec('first', 'ready', 1)], missing: null, ...over,
+  });
+  await write();
+  const first = await collectBatchCompact({ config: cfg, batchId, limit: 1 });
+  assert.equal(first.items.length, 1);
+  assert.equal(first.items[0].delivery_excerpt.summary, 'first');
+  // The SAME job id, the SAME results.length, but NEW content and a higher
+  // revision — a late settlement / reconciliation, not an append.
+  await write({ revision: 2, results: [rec('updated', 'needs_input', 2)], status: 'complete', missing: [] });
+  const after = await collectBatchCompact({ config: cfg, batchId, limit: 5, cursor: first.next_cursor });
+  assert.equal(after.revision, 2);
+  assert.equal(after.changed, true, 'an in-place update must not be reported as unchanged');
+  assert.deepEqual(after.items.map(i => i.id), ['one']);
+  assert.equal(after.items[0].delivery_excerpt.summary, 'updated');
+  assert.equal(after.items[0].delivery_status, 'needs_input');
+  assert.equal(after.items[0].rev, 2, 'the consumer can merge replayed items by their publication revision');
+  // A cursor from before the update never overwrites the newer state.
+  const stale = await collectBatchCompact({ config: cfg, batchId, limit: 5, cursor: first.next_cursor });
+  assert.equal(stale.items[0].delivery_excerpt.summary, 'updated');
+});
+
+test('invalid compact options are rejected before config reads or child admission', async t => {
+  const base = await jobRoot(t);
+  const jobs = [job({ id: 'one', cwd: path.join(base, 'one'), file: path.join(base, 'one', 'o.md') })];
+  const { f, manifestFile } = await batchFixture(t, jobs);
+  for (const [options, code] of [
+    [{ limit: '0' }, 'BAD_LIMIT'],
+    [{ 'max-bytes': String(COMPACT_MIN_BYTES - 1) }, 'BAD_BUDGET'],
+  ]) {
+    let configReads = 0, launches = 0;
+    await assert.rejects(runBatch({
+      config: { configPath: f.configFile },
+      opt: { manifest: manifestFile, compact: true, ...options },
+      deps: {
+        loadConfig: async () => { configReads++; return f.config; },
+        spawnJob: () => { launches++; throw Object.assign(new Error('unexpected launch'), { code: 'SYNTHETIC_LAUNCH' }); },
+      },
+      output: () => {}, text: () => {}, cliPath: CLI,
+    }), { code });
+    assert.deepEqual({ configReads, launches }, { configReads: 0, launches: 0 }, 'invalid consumer options must not start authorized work');
+  }
+});
+
+test('short evidence distinguishes clipped text from omitted entries', () => {
+  const excerpt = deliveryExcerpt({
+    summary: 'complete',
+    criteria: [{ criterion: '条'.repeat(200), state: 'unsatisfied' }],
+    checks: [{ name: '检'.repeat(180), state: 'failed', detail: 'failure evidence' }],
+    questions: ['问'.repeat(500), 'short question'],
+  });
+  assert.equal(excerpt.omitted.questions, 0, 'both questions are represented');
+  assert.deepEqual(excerpt.questions_truncated, [true, false], 'a represented question can still be a clipped fragment');
+  assert.deepEqual(excerpt.criteria.unsatisfied_truncated, [true]);
+  assert.deepEqual(excerpt.checks.failing_truncated, [true]);
+});
+
+test('minimal detail retains worker provenance and failure counts for expansion decisions', () => {
+  const session = randomUUID(), request = randomUUID();
+  const item = projectResult({
+    id: 'blocked', rev: 2, session_id: session, request_id: request,
+    delivery_status: 'needs_input', delivery_questions: ['Which contract applies?'],
+    delivery_excerpt: deliveryExcerpt({
+      summary: 'A failed check and unsatisfied condition require a decision',
+      criteria: [{ criterion: 'contract matches', state: 'unsatisfied' }],
+      checks: [{ name: 'negative control', state: 'failed', detail: 'wrong identity was accepted' }],
+      questions: ['Which contract applies?'],
+    }),
+  }, { detail: 'minimal' });
+  assert.equal(item.delivery_excerpt?.source, 'worker_reported');
+  assert.equal(item.delivery_excerpt.criteria.unsatisfied, 1);
+  assert.equal(item.delivery_excerpt.checks.by_state.failed, 1);
+  assert.equal(item.delivery_excerpt.questions_total, 1);
+  assert.ok(item.delivery_excerpt.omitted_fields.includes('summary'));
+  assert.equal(item.expand.session_id, session);
+  assert.equal(item.expand.request_id, request);
+});
+
+test('full and compact terminals remain partial when the final index publication fails', async t => {
+  for (const compact of [false, true]) {
+    const cwd = path.join(await jobRoot(t), 'one');
+    const { f, manifestFile, out, state } = await batchFixture(t, [job({ id: 'one', cwd, file: path.join(cwd, 'o.md') })]);
+    const originalRename = fs.rename;
+    fs.rename = async (from, to) => {
+      if (path.basename(to) === 'index.json') {
+        const record = JSON.parse(await fs.readFile(from, 'utf8'));
+        if (record.status === 'complete') throw Object.assign(new Error('synthetic final publication failure'), { code: 'EIO' });
+      }
+      return originalRename(from, to);
+    };
+    try {
+      const code = await runBatch({
+        config: { configPath: f.configFile }, opt: { manifest: manifestFile, compact },
+        deps: { loadConfig: async () => f.config, spawnJob: fakeSpawner(state, { stateDir: f.config.stateDir }) },
+        output: value => out.push(value), text: () => {}, cliPath: CLI,
+      });
+      assert.equal(code, 1);
+      const terminal = out.at(-1);
+      assert.equal(terminal.status, 'partial', 'a failed durable publication cannot be reported complete');
+      assert.equal((compact ? terminal.batch : terminal).index_warning, 'EIO');
+    } finally {
+      fs.rename = originalRename;
+    }
+  }
 });

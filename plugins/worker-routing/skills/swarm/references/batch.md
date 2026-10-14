@@ -20,6 +20,11 @@ goal; never let the mechanical step invent scope, permissions or acceptance crit
 Use independent CLI subprocesses for ACP jobs. The CLI scrubs its process environment, so
 concurrent calls to its main function in one Node process are unsafe. Use trusted structured
 start handles/control output to retain actual session IDs; do not parse human stderr strings.
+Pass `--start-handle FILE` to `batch` so the runner writes a machine-readable batch handle
+(`batch_id` and index location) right after the initial index exists and before any child
+launches; the coordinator then addresses that batch directly instead of scanning the private
+state directory for a batch id. A failed handle write aborts the batch before any launch, and
+the handle is an identity pointer, not a progress signal: there is still no per-item wakeup.
 The finite manifest indexes approved items and runtime handles, not a competing task store.
 
 Retain the exact-cwd lock and each responsibility's operation lock. Different cwd/worktrees
@@ -58,6 +63,33 @@ inspect the receipt, consolidate the report on the same session, answer the work
 questions — for the coordinator to judge. They are never commands, never worker text and
 never auto-executed; a continue-class hint is offered only for a known session with terminal
 runtime, confirmed cleanup and a matching handle.
+
+Read results through the bounded compact interface. `batch --compact` (and
+`collect --compact`) return a whole-response UTF-8 byte budget (default 32 KiB, minimum 8 KiB,
+maximum 256 KiB) with an item limit (default 8, maximum 32), so metadata, cursor and items
+together stay under the budget including the trailing newline. Each item carries short
+evidence — `source`, summary, criterion counts with the unsatisfied list, and check
+name/state/detail ordered problems-first — with text truncation and omission counts visible;
+`worker_reported` never becomes a verified fact. When a rich item cannot fit, the runner
+reduces only optional detail and names omitted fields in `omitted_fields`; minimal detail
+still retains provenance and criterion/check counts. When results remain, a successful
+page includes a locatable item or explicitly rejects an insufficient budget. The
+full questions, artifacts and checks never enter the compact page. `collect --job JOB_ID`
+expands one settled result in full from the durable index, and
+`delivery --session UUID --request REQUEST_ID` expands the per-request sidecar.
+
+The cursor is an opaque token naming this batch, revision and offset. It is validated strictly
+for shape, canonical encoding, batch, range and revision — it is not an authenticity tag.
+Nothing changed since the cursor re-sends no results; a new append is read incrementally. A
+same-id update (late settlement or reconciliation) is replayed from the earliest changed item,
+which may also repeat unchanged successors, so merge by job id and each item’s `rev`
+(response `revision` for legacy `rev:null`), rather than assuming a strict event delta or zero
+duplication. An un-expanded page, unsettled jobs with a recorded handle, `awaiting_handle` jobs
+and genuinely missing results are separate facts. Awaiting a handle can mean pending
+admission or startup; it does not prove no child exists, and a recorded handle proves
+locks held, not prompt acknowledgement.
+The legacy plain `batch` and `collect` full returns are unchanged and are not subject to the
+compact budget.
 
 De-duplicate the same session/request and preserve explicit revision lineage. Late older
 results do not replace newer results. Retain useful partial artifacts and exceptions; don't

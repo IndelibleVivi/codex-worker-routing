@@ -59,15 +59,17 @@ ACP 是可选的，并与 native 委派并存。当 operator 的默认或当前�
 
 两项协调辅助不进入日常路径。`prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与一份
 manifest，不启动任何 worker；`batch` 对这份有限清单做 admission，并以独立 CLI 子进程执行；
-`collect` 读取已发布到持久索引的结果，不必等其余项目结束。admission 只作用于本批，因此没有
-全局 scheduler，也不宣称跨入口的并发安全。
+`batch --start-handle` 在初始索引落盘后、启动任何子进程前给出本批 identity，`batch
+--compact` 给出整份受字节预算约束的分页终态；`collect` 读取已发布到持久索引的结果，
+`collect --compact` 做分页有界读取、`collect --job` 展开单条完整记录，都不必等其余项目
+结束。admission 只作用于本批，因此没有全局 scheduler，也不宣称跨入口的并发安全。
 
 ```mermaid
 flowchart LR
   Spec["一份撰写的 order spec"] -->|prepare| Man["逐条 order + manifest<br/>不启动 worker"]
   Man -->|batch admission| Jobs["有限独立<br/>CLI 子进程"]
   Jobs -->|结算即发布| Index["持久 batch 索引"]
-  Index -->|collect| Read["只读结果<br/>当前已结算"]
+  Index -->|collect<br/>compact/job| Read["只读结果<br/>当前已结算"]
   classDef coordinator fill:#edf2e5,stroke:#8fa77c,color:#51415f
   classDef worker fill:#faedf1,stroke:#c69eae,color:#51415f
   classDef evidence fill:#fffefa,stroke:#c1b3c9,color:#51415f

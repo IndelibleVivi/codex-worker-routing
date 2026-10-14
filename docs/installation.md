@@ -11,7 +11,7 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
 同名目录归属，不能覆盖其他插件。
 
 更新源码后，先用当前宿主的 `codex plugin marketplace list --json` 核对 marketplace
-和源目录；为插件 manifest 更新版本（本次为 `0.4.1`），再通过正式
+和源目录；为插件 manifest 更新版本（本次为 `0.4.2`），再通过正式
 `codex plugin add worker-routing@MARKETPLACE --json` 重装。宿主若提供 bundled authoring
 helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设旧 helper 路径仍存在。
 不要热改 installed cache。安装后核对版本与源文件，并用新的主 session 验收 discovery。
@@ -22,6 +22,16 @@ helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设�
 SessionStart 再复制当前 route 名。完整配置与撤回许可见[ACP 接入](acp-integration.md#默认与备用)。
 
 ## Delivery 与 swarm 升级
+
+0.4.2 收口有限批次的消费接口，并保持既有调用兼容。`batch --start-handle FILE` 在初始索引
+落盘后、启动任何子进程前写出本批 identity（`batch_id` 与索引位置），不再需要扫描私有 state
+目录猜 batch id；写入失败会在启动前终止整批。默认 `batch` 与 `collect` 仍返回完整的旧终态，
+不受预算约束；新增可选的 `batch --compact` 与 `collect --compact` 提供整份受 UTF-8 字节预算
+硬限、带 cursor 的分页读取（默认 32 KiB、最低 8 KiB、最高 256 KiB；每页 item 上限默认 8、
+最大 32），必要时只缩减可选 detail 并显式列出省略字段，最简 tier 仍保留来源与条件/检查计数。
+还有结果时成功页至少返回一个可定位条目，或明确报预算不足，不返回无法前进的空页。`collect --job JOB_ID` 从索引展开单条完整结果，`delivery --session/--request` 展开
+sidecar；cursor 只按 shape/编码/batch/range/revision 严格校验，不是真实性标签。旧 manifest、
+旧 run/continue 调用与历史回执继续可用。
 
 0.4.1 同步收窄 packaged swarm 与双语说明中的证据承诺：worker 自述、受信结果与索引中的
 恢复线索保持分开；freshness 仍需独立核对。工具调用与 schema 保持兼容。

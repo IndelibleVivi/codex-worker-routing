@@ -1,6 +1,6 @@
 {
   "name": "@codex-worker-routing/acp-integration",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "Opt-in ACP worker channel; native Codex delegation remains unchanged",

@@ -10,7 +10,7 @@ import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buil
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
 import { readDelivery } from './delivery.mjs';
-import { runBatch, collectBatch } from './batch.mjs';
+import { runBatch, collectBatch, collectBatchCompact, collectBatchJob } from './batch.mjs';
 import { runPrepare } from './prepare.mjs';
 
 
@@ -22,6 +22,8 @@ const FLAG = Object.freeze({
   delivery: ['json'],
   run: ['deliver'],
   continue: ['deliver'],
+  collect: ['compact'],
+  batch: ['compact'],
 });
 const VALUES = Object.freeze({
   run: ['config', 'route', 'cwd', 'file', 'permissions', 'title', 'category', 'start-handle', 'expected-admission'],
@@ -33,10 +35,10 @@ const VALUES = Object.freeze({
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config', 'since', 'port'],
-  batch: ['config', 'manifest', 'concurrency'],
+  batch: ['config', 'manifest', 'concurrency', 'start-handle', 'limit', 'max-bytes'],
   delivery: ['config', 'session', 'request'],
   prepare: ['config', 'spec', 'out'],
-  collect: ['config', 'batch'],
+  collect: ['config', 'batch', 'job', 'cursor', 'limit', 'max-bytes'],
 });
 const REQUIRED = Object.freeze({
   // `route` is resolved separately: it is required only for configs without a
@@ -73,9 +75,13 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--time-zone IANA_ZONE] [--json]
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
   batch    --config FILE --manifest FILE [--concurrency N]
+           [--start-handle FILE]      (publishes {batch_id,index_path} before any launch)
+           [--compact [--limit N] [--max-bytes N]]   (bounded paged terminal; default is full)
   delivery --config FILE --session UUID [--request REQUEST_ID] [--json]
   prepare  --config FILE --spec SPEC_FILE [--out DIR]
   collect  --config FILE --batch BATCH_ID
+           [--compact [--limit N] [--max-bytes N] [--cursor TOKEN]]
+           [--job JOB_ID]
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
@@ -95,8 +101,14 @@ for a batch runner, instead of parsing human stderr text.
 batch runs a finite, coordinator-authored manifest of run/continue jobs as
 independent CLI subprocesses, with explicit per-job permissions, a maximum
 concurrency, and safe local admission for an exact cwd and a shared worker home.
-It reports partial when required results are missing. delivery is read-only and
-never loads an adapter.
+It reports partial when required results are missing. With --start-handle FILE it
+writes a machine-readable batch handle (batch_id, index_path) immediately after
+the initial index exists and before any child launches; a failed handle write
+aborts the batch before launching anything. Its terminal stdout keeps the FULL
+legacy receipt by default (including delivery_questions/artifact_references);
+--compact instead emits a bounded, paged terminal within --max-bytes that carries
+the batch metadata plus a first page, and the caller continues with
+'collect --compact --cursor'. delivery is read-only and never loads an adapter.
 
 prepare mechanically turns one coordinator-authored order spec (shared
 background plus each item's task) into per-item order files and a standard
@@ -106,11 +118,18 @@ launches, fills an omitted run route from the config's CURRENT routing.default,
 and never infers a permission from a category or a keyword. It launches nothing
 and loads no adapter; batch admission re-validates every generated job.
 
-collect is a read-only view of one batch's index: the bounded per-item results
-settled SO FAR, including the worker-reported delivery excerpt and candidate
-next actions. It never loads an adapter, never waits, and provides no per-item
-wakeup; the coordinator uses its host's own wait and reads collect between
-other work. A corrupted index is an explicit error, never a fake pass.
+collect is a read-only view of one batch's index. Plain collect returns the full
+stored results (the compatibility view). --compact returns a bounded coordination
+read: whole-response UTF-8 byte budget and item limit, an opaque change/paging
+cursor, a recorded-handle/awaiting-handle/missing classification, and per-item short
+evidence (source, summary, criteria, check name/state/detail, questions, clipped
+with visible omission counts). No change since the cursor re-sends no results;
+cross-batch, malformed, out-of-range or future cursors are rejected. --job JOB_ID
+expands ONE settled result in full from the index and cannot be combined with
+--compact/--cursor/--limit/--max-bytes; the full delivery block stays
+readable with 'delivery --session/--request'. collect never loads an adapter,
+never waits, provides no per-item wakeup, and a corrupted index is an explicit
+error, never a fake pass.
 
 run and continue require an explicit --permissions read|full on EVERY turn.
 The category is metadata, never permission. A continuation does not inherit a
@@ -268,6 +287,8 @@ export async function main(args, deps = {}) {
   }
   if (opt.command === 'batch') {
     const config = await loadControlConfig(opt.config);
+    if (!opt.compact && (opt.limit !== undefined || opt['max-bytes'] !== undefined))
+      throw new Fault('USAGE', '--limit/--max-bytes require --compact on batch; the default terminal keeps the full legacy receipt.');
     return runBatch({ config, opt, deps, output, text, cliPath: cli_path() });
   }
   if (opt.command === 'prepare') {
@@ -280,8 +301,21 @@ export async function main(args, deps = {}) {
   }
   if (opt.command === 'collect') {
     // Read-only batch-index view; never loads an adapter, never waits.
+    if (opt.job !== undefined && (opt.compact || opt.cursor !== undefined || opt.limit !== undefined || opt['max-bytes'] !== undefined))
+      throw new Fault('USAGE', '--job expands a full result and cannot be combined with --compact/--cursor/--limit/--max-bytes.');
     const config = await loadControlConfig(opt.config);
-    output(await collectBatch({ config, batchId: opt.batch }));
+    if (opt.job !== undefined) {
+      // Expand ONE settled result in full by manifest job id.
+      output(await collectBatchJob({ config, batchId: opt.batch, jobId: opt.job }));
+    } else if (opt.compact) {
+      const limit = opt.limit === undefined ? undefined : Number(opt.limit);
+      const maxBytes = opt['max-bytes'] === undefined ? undefined : Number(opt['max-bytes']);
+      output(await collectBatchCompact({ config, batchId: opt.batch, cursor: opt.cursor ?? null, limit, maxBytes }));
+    } else if (opt.cursor !== undefined || opt.limit !== undefined || opt['max-bytes'] !== undefined) {
+      throw new Fault('USAGE', '--cursor/--limit/--max-bytes require --compact (or use --job to expand one result).');
+    } else {
+      output(await collectBatch({ config, batchId: opt.batch }));
+    }
     return 0;
   }
   const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';

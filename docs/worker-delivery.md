@@ -52,7 +52,14 @@ HEAD 识别。可定位的文件引用不自动证明正文支持结论；报告
 
 ```sh
 node ENTRY batch --config CONFIG --manifest BATCH_FILE --concurrency 2
+node ENTRY batch --config CONFIG --manifest BATCH_FILE --start-handle HANDLE --compact
 ```
+
+给 `batch` 传 `--start-handle FILE` 时，运行器在初始索引落盘之后、启动任何子进程之前，
+把本批的机器句柄（`batch_id` 与索引位置）写入该文件；句柄写入失败会在启动前终止整批。
+调用者因此可以直接寻址该批，而不必扫描私有 state 目录去猜 batch id。句柄只是身份指针，
+不是进度信号：仍没有逐项唤醒。`--compact` 让终态 stdout 变成有界分页响应，默认保留的完整
+终态返回不受影响。
 
 manifest 由协调 agent 生成，schema 为 `cwr.acp.batch-manifest/1`。每项有稳定 id、
 `run` 或 `continue`、工单位置、明确权限以及相关 cwd/session 和共享资源。它索引既有
@@ -114,6 +121,8 @@ ACL 隐私，CWR 不据此声称已验证 owner-only 访问；需要由 operator
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
 node ENTRY collect --config CONFIG --batch BATCH_ID
+node ENTRY collect --config CONFIG --batch BATCH_ID --compact [--limit N] [--max-bytes N] [--cursor TOKEN]
+node ENTRY collect --config CONFIG --batch BATCH_ID --job JOB_ID
 ```
 
 以下是合成的最小 spec；实际内容由协调者从真实目标撰写，机械步骤不发明范围、权限或
@@ -130,14 +139,36 @@ node ENTRY collect --config CONFIG --batch BATCH_ID
 }
 ```
 
-每个结果一结算就写入批次的持久索引；`collect` 是该索引的只读视图，返回批次状态、
-总数、已捕获句柄数、已结算数、outstanding 与逐项结果——不等待、不加载 adapter、
-没有逐项唤醒，协调者在自己宿主的事等待间隙读取。索引损坏或不存在是明确错误，
-不伪造通过。逐项结果附带两个协调辅助字段：
+每个结果一结算就写入批次的持久索引；`collect` 是该索引的只读视图——不等待、不加载
+adapter、没有逐项唤醒，协调者在自己宿主的事等待间隙读取。索引损坏或不存在是明确错误，
+不伪造通过。普通 `collect` 返回索引里完整的逐项结果，是兼容旧消费者的完整视图，不受
+compact 预算约束；日常协调改用 `--compact`。
+
+`--compact` 返回有界分页响应：整份响应（含 metadata、cursor、items 与结尾换行）受
+UTF-8 字节预算硬限，默认 32 KiB、最低 8 KiB、最高 256 KiB；每页 item 上限默认 8、
+最大 32。响应给出批次状态、总数、已捕获句柄数、已结算数、outstanding、`page`
+（是否还有未展开页 `has_more`/`limited_by`）、`unresolved`（已记录 handle 的未结算项、`awaiting_handle`、真正 missing 分开）、`next_cursor` 与逐项结果。预算装不下某个富条目时，只缩减可选 detail
+并显式列出 `omitted_fields`；最简 tier 仍保留来源、条件与检查计数。还有待返回结果时，
+成功页至少包含一个可定位条目，否则明确报预算不足，避免无法推进的空页。完整 questions/artifacts/checks 不进入 compact 页：
+`collect --job JOB_ID` 从索引展开单个结算结果的全部字段，`delivery --session UUID
+--request REQUEST_ID` 展开按请求保存的 sidecar。
+
+cursor 是不透明 token，只声明本 batch、revision 与 offset，按 shape/canonical 编码/
+batch/range/revision 严格校验；它不是真实性标签。`awaiting_handle` 可能是尚待准入或已在启动，不能据此认定没有 child；已记录 handle
+也只证明锁已取得，不证明 prompt 已确认。相对 cursor 无变化时不重传任何旧结果；
+新增结果是增量读取。同 ID 的更新（迟到结算或协调）会从最早变化项起重放其后各页，可能
+包含未变化的后继，因此协调者按 id 和逐项 `rev` 合并，`rev:null` 的历史结果以响应
+`revision` 判断新旧，而不是把 cursor
+当作严格事件 delta 或零重复保证。
+
+`--job` 是不受 compact 预算约束的完整展开，不能与 `--compact`、`--cursor`、`--limit` 或 `--max-bytes` 混用；混用会在读取索引前报参数错误。
+
+逐项结果附带两个协调辅助字段：
 
 - `delivery_excerpt`：worker 自述交付的有界逐字投影（`source:"worker_reported"`）：
-  带截断标记的摘要、条件总数与未满足清单、检查计数与失败名单、前几条问题。程序不做
-  语义扩写；worker 自述与运行器观察保持分开。
+  带截断标记的摘要、条件总数与未满足清单、检查计数与失败名单，以及按严重度排序的少量
+  `name/state/detail` 短证据和前几条问题，另有显式省略计数。程序不做语义扩写；
+  `worker_reported` 不等于已被验证，worker 自述与运行器观察保持分开。
 - `next_actions`：运行器根据受信 runtime/句柄事实及明确归属的 worker 自述生成候选提示。
   `answer_questions` 使用自述的 needs_input 与 questions，不表示问题或 blocker 已独立证实。
   固定词表：`reconcile_session`、

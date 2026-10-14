@@ -33,6 +33,14 @@ test('synthetic ACP server self-test: cooperative cancel settles the original pr
  while(JSON.parse(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-sessions.json'),'utf8'))[f.id].turn===0)await new Promise(r=>setTimeout(r,5));
  await f.request('session/cancel',{sessionId:f.id});assert.equal((await prompt).result.stopReason,'cancelled');
 });
+test('synthetic ACP server self-test: cancellation during parked-prompt preparation is retained', {timeout:10000},async t=>{
+ const f=await setup(t);
+ const prompt=f.request('session/prompt',{sessionId:f.id,prompt:[{type:'text',text:'FIXTURE_WAIT'}]});
+ // Back-to-back RPCs reach the handler before its awaited audit/store writes.
+ // Cancellation must not disappear while the parked turn is being prepared.
+ await f.request('session/cancel',{sessionId:f.id});
+ assert.equal((await prompt).result.stopReason,'cancelled');
+});
 test('synthetic ACP server self-test: CLI pipe EOF clears a parked prompt timer', {timeout:10000},async t=>{
  const f=await setup(t);
  void f.request('session/prompt',{sessionId:f.id,prompt:[{type:'text',text:'FIXTURE_WAIT'}]});

@@ -26,17 +26,25 @@ node ENTRY close --config CONFIG --session UUID
 ```
 
 For an approved independent batch, prepare mechanically turns one coordinator-authored
-order spec into per-item order files plus a batch manifest, and collect reads one batch's
-settled results so far without waiting for the rest:
+order spec into per-item order files plus a batch manifest. Run the finite list with a
+batch start handle so the batch id is available before the first launch, read settled
+results through the bounded compact interface, and expand one result in full when needed:
 
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
-node ENTRY collect --config CONFIG --batch BATCH_ID
+node ENTRY batch --config CONFIG --manifest MANIFEST --start-handle HANDLE --compact
+node ENTRY collect --config CONFIG --batch BATCH_ID --compact [--limit N] [--max-bytes N] [--cursor TOKEN]
+node ENTRY collect --config CONFIG --batch BATCH_ID --job JOB_ID
 ```
 
-Both are coordination aids only: prepare launches nothing (batch admission re-validates
-every generated job), and collect is read-only. Their guarantees live with the swarm
-skill's batch reference.
+`--start-handle` publishes this batch's identity (batch_id and index location) after the
+initial index exists and before any child launches; a failed handle write aborts before
+launch, and the handle is not a wakeup. `batch --compact` returns a bounded paged terminal
+(the whole response, metadata included, stays within the byte budget); `collect --compact`
+pages and expands the same way, and `collect --job` returns one settled result in full.
+Plain `batch` and plain `collect` keep their full legacy returns. prepare launches nothing
+(batch admission re-validates every generated job) and every collect read is read-only;
+their guarantees live with the swarm skill's batch reference.
 
 Choose read or full from the current task's existing authority on EVERY run/continue.
 Category is metadata, no mode is inherited, and the user need not approve work again.

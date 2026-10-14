@@ -63,7 +63,16 @@ required items still mean partial.
 
 ```sh
 node ENTRY batch --config CONFIG --manifest BATCH_FILE --concurrency 2
+node ENTRY batch --config CONFIG --manifest BATCH_FILE --start-handle HANDLE --compact
 ```
+
+Passing `--start-handle FILE` makes the runner write this batch's machine handle
+(`batch_id` and index location) after the initial index exists and before any child
+launches; a failed handle write aborts the batch before launch. The coordinator can then
+address that batch directly instead of scanning the private state directory for a batch id.
+The handle is an identity pointer, not a progress signal: there is still no per-item
+wakeup. `--compact` turns the terminal stdout into a bounded paged response; the default
+full terminal receipt is unaffected.
 
 The coordinator generates a cwr.acp.batch-manifest/1 manifest. Each item has a stable id,
 run or continue verb, order location, explicit permissions, relevant cwd/session and shared
@@ -136,6 +145,8 @@ access from that metadata. The operator must independently check the output dire
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
 node ENTRY collect --config CONFIG --batch BATCH_ID
+node ENTRY collect --config CONFIG --batch BATCH_ID --compact [--limit N] [--max-bytes N] [--cursor TOKEN]
+node ENTRY collect --config CONFIG --batch BATCH_ID --job JOB_ID
 ```
 
 This minimal spec is synthetic; actual content is authored from the real goal, and the
@@ -152,18 +163,43 @@ mechanical step never invents scope, permissions or acceptance criteria.
 }
 ```
 
-Every result is published into the batch's durable index as it settles; `collect` is a
-read-only view of that index, returning the batch status, the full size, captured handles,
-settled results, the outstanding count and the per-item records SO FAR — without waiting,
-without loading an adapter, and with no per-item wakeup: the coordinator reads it between
-its host's own waits. A corrupted or unknown index is an explicit error, never a fabricated
-pass. Each settled record carries two coordination aids:
+Every result is published into the batch's durable index as it settles. `collect` is a
+read-only view of that index — without waiting, without loading an adapter, and with no
+per-item wakeup: the coordinator reads it between its host's own waits. A corrupted or
+unknown index is an explicit error, never a fabricated pass. Plain `collect` returns the
+full stored records (the compatibility view) and is not subject to the compact budget;
+routine coordination uses `--compact` instead.
+
+`--compact` returns a bounded paged response: the WHOLE response (metadata, cursor, items
+and the trailing newline) is held under a UTF-8 byte budget, default 32 KiB, minimum 8 KiB,
+maximum 256 KiB, with an item limit default 8 and maximum 32. It reports the batch status,
+total, captured handles, settled count, outstanding count, a `page` summary (`has_more`,
+`limited_by`), an `unresolved` classification (recorded-handle unsettled items, `awaiting_handle`, and truly
+missing kept separate), a `next_cursor` and per-item records. When a rich item cannot fit,
+only optional detail is reduced and named in `omitted_fields`; even minimal detail retains
+provenance and criterion/check counts. When results remain, a successful page includes at
+least one locatable item or returns an explicit insufficient-budget error. The full
+questions, artifacts and checks never enter the compact page: `collect --job JOB_ID` expands
+one settled result in full from the index, and `delivery --session UUID --request
+REQUEST_ID` expands the per-request sidecar.
+
+The cursor is an opaque token naming this batch, revision and offset; it is validated strictly
+for shape, canonical encoding, batch, range and revision, and it is not an authenticity tag.
+`awaiting_handle` can mean pending admission or startup, not absence of a child; a recorded
+handle proves locks held, not prompt acknowledgement. Nothing changed since the cursor re-sends no results; new appends are read incrementally. A
+same-id update (late settlement or reconciliation) is replayed from the earliest changed item
+onward, which may repeat unchanged successors, so the coordinator merges by id and each
+item’s `rev` (response `revision` for legacy `rev:null`), rather than treating the cursor as a strict event
+delta or a zero-duplication guarantee. Each settled record carries two coordination aids:
+
+`--job` is an unbounded full expansion and cannot be combined with `--compact`, `--cursor`, `--limit`, or `--max-bytes`; conflicting views fail before reading the index.
 
 - `delivery_excerpt`: a bounded verbatim projection of the worker-reported delivery
   (`source:"worker_reported"`) — the summary with its truncation marker, criterion totals
-  with the unsatisfied list, check totals with failing names, and the first few questions.
-  The program adds no semantic judgment; worker declarations stay separate from
-  runner-observed facts.
+  with the unsatisfied list, check totals with failing names, a severity-ordered handful of
+  `name/state/detail` short evidence, the first few questions, and explicit omission counts.
+  The program adds no semantic judgment; `worker_reported` is never a verified fact, and
+  worker declarations stay separate from runner-observed facts.
 - `next_actions`: runner-generated hints based on trusted runtime/handle facts and attributed
   worker-reported delivery status. answer_questions uses the reported needs_input and
   questions; it does not independently verify the blocker. Hints use a fixed

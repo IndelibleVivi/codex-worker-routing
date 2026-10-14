@@ -65,8 +65,11 @@ rejected; no separate acpx queue is rebuilt.
 ## Files
 
 0.3 adds actual assembly of the shared worker contract, optional delivery sidecars,
-finite batches and task-scoped acceptance helpers. See [Worker delivery and finite
-batches](worker-delivery.en.md) for operations and evidence boundaries. Ordinary
+finite batches and task-scoped acceptance helpers; 0.4.2 closes the batch consumption
+interface: `--start-handle` publishes the batch identity before launch, plain `batch`/
+`collect` keep the complete legacy returns, and the optional `--compact` pages a bounded
+read while `collect --job` expands one full record from the index. See [Worker delivery and
+finite batches](worker-delivery.en.md) for operations and evidence boundaries. Ordinary
 single responsibilities keep the commands below without a report schema or Dispatch.
 Historical acceptance sections retain their respective dates and versions.
 
@@ -79,8 +82,8 @@ Historical acceptance sections retain their respective dates and versions.
   file-type checks.
 - `src/delivery.mjs`: bounded delivery collection and identity validation; reports
   remain separate from runtime facts.
-- `src/batch.mjs`: finite independent CLI subprocesses, batch-local admission and
-  coverage of actual results.
+- `src/batch.mjs`: finite independent CLI subprocesses, batch-local admission, a pre-launch
+  batch handle and a byte-bounded compact read; the complete legacy terminal stays the default.
 - `src/verify.mjs`: coordinator-confirmed argv checks, task environments, budgets and
   evidence freshness; it never executes commands from a report.
 - `test/*.test.mjs`: integration-layer tests that run without dependencies; the runtime

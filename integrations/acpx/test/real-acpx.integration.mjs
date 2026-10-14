@@ -270,6 +270,9 @@ test('REAL acpx: batch runs two independent jobs as real subprocesses with handl
   assert.equal(j.delivery_excerpt.source,'worker_reported');
   assert.equal(j.delivery_excerpt.summary,'synthetic delivery');
   assert.equal(j.delivery_excerpt.summary_truncated,false);
+  // The DEFAULT terminal keeps the full legacy receipt: no field is dropped.
+  assert.ok(Array.isArray(j.delivery_questions),'legacy delivery_questions is preserved');
+  assert.ok(Array.isArray(j.artifact_references),'legacy artifact_references is preserved');
   assert.deepEqual(j.next_actions,[]);
  }
  // The durable index reached its terminal status with the same projection…
@@ -287,6 +290,23 @@ test('REAL acpx: batch runs two independent jobs as real subprocesses with handl
  assert.equal(collected.receipt.settled,2);
  assert.equal(collected.receipt.outstanding,0);
  assert.equal(collected.receipt.results.find(r=>r.id==='a').delivery_excerpt.summary,'synthetic delivery');
+ // The OPTIONAL compact terminal stays within its whole-response byte budget,
+ // carries the batch metadata, and its cursor continues through the read verb.
+ const budget=8192;
+ const compactRun=await command(f,'batch',['--manifest',manifest,'--compact','--limit','1','--max-bytes',String(budget)]);
+ assert.equal(compactRun.code,0,compactRun.stderr);
+ assert.ok(Buffer.byteLength(compactRun.stdout)<=budget,`compact terminal ${Buffer.byteLength(compactRun.stdout)} must fit ${budget}`);
+ assert.equal(compactRun.receipt.schema,'cwr.acp.batch-collect-compact/1');
+ assert.equal(compactRun.receipt.status,'complete');
+ assert.equal(compactRun.receipt.items.length,1,'the compact terminal returns at least one locatable item');
+ assert.equal(compactRun.receipt.page.has_more,true);
+ assert.equal(compactRun.receipt.page.limited_by,'limit');
+ assert.ok(compactRun.receipt.batch.index_path.endsWith('index.json'));
+ const cont=await command(f,'collect',['--batch',compactRun.receipt.batch_id,'--compact','--limit','8','--cursor',compactRun.receipt.next_cursor]);
+ assert.equal(cont.code,0,cont.stderr);
+ const ids=new Set(compactRun.receipt.items.map(i=>i.id));
+ for(const it of cont.receipt.items)ids.add(it.id);
+ assert.deepEqual([...ids].sort(),['a','b'],'the continuation page reaches the remaining job');
 });
 
 // Runs only on windows-latest. The unit contract double cannot prove that the
@@ -339,4 +359,71 @@ test('REAL batch: a parent cancellation reaches its child through the canonical 
  assert.equal(audit.filter(e=>e.method==='session/prompt').length,1);
  assert.ok(audit.some(e=>e.method==='session/cancel'));
  assert.equal(result.receipt.jobs[0].start_handle.phase,'locks_held');
+});
+
+// Two batches coexist through the REAL CLI. Each publishes its own start handle
+// after the initial index and before any launch, so a caller reads the batch id
+// from the handle instead of scanning the private state root. A fast item must be
+// collectable through the public compact read while a slow sibling is still
+// running, and neither batch may re-read the other's jobs.
+test('REAL acpx: two coexisting batches publish start handles and collect without cross-recognition', async t => {
+ const f=await ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:60000}));
+ const cwdSlow=path.join(f.root,'ws-slow'),cwdSolo=path.join(f.root,'ws-solo');
+ await fs.mkdir(cwdSlow,{mode:0o700});await fs.mkdir(cwdSolo,{mode:0o700});
+ const orderSlow=path.join(f.root,'order-slow.md');await fs.writeFile(orderSlow,'FIXTURE_PROGRESS_ONLY');
+ const orderSolo=path.join(f.root,'order-solo.md');await fs.writeFile(orderSolo,'Second independent batch job.');
+ // Three disjoint workspaces and three disjoint worker homes: the batches share
+ // no cwd, session lock or HOME, so their coexistence is a real concurrency, not
+ // a serialized accident.
+ f.raw.routes.worker.workspaces=[f.cwd,cwdSlow,cwdSolo];
+ f.raw.routes.backup={...f.raw.routes.worker,workerHome:path.join(f.root,'backup-home')};
+ f.raw.routes.solo={...f.raw.routes.worker,workerHome:path.join(f.root,'solo-home')};
+ await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ const handleA=path.join(f.root,'a.handle.json'),handleB=path.join(f.root,'b.handle.json');
+ const manifestA=path.join(f.root,'batch-a.json');
+ await fs.writeFile(manifestA,JSON.stringify({schema:'cwr.acp.batch-manifest/1',maxConcurrency:2,jobs:[
+  {id:'fast',verb:'run',route:'worker',cwd:f.cwd,file:f.orderFile,permissions:'read'},
+  {id:'slow',verb:'run',route:'backup',cwd:cwdSlow,file:orderSlow,permissions:'read',deliver:false},
+ ]}));
+ const manifestB=path.join(f.root,'batch-b.json');
+ await fs.writeFile(manifestB,JSON.stringify({schema:'cwr.acp.batch-manifest/1',jobs:[
+  {id:'solo',verb:'run',route:'solo',cwd:cwdSolo,file:orderSolo,permissions:'read'},
+ ]}));
+ // Start BOTH real CLI batches without awaiting. Each must publish its handle
+ // BEFORE it launches anything.
+ const runA=start(f,'batch',['--manifest',manifestA,'--start-handle',handleA]);
+ const runB=start(f,'batch',['--manifest',manifestB,'--start-handle',handleB]);
+ const readHandle=async file=>{try{return JSON.parse(await fs.readFile(file,'utf8'))}catch{return null}};
+ const hA=await until(async()=>{const h=await readHandle(handleA);return h&&h.schema==='cwr.acp.batch-handle/1'?h:null},'batch A must publish its start handle');
+ const hB=await until(async()=>{const h=await readHandle(handleB);return h&&h.schema==='cwr.acp.batch-handle/1'?h:null},'batch B must publish its start handle');
+ assert.notEqual(hA.batch_id,hB.batch_id,'coexisting batches have distinct ids');
+ assert.ok(hA.index_path&&hB.index_path,'each handle locates its own durable index');
+ // The fast item settles while the slow sibling is still running. The compact
+ // read is the public, bounded coordination path.
+ const mid=await until(async()=>{
+  const r=await command(f,'collect',['--batch',hA.batch_id,'--compact','--limit','8']);
+  if(r.code!==0)return null;
+  const resp=r.receipt;
+  return resp.items.some(i=>i.id==='fast')&&resp.unresolved.running.includes('slow')?resp:null;
+ },'the fast item must be collectable while the slow item still runs',25000);
+ assert.equal(mid.batch_id,hA.batch_id);
+ assert.equal(mid.status,'running');
+ assert.ok(mid.items.every(i=>i.id==='fast'),'batch A returns only its own settled jobs');
+ assert.ok(!JSON.stringify(mid).includes(hB.batch_id),'batch A never references batch B');
+ assert.ok(!JSON.stringify(mid).includes('solo'),'batch A never leaks batch B job ids');
+ // Batch B, running independently, serves only its own job.
+ const bDone=await runB.done;
+ assert.equal(bDone.code,0,bDone.stderr);
+ assert.equal(bDone.receipt.batch_id,hB.batch_id);
+ const bCollected=await command(f,'collect',['--batch',hB.batch_id,'--compact']);
+ assert.equal(bCollected.code,0,bCollected.stderr);
+ assert.ok(bCollected.receipt.items.some(i=>i.id==='solo'));
+ assert.ok(bCollected.receipt.items.every(i=>i.id==='solo'),'batch B returns only its own job');
+ assert.ok(!JSON.stringify(bCollected.receipt).includes(hA.batch_id),'batch B never references batch A');
+ // Stop batch A through the real parent signal; it settles and reports partial.
+ runA.child.kill('SIGTERM');
+ const aDone=await runA.done;
+ assert.equal(aDone.receipt?.status,'partial');
+ assert.equal(aDone.receipt?.cancelled,true);
+ assert.ok(aDone.receipt.jobs.every(j=>['fast','slow'].includes(j.id)),'batch A only ever owns its own jobs');
 });

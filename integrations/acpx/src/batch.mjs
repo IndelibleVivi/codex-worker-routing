@@ -19,14 +19,35 @@ const MANIFEST_SCHEMA = 'cwr.acp.batch-manifest/1';
 const BATCH_SCHEMA = 'cwr.acp.batch/1';
 const INDEX_SCHEMA = 'cwr.acp.batch-index/1';
 const HANDLE_SCHEMA = 'cwr.acp.start-handle/1';
+// Initial, machine-readable batch handle: a caller gets the batch id and the
+// durable index location as soon as the initial index exists, BEFORE any child
+// launches, instead of scraping the state root for a directory name.
+const BATCH_HANDLE_SCHEMA = 'cwr.acp.batch-handle/1';
+const COMPACT_SCHEMA = 'cwr.acp.batch-collect-compact/1';
 const JOB_KEYS = ['id', 'verb', 'route', 'cwd', 'file', 'permissions', 'title', 'category', 'session', 'resources', 'deliver', 'sharedHomeValidation'];
 const MAX_JOBS = 32;
 const MAX_CONCURRENCY = 8;
 const MAX_CHILD_OUTPUT = 256 * 1024;
 const SETTLE_MS = 5000;
+const MAX_INDEX_BYTES = 16 * 1024 * 1024;
+// Whole-response UTF-8 budget and item limit for the compact coordination read.
+// A caller may choose either within these bounds; the response never silently
+// exceeds the byte budget, and pagination covers every remaining settled item.
+const COMPACT_DEFAULT_BYTES = 32 * 1024;
+const COMPACT_MIN_BYTES = 8 * 1024;
+const COMPACT_MAX_BYTES = 256 * 1024;
+const COMPACT_DEFAULT_LIMIT = 8;
+const NOTABLE_CHECKS = 6;
+const EXCERPT_ARTIFACTS = 6;
 const UUID_RE = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const RESOURCE_RE = /^[A-Za-z0-9._:-]{1,120}$/;
+function validateCompactLimits(limit, maxBytes) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_JOBS)
+    throw new Fault('BAD_LIMIT', `--limit must be an integer 1..${MAX_JOBS}.`);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < COMPACT_MIN_BYTES || maxBytes > COMPACT_MAX_BYTES)
+    throw new Fault('BAD_BUDGET', `--max-bytes must be an integer between ${COMPACT_MIN_BYTES} and ${COMPACT_MAX_BYTES}.`);
+}
 // OS variables a launched CLI needs to start on each platform (no credentials).
 const OS_ENV_POSIX = ['PATH', 'LANG'];
 const OS_ENV_WIN = ['PATH', 'SystemRoot', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP', 'windir'];
@@ -199,27 +220,161 @@ function parseReceipt(stdout) {
 // can be read without opening every sidecar. It is a verbatim, clipped
 // projection: the program adds no semantic judgment, and the source marker
 // keeps worker declarations distinct from runner-observed facts.
-const clipText = (s, n) => (typeof s === 'string' && s.length > n ? { text: s.slice(0, n), truncated: true } : { text: s ?? '', truncated: false });
+// Clip on WHOLE code points, so a bounded excerpt never ends in a broken
+// surrogate and the retained prefix stays readable.
+const clipText = (s, n) => {
+  if (typeof s !== 'string') return { text: s ?? '', truncated: false };
+  const chars = [...s];
+  return chars.length > n ? { text: chars.slice(0, n).join(''), truncated: true } : { text: s, truncated: false };
+};
+// Severity order for the short-evidence list: problems first, so a clipped
+// projection never hides a failure behind a passing check.
+const CHECK_RANK = { failed: 0, blocked: 1, stale: 2, not_checked: 3, passed: 4 };
 export function deliveryExcerpt(block) {
   if (!block) return null;
   const summary = clipText(block.summary, 400);
-  const unsatisfied = (block.criteria ?? []).filter(c => c.state === 'unsatisfied');
+  const criteria = block.criteria ?? [];
+  const checks = block.checks ?? [];
+  const questions = block.questions ?? [];
+  const unsatisfied = criteria.filter(c => c.state === 'unsatisfied');
   const byState = {};
-  for (const c of block.checks ?? []) byState[c.state] = (byState[c.state] ?? 0) + 1;
+  for (const c of checks) byState[c.state] = (byState[c.state] ?? 0) + 1;
+  const failing = checks.filter(c => c.state === 'failed' || c.state === 'blocked');
+  // Short per-check evidence (name/state/detail) so a coordinator sees WHAT
+  // failed and why, not only a count. Ordered by severity then original order.
+  const ordered = checks.map((c, i) => ({ c, i }))
+    .sort((a, b) => (CHECK_RANK[a.c.state] ?? 9) - (CHECK_RANK[b.c.state] ?? 9) || a.i - b.i)
+    .map(x => x.c);
+  const evidence = ordered.slice(0, NOTABLE_CHECKS).map(c => {
+    const name = clipText(c.name, 120), detail = clipText(c.detail, 200);
+    return { name: name.text, name_truncated: name.truncated, state: c.state, detail: detail.text, detail_truncated: detail.truncated };
+  });
   return {
     source: 'worker_reported',
     summary: summary.text, summary_truncated: summary.truncated,
     criteria: {
-      total: (block.criteria ?? []).length, unsatisfied: unsatisfied.length,
+      total: criteria.length, unsatisfied: unsatisfied.length,
       unsatisfied_list: unsatisfied.slice(0, 8).map(c => clipText(c.criterion, 160).text),
+      unsatisfied_truncated: unsatisfied.slice(0, 8).map(c => clipText(c.criterion, 160).truncated),
     },
     checks: {
-      total: (block.checks ?? []).length, by_state: byState,
-      failing: (block.checks ?? []).filter(c => c.state === 'failed' || c.state === 'blocked').slice(0, 8).map(c => clipText(c.name, 100).text),
+      total: checks.length, by_state: byState,
+      failing: failing.slice(0, 8).map(c => clipText(c.name, 100).text),
+      failing_truncated: failing.slice(0, 8).map(c => clipText(c.name, 100).truncated),
+      evidence,
     },
-    questions: (block.questions ?? []).slice(0, 4).map(q => clipText(q, 300).text),
-    questions_total: (block.questions ?? []).length,
+    questions: questions.slice(0, 4).map(q => clipText(q, 300).text),
+    questions_truncated: questions.slice(0, 4).map(q => clipText(q, 300).truncated),
+    questions_total: questions.length,
+    // Explicit omission accounting: a clipped projection never silently drops
+    // decision-relevant evidence without a visible count, and text truncation
+    // is already marked on each clipped field.
+    omitted: {
+      criteria_unsatisfied: Math.max(0, unsatisfied.length - 8),
+      checks_failing: Math.max(0, failing.length - 8),
+      checks_evidence: Math.max(0, checks.length - NOTABLE_CHECKS),
+      questions: Math.max(0, questions.length - 4),
+    },
   };
+}
+
+// Bounded runner-observed projection of collected artifact references. Full
+// artifact records and notes stay in the durable index/sidecar; this keeps only
+// counts, status and a few clipped refs so a coordination read stays small.
+function summarizeArtifacts(refs) {
+  if (!Array.isArray(refs)) return null;
+  const byObserved = {};
+  for (const a of refs) {
+    const status = a?.observed?.status ?? 'unknown';
+    byObserved[status] = (byObserved[status] ?? 0) + 1;
+  }
+  const notable = refs.slice(0, EXCERPT_ARTIFACTS).map(a => {
+    const ref = clipText(a?.ref, 200), note = clipText(a?.note, 120);
+    return {
+      kind: a?.kind ?? null, ref: ref.text, ref_truncated: ref.truncated,
+      note: note.text, note_truncated: note.truncated,
+      observed: a?.observed?.status ?? 'unknown',
+    };
+  });
+  return { total: refs.length, by_observed: byObserved, notable, omitted: Math.max(0, refs.length - EXCERPT_ARTIFACTS) };
+}
+// Counts/status only (no refs or notes): used by the reduced and minimal tiers.
+function countArtifacts(refs) {
+  if (!Array.isArray(refs)) return null;
+  const byObserved = {};
+  for (const a of refs) {
+    const status = a?.observed?.status ?? 'unknown';
+    byObserved[status] = (byObserved[status] ?? 0) + 1;
+  }
+  return { total: refs.length, by_observed: byObserved };
+}
+// `reduced`: keep the clipped summary, the criterion/check totals and every
+// omission count, but drop the optional evidence text and NAME every dropped
+// field, so a budget-driven reduction is never a silent loss.
+function reduceExcerpt(excerpt) {
+  if (!excerpt) return null;
+  return {
+    source: excerpt.source,
+    summary: excerpt.summary, summary_truncated: excerpt.summary_truncated,
+    criteria: { total: excerpt.criteria?.total ?? 0, unsatisfied: excerpt.criteria?.unsatisfied ?? 0 },
+    checks: { total: excerpt.checks?.total ?? 0, by_state: excerpt.checks?.by_state ?? {} },
+    questions_total: excerpt.questions_total ?? 0,
+    omitted: excerpt.omitted ?? {},
+    omitted_fields: ['criteria.unsatisfied_list', 'checks.failing', 'checks.evidence', 'questions', 'artifacts.notable'],
+  };
+}
+
+// A bounded, serializable projection of one settled result for the budgeted
+// compact read. `detail` trades optional evidence text for bytes while ALWAYS
+// keeping the source marker, status, counts and expansion identity:
+//   full    -> short per-check/question/artifact evidence
+//   reduced -> clipped summary + counts, with omitted fields named
+//   minimal -> identity + status + provenance/counts, all optional text omitted
+// The default batch terminal never uses this projection: it keeps the full
+// legacy result records so existing consumers do not lose any field.
+export function projectResult(result, { detail = 'full' } = {}) {
+  const startHandle = isPlain(result.start_handle)
+    ? { session_id: result.start_handle.session_id ?? null, request_id: result.start_handle.request_id ?? null, phase: result.start_handle.phase ?? null }
+    : null;
+  const artifacts = Array.isArray(result.artifact_references) ? result.artifact_references : null;
+  const base = {
+    id: result.id,
+    rev: Number.isSafeInteger(result.rev) ? result.rev : null,
+    session_id: result.session_id ?? null,
+    request_id: result.request_id ?? null,
+    route: result.route ?? null,
+    start_handle: startHandle,
+    handle_mismatch: result.handle_mismatch === true,
+    runtime_status: result.runtime_status ?? null,
+    cleanup: result.cleanup ?? null,
+    receipt_path: result.receipt_path ?? null,
+    exit_code: result.exit_code ?? null,
+    output_received: result.output_received === true,
+    output_truncated: result.output_truncated === true,
+    stderr_truncated: result.stderr_truncated === true,
+    error_code: result.error_code ?? null,
+    delivery_status: result.delivery_status ?? null,
+    delivery_problem: result.delivery_problem ?? null,
+    delivery_questions_total: Array.isArray(result.delivery_questions) ? result.delivery_questions.length : null,
+    next_actions: Array.isArray(result.next_actions) ? result.next_actions : [],
+    // Identity a coordinator uses to expand the FULL content through the public
+    // CLI (index record / per-request sidecar) without re-reading the state root.
+    expand: { job: result.id, session_id: result.session_id ?? null, request_id: result.request_id ?? null },
+  };
+  // A locatable recovery clue when no trusted handle was captured at all.
+  if (typeof result.handle_file === 'string') base.handle_file = result.handle_file;
+  if (detail === 'minimal') {
+    const excerpt = reduceExcerpt(result.delivery_excerpt);
+    if (excerpt) {
+      delete excerpt.summary;
+      delete excerpt.summary_truncated;
+      excerpt.omitted_fields = ['summary', ...excerpt.omitted_fields];
+    }
+    return { ...base, detail: 'minimal', delivery_excerpt: excerpt, artifacts: countArtifacts(artifacts) };
+  }
+  if (detail === 'reduced')
+    return { ...base, detail: 'reduced', delivery_excerpt: reduceExcerpt(result.delivery_excerpt), artifacts: countArtifacts(artifacts) };
+  return { ...base, detail: 'full', delivery_excerpt: result.delivery_excerpt ?? null, artifacts: summarizeArtifacts(artifacts) };
 }
 
 // Candidate next actions combine trusted runtime/handle facts with attributed
@@ -266,6 +421,13 @@ async function captureHandle(handleFile) {
  * for tests. Returns an exit code; prints the batch JSON via `output`.
  */
 export async function runBatch({ config, opt, deps = {}, output, text, cliPath }) {
+  // Consumer options must fail before any adapter/workspace mutation, rather
+  // than after an otherwise authorized batch has already executed its jobs.
+  const compactOptions = opt?.compact ? {
+    limit: opt.limit === undefined ? COMPACT_DEFAULT_LIMIT : Number(opt.limit),
+    maxBytes: opt['max-bytes'] === undefined ? COMPACT_DEFAULT_BYTES : Number(opt['max-bytes']),
+  } : null;
+  if (compactOptions) validateCompactLimits(compactOptions.limit, compactOptions.maxBytes);
   const loadConfigImpl = deps.loadConfig ?? loadConfig;
   const full = await loadConfigImpl(config.configPath);
   const rawManifest = await readJSON(path.resolve(opt.manifest), { privateFile: false, maxBytes: 256 * 1024 });
@@ -310,6 +472,18 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   const handles = new Map();
   const heldKeys = new Set();
   const order = [...prepared];
+  // The full planned id list is published with the initial index so a reader can
+  // distinguish settled / recorded-handle / awaiting-handle / genuinely-missing
+  // without scanning the state root. `indexRevision` counts result publications
+  // and is the monotonic basis for the compact-read cursor.
+  const plannedIds = prepared.map(p => p.job.id);
+  let indexRevision = 0;
+  // `rev` records the publication revision on EACH result, so a reader can tell
+  // an APPEND from an in-place UPDATE of an existing job (late settlement /
+  // reconciliation). Without it a same-id replacement would grow the revision
+  // while leaving results.length unchanged, and a cursor already past that item
+  // would silently miss the change.
+  const setResult = (id, record) => { indexRevision += 1; results.set(id, { ...record, rev: indexRevision }); };
   const spawn = deps.spawnJob ?? spawnJob;
   let cancelled = false;
   // A mid-batch admission failure (config reload throws, spawn refuses) closes
@@ -317,17 +491,39 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   // settles, and the batch still reports every result it already owns.
   let admissionError = null;
   let indexWarning = null, indexQueue = Promise.resolve(), indexStatus = 'running';
-  const writeIndex = status => {
+  let indexMissing = null;
+  const startedAt = new Date().toISOString();
+  const writeIndex = (status, extra = {}) => {
     if (status !== 'running') indexStatus = status;
-    const next = indexQueue.then(() => atomicJSON(path.join(indexDir, 'index.json'), {
-      schema: INDEX_SCHEMA, batch_id: batchId, status: indexStatus, total: prepared.length,
+    const record = {
+      schema: INDEX_SCHEMA, batch_id: batchId, status: indexStatus, revision: indexRevision,
+      started_at: startedAt, total: prepared.length, planned: plannedIds,
       jobs: [...handles.entries()].map(([id, start_handle]) => ({ id, start_handle })),
       results: [...results.values()],
-    }));
+    };
+    if (indexStatus !== 'running') record.missing = extra.missing ?? indexMissing ?? [];
+    const next = indexQueue.then(() => atomicJSON(path.join(indexDir, 'index.json'), record));
     indexQueue = next.catch(e => { indexWarning = e.code ?? 'INDEX_WRITE_FAILED'; cancelled = true; });
     return next;
   };
   await writeIndex('running');
+  // Publish the initial machine handle AFTER the initial index exists and BEFORE
+  // any child launches. A caller no longer has to guess the batch id from the
+  // state directory. Failure to write it aborts the batch before any launch
+  // (fail closed): a batch a caller cannot address must not start work.
+  if (opt?.['start-handle'] !== undefined) {
+    try {
+      await atomicJSON(path.resolve(opt['start-handle']), {
+        schema: BATCH_HANDLE_SCHEMA, batch_id: batchId, status: 'running',
+        total: prepared.length, started_at: startedAt,
+        index_path: path.join(indexDir, 'index.json'),
+      });
+    } catch (error) {
+      // No child exists, and the owned index must not remain falsely running.
+      await writeIndex('partial', { missing: plannedIds }).catch(() => {});
+      throw error;
+    }
+  }
   let interrupt;
   const interrupted = new Promise(resolve => { interrupt = resolve; });
   const stopped = Symbol('batch interrupted');
@@ -358,7 +554,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           else if (delivery.worker?.status === 'missing') deliveryProblem = 'DELIVERY_MISSING_BLOCK';
         } catch (e) { deliveryProblem = e.code === 'CORRUPT_DELIVERY' ? 'DELIVERY_CORRUPT' : 'DELIVERY_UNREADABLE'; }
       }
-      results.set(record.id, {
+      setResult(record.id, {
         id: record.id,
         session_id: receipt?.session_id ?? startHandle?.session_id ?? record.entry.job.session ?? null,
         request_id: receipt?.request_id ?? startHandle?.request_id ?? null,
@@ -412,7 +608,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           // error for this admission, not a pre-launch validation failure. Record
           // it, close admission, and settle what is already running below.
           admissionError = { job: entry.job.id, code: e.code ?? 'CONFIG_RELOAD_FAILED' };
-          results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
+          setResult(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
           break;
         }
         // Cancellation or an index publication failure may have landed during the
@@ -420,7 +616,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
         // The unlaunched job keeps no fabricated result, so it lands in `missing`.
         if (cancelled) break;
         if (fresh.stateDir !== full.stateDir || JSON.stringify(fresh.routes[entry.targets.routeName]) !== JSON.stringify(entry.targets.route)) {
-          results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: 'CONFIG_CHANGED', cleanup: null });
+          setResult(entry.job.id, { id: entry.job.id, output_received: false, error_code: 'CONFIG_CHANGED', cleanup: null });
           continue;
         }
         const expectedAdmission = digest({ stateDir: full.stateDir, routeName: entry.targets.routeName, route: entry.targets.route, cwd: entry.targets.cwd, permissions: entry.job.permissions });
@@ -430,7 +626,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           handle = spawn({ cliPath, configFile: config.configPath, stateDir: full.stateDir, expectedAdmission, job: entry.job, handleFile, env });
         } catch (e) {
           admissionError = { job: entry.job.id, code: e.code ?? 'SPAWN_FAILED' };
-          results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
+          setResult(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
           break;
         }
         const record = { id: entry.job.id, entry, handleFile, keys: entry.keys, handle };
@@ -484,7 +680,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
       if (!results.has(r.record.id)) {
         const observed = handles.get(r.record.id) ?? null;
         const trusted = Boolean(observed) && observed.cwd === r.record.entry.targets.cwd && observed.route === r.record.entry.targets.routeName;
-        results.set(r.record.id, {
+        setResult(r.record.id, {
           id: r.record.id,
           session_id: (trusted ? observed.session_id : null) ?? r.record.entry.job.session ?? null,
           request_id: trusted ? observed.request_id : null,
@@ -502,7 +698,6 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
     }
   }
 
-  const jobs = [...results.values()].sort((a, b) => a.id.localeCompare(b.id));
   // A missing REQUIRED result: no receipt, a handle mismatch, or a required
   // delivery problem. A failed/cancelled turn still produced an honest record.
   const missing = [];
@@ -512,35 +707,64 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
     if (!r || !r.output_received || !r.start_handle || r.handle_mismatch || (p.job.deliver && r.delivery_problem)) missing.push(id);
   }
   const status = cancelled || missing.length || indexWarning || admissionError ? 'partial' : 'complete';
+  // Default terminal stdout is the FULL legacy receipt: every result field,
+  // including delivery_questions and artifact_references, is preserved so
+  // existing consumers lose nothing. `batch --compact` opts into the bounded,
+  // paged terminal instead (`collectBatchCompact`-shaped), whose full content
+  // stays reachable by `collect --job` and `delivery --session/--request`.
+  const jobs = [...results.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const indexRecord = {
+    schema: INDEX_SCHEMA, batch_id: batchId, status, revision: indexRevision, started_at: startedAt,
+    total: prepared.length, planned: plannedIds,
+    jobs: [...handles.entries()].map(([id, start_handle]) => ({ id, start_handle })),
+    results: [...results.values()],
+    missing,
+  };
   const batch = {
     schema: BATCH_SCHEMA, batch_id: batchId, status, cancelled, concurrency,
     shared_home_validated: manifest.manifestValidated,
+    index_revision: indexRevision,
     job_count: prepared.length, missing, jobs,
     admission_scope: 'batch_local_only',
     index_path: path.join(indexDir, 'index.json'), index_warning: indexWarning,
     admission_error: admissionError,
   };
-  await writeIndex(status).catch(() => {});
+  indexMissing = missing;
+  await writeIndex(status, { missing }).catch(() => {});
   if (indexWarning) { batch.status = 'partial'; batch.index_warning = indexWarning; }
-  output(batch);
+  if (opt?.compact) {
+    indexRecord.status = batch.status;
+    // Explicit bounded terminal: a first compact page plus the batch metadata,
+    // still within the byte budget. The caller continues with `collect
+    // --compact --cursor <next_cursor>` instead of receiving the full dump.
+    output(buildCompactPage(indexRecord, {
+      batchId, ...compactOptions,
+      extra: {
+        cancelled: batch.cancelled, concurrency, shared_home_validated: manifest.manifestValidated,
+        admission_scope: 'batch_local_only', index_path: batch.index_path,
+        index_warning: indexWarning, admission_error: admissionError,
+      },
+    }));
+  } else {
+    output(batch);
+  }
   return batch.status === 'complete' ? 0 : 1;
 }
 
-export { MANIFEST_SCHEMA, BATCH_SCHEMA, INDEX_SCHEMA, HANDLE_SCHEMA };
+export {
+  MANIFEST_SCHEMA, BATCH_SCHEMA, INDEX_SCHEMA, HANDLE_SCHEMA, BATCH_HANDLE_SCHEMA, COMPACT_SCHEMA,
+  COMPACT_DEFAULT_BYTES, COMPACT_MIN_BYTES, COMPACT_MAX_BYTES, COMPACT_DEFAULT_LIMIT,
+};
 
 /**
- * Read-only view of one batch's durable index: the results settled SO FAR,
- * each already carrying its bounded delivery excerpt and candidate next
- * actions. It never loads an adapter, never waits, and never infers progress
- * beyond the recorded handles/results; there is no per-item wakeup — the
- * coordinator reads this between its host's own waits. A corrupted or foreign
- * index is an explicit error, never a fake pass.
+ * Read and shape-validate one batch's durable index. Shared by every read-only
+ * collect path so a corrupted or foreign index is always an explicit error.
  */
-export async function collectBatch({ config, batchId }) {
+async function loadBatchIndex(config, batchId) {
   if (typeof batchId !== 'string' || !UUID_RE.test(batchId)) throw new Fault('BAD_BATCH_ID', 'Expected a batch UUID returned by batch.');
   const file = path.join(config.stateDir, 'batches', batchId, 'index.json');
   let raw;
-  try { raw = await readJSON(file, { privateFile: true, maxBytes: 16 * 1024 * 1024 }); }
+  try { raw = await readJSON(file, { privateFile: true, maxBytes: MAX_INDEX_BYTES }); }
   catch (e) {
     if (e.code === 'ENOENT' || e.code === 'STATE_MISSING') throw new Fault('BATCH_NOT_FOUND', 'No batch index with that id exists in the state root.');
     throw e;
@@ -551,11 +775,196 @@ export async function collectBatch({ config, batchId }) {
     || raw.jobs.some(j => !isPlain(j) || typeof j.id !== 'string')
     || raw.results.some(r => !isPlain(r) || typeof r.id !== 'string'))
     throw new Fault('CORRUPT_INDEX', 'The stored batch index is invalid.');
+  return raw;
+}
+
+/**
+ * Read-only view of one batch's durable index: the results settled SO FAR,
+ * each already carrying its bounded delivery excerpt and candidate next
+ * actions. It never loads an adapter, never waits, and never infers progress
+ * beyond the recorded handles/results; there is no per-item wakeup — the
+ * coordinator reads this between its host's own waits. A corrupted or foreign
+ * index is an explicit error, never a fake pass. This is the FULL, unbounded
+ * compatibility view: it returns every stored result verbatim. Prefer
+ * `collectBatchCompact` for a bounded coordination read.
+ */
+export async function collectBatch({ config, batchId }) {
+  const raw = await loadBatchIndex(config, batchId);
   const total = Number.isSafeInteger(raw.total) ? raw.total : null;
   return {
     schema: 'cwr.acp.batch-collect/1', batch_id: batchId, status: raw.status, total,
+    revision: Number.isSafeInteger(raw.revision) ? raw.revision : raw.results.length,
     handles: raw.jobs.length, settled: raw.results.length,
     outstanding: total === null ? null : Math.max(0, total - raw.results.length),
     results: raw.results,
+  };
+}
+
+// The cursor is an opaque token carrying ONLY {v, b, r, o}: version, THIS
+// batch, the index revision it was issued at, and the result offset reached. It
+// is NOT an authenticity tag and carries no secret — it is validated strictly
+// for shape, canonical encoding and range, and a cursor naming another batch, an
+// out-of-range offset or a newer revision than this index is a hard rejection.
+const CURSOR_MAX_LENGTH = 4096;
+const encodeCursor = payload => Buffer.from(JSON.stringify({ v: payload.v, b: payload.b, r: payload.r, o: payload.o }), 'utf8').toString('base64url');
+function decodeCursor(token) {
+  if (typeof token !== 'string' || !token || token.length > CURSOR_MAX_LENGTH) throw new Fault('BAD_CURSOR', 'The cursor is not a batch cursor.');
+  let payload;
+  try { payload = JSON.parse(Buffer.from(token, 'base64url').toString('utf8')); }
+  catch { throw new Fault('BAD_CURSOR', 'The cursor is not a decodable batch cursor.'); }
+  if (!isPlain(payload) || Object.keys(payload).sort().join(',') !== 'b,o,r,v')
+    throw new Fault('BAD_CURSOR', 'The cursor has invalid or unexpected fields.');
+  if (payload.v !== 1) throw new Fault('BAD_CURSOR', 'The cursor version is not supported.');
+  if (typeof payload.b !== 'string' || !UUID_RE.test(payload.b)) throw new Fault('BAD_CURSOR', 'The cursor batch id is invalid.');
+  if (!Number.isSafeInteger(payload.r) || payload.r < 0 || !Number.isSafeInteger(payload.o) || payload.o < 0)
+    throw new Fault('BAD_CURSOR', 'The cursor fields are invalid.');
+  // A mangled/extra-padding base64 decode must not be accepted as the same
+  // cursor: require the canonical re-encoding to match exactly.
+  if (encodeCursor(payload) !== token) throw new Fault('BAD_CURSOR', 'The cursor encoding is not canonical.');
+  return payload;
+}
+// The revision a result carries; a legacy record without one is treated as 0 so
+// a changed revision forces a re-read instead of a silent miss.
+const resultRev = r => (Number.isSafeInteger(r?.rev) ? r.rev : 0);
+
+// Fresh classification of planned jobs that have NOT settled, so a compact read
+// never confuses an un-expanded page with still-running or genuinely-missing
+// work. Absence of a recorded handle can mean awaiting admission OR startup;
+// it never proves no child exists. Only a terminal index declares missing work.
+function unresolvedSummary(raw) {
+  const settled = new Set(raw.results.map(r => r.id));
+  const handleIds = new Set(raw.jobs.map(j => j.id));
+  const planned = Array.isArray(raw.planned) && raw.planned.length
+    ? raw.planned.filter(id => typeof id === 'string')
+    : [...new Set([...handleIds, ...settled])];
+  const running = [], awaitingHandle = [];
+  for (const id of planned) {
+    if (settled.has(id)) continue;
+    if (handleIds.has(id)) running.push(id); else awaitingHandle.push(id);
+  }
+  const terminal = raw.status !== 'running';
+  if (terminal) {
+    const missing = Array.isArray(raw.missing) ? raw.missing : [...running, ...awaitingHandle];
+    return { terminal, running: [], awaiting_handle: [], missing };
+  }
+  return { terminal, running, awaiting_handle: awaitingHandle, missing: [] };
+}
+
+const sizeOfJSON = obj => Buffer.byteLength(JSON.stringify(obj)) + 1;
+
+/**
+ * Build one bounded, paged compact page from an already-loaded batch index. The
+ * WHOLE response — metadata, cursor, unresolved classification and items — fits
+ * a UTF-8 byte budget and an item limit. It pages settled results by an opaque
+ * change cursor and always makes forward progress when a result remains: if the
+ * full short evidence does not fit the budget, the item is returned at a reduced
+ * detail tier (naming the omitted fields) rather than an empty page that would
+ * stall the caller. A revision change is re-delivered from the earliest changed
+ * item, so an in-place update of an existing job is never skipped. It never
+ * loads an adapter, never waits and never silently exceeds the budget.
+ */
+export function buildCompactPage(raw, { batchId, cursor = null, limit = COMPACT_DEFAULT_LIMIT, maxBytes = COMPACT_DEFAULT_BYTES, extra = null } = {}) {
+  validateCompactLimits(limit, maxBytes);
+  const results = raw.results;
+  const revision = Number.isSafeInteger(raw.revision)
+    ? raw.revision
+    : results.reduce((max, r) => Math.max(max, resultRev(r)), results.length);
+  let offset = 0;
+  if (cursor !== null && cursor !== undefined) {
+    const parsed = decodeCursor(cursor);
+    if (parsed.b !== batchId) throw new Fault('CROSS_BATCH_CURSOR', 'The cursor belongs to a different batch.');
+    if (parsed.r > revision) throw new Fault('FUTURE_CURSOR', 'The cursor revision is newer than this batch index.');
+    if (parsed.o > results.length) throw new Fault('CURSOR_OUT_OF_RANGE', 'The cursor position is outside the recorded results.');
+    offset = parsed.o;
+    // A revision change can be an APPEND or an in-place UPDATE of an existing
+    // job. Re-deliver from the earliest item changed after the cursor revision,
+    // so a cursor already past an updated item does not silently miss it. A
+    // record without a revision forces a re-read rather than a missed update.
+    if (parsed.r < revision) {
+      const firstChanged = results.findIndex(r => resultRev(r) > parsed.r);
+      offset = firstChanged === -1 ? 0 : Math.min(offset, firstChanged);
+    }
+  }
+  const total = Number.isSafeInteger(raw.total) ? raw.total : null;
+  const build = (items, limitedBy) => {
+    const nextOffset = offset + items.length;
+    const response = {
+      schema: COMPACT_SCHEMA, batch_id: batchId, status: raw.status, revision,
+      total, settled: results.length,
+      outstanding: total === null ? null : Math.max(0, total - results.length),
+      handles: raw.jobs.length,
+      offset, limit, changed: items.length > 0,
+      page: { returned: items.length, next_offset: nextOffset, has_more: nextOffset < results.length, limited_by: limitedBy },
+      omitted: { results: Math.max(0, results.length - nextOffset) },
+      next_cursor: encodeCursor({ v: 1, b: batchId, r: revision, o: nextOffset }),
+      unresolved: unresolvedSummary(raw),
+      items,
+      budget: { max_bytes: maxBytes, used_bytes: 0 },
+    };
+    if (extra) response.batch = extra;
+    // Converge the self-reported used_bytes on the real serialized size.
+    for (let i = 0; i < 6; i++) {
+      const size = sizeOfJSON(response);
+      if (response.budget.used_bytes === size) break;
+      response.budget.used_bytes = size;
+    }
+    return response;
+  };
+  const items = [];
+  let limitedBy = null;
+  for (let i = offset; i < results.length; i++) {
+    if (items.length >= limit) { limitedBy = 'limit'; break; }
+    // Try the richest tier first; fall back to richer->poorer so a single item
+    // still advances the page under the minimum budget.
+    let placed = false;
+    for (const detail of ['full', 'reduced', 'minimal']) {
+      const candidate = projectResult(results[i], { detail });
+      if (build([...items, candidate], 'budget').budget.used_bytes <= maxBytes) { items.push(candidate); placed = true; break; }
+    }
+    if (!placed) {
+      if (items.length === 0)
+        throw new Fault('BUDGET_TOO_SMALL', `--max-bytes ${maxBytes} cannot hold one locatable item for this batch; request at least ${COMPACT_MIN_BYTES}.`);
+      limitedBy = 'budget';
+      break;
+    }
+  }
+  const response = build(items, limitedBy);
+  // A single minimal item always fits COMPACT_MIN_BYTES; if a caller somehow
+  // asks for less, refuse rather than emit a silently over-budget response.
+  if (response.budget.used_bytes > maxBytes)
+    throw new Fault('BUDGET_TOO_SMALL', `--max-bytes ${maxBytes} cannot hold one locatable item for this batch; request at least ${COMPACT_MIN_BYTES}.`);
+  return response;
+}
+
+/**
+ * Read-only bounded, paged coordination read of one batch, loaded from its
+ * durable index. See `buildCompactPage` for the response guarantees.
+ */
+export async function collectBatchCompact({ config, batchId, cursor = null, limit = COMPACT_DEFAULT_LIMIT, maxBytes = COMPACT_DEFAULT_BYTES }) {
+  const raw = await loadBatchIndex(config, batchId);
+  return buildCompactPage(raw, { batchId, cursor, limit, maxBytes });
+}
+
+/**
+ * Expand ONE settled result in full by its manifest job id. The full questions
+ * and runner-observed artifact references live only in the durable index; this
+ * is the public way to read them without scanning the state root. The full
+ * delivery block (criteria/checks/artifacts/questions) is also readable through
+ * `delivery --session/--request`.
+ */
+export async function collectBatchJob({ config, batchId, jobId }) {
+  if (typeof jobId !== 'string' || !ID_RE.test(jobId)) throw new Fault('BAD_JOB_ID', 'Expected a manifest job id.');
+  const raw = await loadBatchIndex(config, batchId);
+  const job = raw.results.find(r => r.id === jobId);
+  if (!job) {
+    const planned = Array.isArray(raw.planned) && raw.planned.includes(jobId);
+    throw new Fault(planned ? 'JOB_NOT_SETTLED' : 'JOB_NOT_FOUND',
+      planned ? 'That job is planned but has not settled yet.' : 'No such job id exists in this batch.');
+  }
+  return {
+    schema: 'cwr.acp.batch-job/1', batch_id: batchId, status: raw.status,
+    revision: Number.isSafeInteger(raw.revision) ? raw.revision : raw.results.length,
+    total: Number.isSafeInteger(raw.total) ? raw.total : null,
+    settled: raw.results.length, job,
   };
 }

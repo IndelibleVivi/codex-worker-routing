@@ -23,7 +23,16 @@ plugin and its optional main-session context integration.
   native handoffs deliver the same body. Keep optional report schemas out of ordinary
   prompts. `delivery.mjs` owns bounded per-request collection; `batch.mjs` owns finite
   CLI subprocess admission and collection, local to one batch, publishing every settled
-  result into the durable index as it lands; `prepare.mjs` owns mechanical order-spec to
+  result into the durable index as it lands. Publish an optional batch start handle
+  after its initial index and before any child admission; a failed handle write must
+  leave no child and settle the owned index as partial. Preserve full batch/collect
+  consumers; compact views are explicit, whole-response UTF-8 budgets include metadata
+  and the stdout newline, and invalid consumer limits must fail before admission.
+  Keep result publication revisions, visible text clipping/detail omissions, cursor
+  validation and identity-based expansion together in `batch.mjs`. Cursor tokens are
+  read positions, not authentication or control authority; an updated early result
+  may replay unchanged later entries, so consumers merge by job id and revision.
+  `prepare.mjs` owns mechanical order-spec to
   orders+manifest assembly and launches nothing. The shared nonce
   cancellation writer lives in `state.mjs`; a start handle records
   locks held, not prompt acknowledgement. Check actual child admission against its

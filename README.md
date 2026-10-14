@@ -16,7 +16,7 @@
 
 ## 0.4 系列：这次改变什么
 
-当前源码版本为 0.4.1。调度由一个 instruction-only plugin 提供；可选 ACP integration 通过
+当前源码版本为 0.4.2。调度由一个 instruction-only plugin 提供；可选 ACP integration 通过
 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生 `SessionStart` hook
 自动加载本机私人说明。没有额外 MCP、job database、provider proxy 或固定 planner/tester/reviewer
 流水线。0.4 系列把重点从组件接线移到「一个能端到端背起整块责任」的 worker。
@@ -26,7 +26,7 @@
 | 完整责任 | 路由说明把实质工程目标视为足以识别一块完整、可委派责任；调查、实施、自检、自修与收尾都由 worker 负责。微小或 solo 工作仍直接完成。 |
 | 同一 worker 协助 | 需要一次判断或某项能力时，答复回到同一个 child，保留已接受的结果，不默认另派 reviewer，也不强制接管。 |
 | 有界交付 | `--deliver` 收集 worker 的结构化交付声明，与 runtime 回执及其有界文本摘录分开保存。 |
-| 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 对有限清单做 admission 并以独立 CLI 进程执行；`collect` 读取已结算结果，不必等其余项目。没有全局 scheduler 或 job database。 |
+| 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 对有限清单做 admission 并以独立 CLI 进程执行，`--start-handle` 在启动前给出本批 identity，`--compact` 给出有界分页终态；`collect`（含 `--compact`）读取已结算结果，`--job` 可展开单条完整记录，不必等其余项目。没有全局 scheduler 或 job database。 |
 | 证据边界 | worker 声明只是候选，不是验收；只有任务确认的检查会执行，绝不执行来自报告的指令。 |
 | ACP 持久授权 | 每次 run/continue 都重查显式每轮权限；恢复绑定确切的 session 与回执；已配置的备用只在启动前触发。 |
 
@@ -72,7 +72,9 @@ flowchart TD
 
 日常 `run` / `continue` / `close` 保持简单，每轮显式权限，不要求额外记录。复杂成果可选
 `--deliver`，有限独立清单可选 `batch`；`prepare` 机械生成 order 与 manifest 且不启动任何 worker，
-`collect` 只读并随时返回已结算结果。worker 声明为 `ready`、`partial` 或 `needs_input`，只是候选，
+`batch --start-handle` 在初始索引落盘后、启动任何子进程前给出本批 identity，不靠扫描 state 目录；
+`collect` 只读并随时返回已结算结果，`collect --compact` 提供整份受字节预算约束的分页读取，
+`collect --job` 按 job 展开索引里的完整记录。worker 声明为 `ready`、`partial` 或 `needs_input`，只是候选，
 不是验收；runtime 完成同样不是验收。完整接口见
 [Worker 交付与有限批次](docs/worker-delivery.md)。
 

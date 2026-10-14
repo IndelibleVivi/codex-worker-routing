@@ -68,16 +68,19 @@ model policy.
 
 Two coordination aids stay off the ordinary path. `prepare` turns one coordinator-authored
 spec into per-item orders and a manifest and launches no worker; `batch` admits the finite
-list and runs it as independent CLI subprocesses; `collect` reads the results already
-published to the durable index without waiting for the rest. Admission is local to one
-batch, so there is no global scheduler and no cross-entrypoint safety claim.
+list and runs it as independent CLI subprocesses, with `--start-handle` publishing the batch
+identity after the initial index exists and before any launch, and `--compact` giving a
+byte-bounded paged terminal; `collect` reads the results already published to the durable
+index without waiting for the rest, `--compact` pages a bounded read and `--job` expands one
+full record. Admission is local to one batch, so there is no global scheduler and no
+cross-entrypoint safety claim.
 
 ```mermaid
 flowchart LR
   Spec["One authored order spec"] -->|prepare| Man["Per-item orders + manifest<br/>launches no worker"]
   Man -->|batch admission| Jobs["Finite independent<br/>CLI subprocesses"]
   Jobs -->|settled as they land| Index["Durable batch index"]
-  Index -->|collect| Read["Read-only results<br/>settled so far"]
+  Index -->|collect<br/>compact/job| Read["Read-only results<br/>settled so far"]
   classDef coordinator fill:#edf2e5,stroke:#8fa77c,color:#51415f
   classDef worker fill:#faedf1,stroke:#c69eae,color:#51415f
   classDef evidence fill:#fffefa,stroke:#c1b3c9,color:#51415f

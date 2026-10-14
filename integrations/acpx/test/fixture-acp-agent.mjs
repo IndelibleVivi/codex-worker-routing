@@ -57,16 +57,26 @@ input.on('line',line=>{
  (async()=>{
   const q=JSON.parse(line);
   if(!q.method){const p=permissions.get(q.id);if(p){permissions.delete(q.id);p(q.result)}return}
+  // Register a parked prompt before the first awaited audit/store operation.
+  // The turn file can become observable while save() is still finalizing;
+  // cancel in that window must settle this request, not disappear.
+  const preparingText=q.method==='session/prompt'?(q.params?.prompt??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n'):'';
+  const preparing=preparingText.includes('FIXTURE_WAIT')||preparingText.includes('FIXTURE_PROGRESS_ONLY')
+   ?{id:q.id,params:q.params,timer:null,cancelStopReason:preparingText.includes('CANCEL_END_TURN')?'end_turn':'cancelled'}:null;
+  if(preparing)pending.set(q.params.sessionId,preparing);
   await fs.appendFile(audit,JSON.stringify({method:q.method,sessionId:q.params?.sessionId??null})+'\n',{mode:0o600});
   const {id,method,params={}}=q;
   if(method==='initialize')return reply(id,{protocolVersion:1,agentInfo:{name:'cwr-synthetic-fixture',version:'1'},agentCapabilities:{loadSession:true,promptCapabilities:{}},authMethods:[]});
   if(method==='session/new'){await reload();const sessionId=randomUUID();sessions[sessionId]={turn:0,cwd:params.cwd};dirty.add(sessionId);await save();return reply(id,{sessionId})}
   if(method==='session/load'){await reload();if(!sessions[params.sessionId])return fail(id,'Synthetic session no longer exists');return reply(id,{})}
   if(method==='session/prompt'){
-   await reload();const s=sessions[params.sessionId];if(!s)return fail(id,'Unknown synthetic session');
+   await reload();
+   if(inputClosed||(preparing&&pending.get(params.sessionId)!==preparing))return;
+   const s=sessions[params.sessionId];
+   if(!s){if(preparing)pending.delete(params.sessionId);return fail(id,'Unknown synthetic session')}
    const text=params.prompt.filter(p=>p.type==='text').map(p=>p.text).join('\n');
    s.turn++;dirty.add(params.sessionId);await save();
-   if(inputClosed)return;
+   if(inputClosed||(preparing&&pending.get(params.sessionId)!==preparing))return;
    if(text.includes('FIXTURE_PROGRESS_ONLY')){
     send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Synthetic progress, no final response.'}}}});
     // Deliberately no prompt response. Tests cancel through the real public
