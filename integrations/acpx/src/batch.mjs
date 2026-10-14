@@ -195,6 +195,62 @@ function parseReceipt(stdout) {
   catch { return null; }
 }
 
+// A bounded excerpt of the worker-declared delivery block, so a batch overview
+// can be read without opening every sidecar. It is a verbatim, clipped
+// projection: the program adds no semantic judgment, and the source marker
+// keeps worker declarations distinct from runner-observed facts.
+const clipText = (s, n) => (typeof s === 'string' && s.length > n ? { text: s.slice(0, n), truncated: true } : { text: s ?? '', truncated: false });
+export function deliveryExcerpt(block) {
+  if (!block) return null;
+  const summary = clipText(block.summary, 400);
+  const unsatisfied = (block.criteria ?? []).filter(c => c.state === 'unsatisfied');
+  const byState = {};
+  for (const c of block.checks ?? []) byState[c.state] = (byState[c.state] ?? 0) + 1;
+  return {
+    source: 'worker_reported',
+    summary: summary.text, summary_truncated: summary.truncated,
+    criteria: {
+      total: (block.criteria ?? []).length, unsatisfied: unsatisfied.length,
+      unsatisfied_list: unsatisfied.slice(0, 8).map(c => clipText(c.criterion, 160).text),
+    },
+    checks: {
+      total: (block.checks ?? []).length, by_state: byState,
+      failing: (block.checks ?? []).filter(c => c.state === 'failed' || c.state === 'blocked').slice(0, 8).map(c => clipText(c.name, 100).text),
+    },
+    questions: (block.questions ?? []).slice(0, 4).map(q => clipText(q, 300).text),
+    questions_total: (block.questions ?? []).length,
+  };
+}
+
+// Candidate next actions derived ONLY from trusted runner state (receipt,
+// handle identity, collection status). They are a fixed vocabulary of hints for
+// the coordinator — never commands, never worker text, never auto-executed.
+// A continue-class hint additionally requires a known session whose runtime is
+// terminal with confirmed cleanup and a matching handle.
+function nextActions({ receipt, startHandle, handleMatches, delivery, deliveryProblem, job }) {
+  const actions = [];
+  const session = receipt?.session_id ?? startHandle?.session_id ?? job.session ?? null;
+  const runtime = receipt?.runtime_status ?? null;
+  const cleanup = receipt?.cleanup ?? null;
+  if (!receipt) {
+    actions.push({ action: 'reconcile_session', session_id: session, reason: startHandle && !handleMatches ? 'start handle identity does not match this job' : 'no runtime receipt was collected' });
+    return actions;
+  }
+  if (runtime === 'failed' || runtime === 'cancelled')
+    actions.push({ action: 'inspect_receipt', session_id: session, receipt_path: receipt?.receipt_path ?? null, reason: `runtime ${runtime}` });
+  const continuable = Boolean(session) && runtime === 'completed' && cleanup === 'confirmed' && handleMatches;
+  // A report-format or absent-report problem calls for same-session report
+  // consolidation, never a replay of the completed work. Local collection
+  // faults (corrupt/unreadable sidecar) get no automatic hint: reconcile the
+  // state directory first.
+  const consolidatable = ['DELIVERY_MISSING', 'DELIVERY_MISSING_BLOCK', 'DELIVERY_MALFORMED', 'DELIVERY_OVERSIZED', 'DELIVERY_WRONG_IDENTITY'];
+  if (continuable && deliveryProblem && consolidatable.includes(deliveryProblem))
+    actions.push({ action: 'consolidate_report', session_id: session, reason: `turn completed but ${deliveryProblem.toLowerCase().replaceAll('_', ' ')}` });
+  if (continuable && delivery?.worker?.status === 'needs_input' && (delivery.worker.block?.questions ?? []).length)
+    actions.push({ action: 'answer_questions', session_id: session, reason: 'worker returned precise questions or a blocker' });
+  return actions;
+}
+
 // Durably record the observed start handle as soon as it appears (not only at
 // batch end), so an interruption retains real handles for recovery.
 async function captureHandle(handleFile) {
@@ -264,7 +320,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   const writeIndex = status => {
     if (status !== 'running') indexStatus = status;
     const next = indexQueue.then(() => atomicJSON(path.join(indexDir, 'index.json'), {
-      schema: INDEX_SCHEMA, batch_id: batchId, status: indexStatus,
+      schema: INDEX_SCHEMA, batch_id: batchId, status: indexStatus, total: prepared.length,
       jobs: [...handles.entries()].map(([id, start_handle]) => ({ id, start_handle })),
       results: [...results.values()],
     }));
@@ -323,7 +379,14 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
         delivery_status: delivery?.worker?.status ?? null,
         delivery_questions: delivery?.worker?.block?.questions ?? null,
         delivery_problem: deliveryProblem,
+        // Bounded worker-declared overview + trusted candidate next actions.
+        delivery_excerpt: deliveryExcerpt(delivery?.worker?.block ?? null),
+        next_actions: nextActions({ receipt, startHandle, handleMatches, delivery, deliveryProblem, job: record.entry.job }),
       });
+      // Publish every settled result into the durable index immediately, so a
+      // mid-batch `collect` sees it without waiting for the batch to settle.
+      // Index failures already close admission via the shared indexWarning path.
+      await writeIndex('running').catch(() => {});
   };
   process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
   try {
@@ -431,6 +494,9 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           // Locatable recovery clue when no handle could be captured at all.
           handle_file: r.record.handleFile,
           delivery_status: null, delivery_questions: null, delivery_problem: null,
+          delivery_excerpt: null,
+          next_actions: [{ action: 'reconcile_session', session_id: (trusted ? observed.session_id : null) ?? r.record.entry.job.session ?? null,
+            reason: trusted ? 'the turn did not settle within the batch wait; reconcile the recorded session before any overlapping work' : 'no start handle was captured; the retained handle_file is the recovery clue' }],
         });
       }
     }
@@ -461,3 +527,35 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
 }
 
 export { MANIFEST_SCHEMA, BATCH_SCHEMA, INDEX_SCHEMA, HANDLE_SCHEMA };
+
+/**
+ * Read-only view of one batch's durable index: the results settled SO FAR,
+ * each already carrying its bounded delivery excerpt and candidate next
+ * actions. It never loads an adapter, never waits, and never infers progress
+ * beyond the recorded handles/results; there is no per-item wakeup — the
+ * coordinator reads this between its host's own waits. A corrupted or foreign
+ * index is an explicit error, never a fake pass.
+ */
+export async function collectBatch({ config, batchId }) {
+  if (typeof batchId !== 'string' || !UUID_RE.test(batchId)) throw new Fault('BAD_BATCH_ID', 'Expected a batch UUID returned by batch.');
+  const file = path.join(config.stateDir, 'batches', batchId, 'index.json');
+  let raw;
+  try { raw = await readJSON(file, { privateFile: true, maxBytes: 16 * 1024 * 1024 }); }
+  catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'STATE_MISSING') throw new Fault('BATCH_NOT_FOUND', 'No batch index with that id exists in the state root.');
+    throw e;
+  }
+  if (!isPlain(raw) || raw.schema !== INDEX_SCHEMA || raw.batch_id !== batchId
+    || !['running', 'complete', 'partial'].includes(raw.status)
+    || !Array.isArray(raw.jobs) || !Array.isArray(raw.results)
+    || raw.jobs.some(j => !isPlain(j) || typeof j.id !== 'string')
+    || raw.results.some(r => !isPlain(r) || typeof r.id !== 'string'))
+    throw new Fault('CORRUPT_INDEX', 'The stored batch index is invalid.');
+  const total = Number.isSafeInteger(raw.total) ? raw.total : null;
+  return {
+    schema: 'cwr.acp.batch-collect/1', batch_id: batchId, status: raw.status, total,
+    handles: raw.jobs.length, settled: raw.results.length,
+    outstanding: total === null ? null : Math.max(0, total - raw.results.length),
+    results: raw.results,
+  };
+}

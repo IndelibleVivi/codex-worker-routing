@@ -10,7 +10,8 @@ import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buil
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
 import { readDelivery } from './delivery.mjs';
-import { runBatch } from './batch.mjs';
+import { runBatch, collectBatch } from './batch.mjs';
+import { runPrepare } from './prepare.mjs';
 
 
 // Property tables for the argument parser. `flags` take no value; `values` take
@@ -34,6 +35,8 @@ const VALUES = Object.freeze({
   dashboard: ['config', 'since', 'port'],
   batch: ['config', 'manifest', 'concurrency'],
   delivery: ['config', 'session', 'request'],
+  prepare: ['config', 'spec', 'out'],
+  collect: ['config', 'batch'],
 });
 const REQUIRED = Object.freeze({
   // `route` is resolved separately: it is required only for configs without a
@@ -49,6 +52,8 @@ const REQUIRED = Object.freeze({
   dashboard: ['config'],
   batch: ['config', 'manifest'],
   delivery: ['config', 'session'],
+  prepare: ['config', 'spec'],
+  collect: ['config', 'batch'],
 });
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
 // Absolute path to THIS CLI entry, used by `batch` to spawn canonical,
@@ -69,6 +74,8 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
   batch    --config FILE --manifest FILE [--concurrency N]
   delivery --config FILE --session UUID [--request REQUEST_ID] [--json]
+  prepare  --config FILE --spec SPEC_FILE [--out DIR]
+  collect  --config FILE --batch BATCH_ID
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
@@ -90,6 +97,20 @@ independent CLI subprocesses, with explicit per-job permissions, a maximum
 concurrency, and safe local admission for an exact cwd and a shared worker home.
 It reports partial when required results are missing. delivery is read-only and
 never loads an adapter.
+
+prepare mechanically turns one coordinator-authored order spec (shared
+background plus each item's task) into per-item order files and a standard
+batch manifest. It validates the explicit per-item permissions, the current
+route/workspace authorization and any continued session binding BEFORE anything
+launches, fills an omitted run route from the config's CURRENT routing.default,
+and never infers a permission from a category or a keyword. It launches nothing
+and loads no adapter; batch admission re-validates every generated job.
+
+collect is a read-only view of one batch's index: the bounded per-item results
+settled SO FAR, including the worker-reported delivery excerpt and candidate
+next actions. It never loads an adapter, never waits, and provides no per-item
+wakeup; the coordinator uses its host's own wait and reads collect between
+other work. A corrupted index is an explicit error, never a fake pass.
 
 run and continue require an explicit --permissions read|full on EVERY turn.
 The category is metadata, never permission. A continuation does not inherit a
@@ -248,6 +269,20 @@ export async function main(args, deps = {}) {
   if (opt.command === 'batch') {
     const config = await loadControlConfig(opt.config);
     return runBatch({ config, opt, deps, output, text, cliPath: cli_path() });
+  }
+  if (opt.command === 'prepare') {
+    // Mechanical order/manifest preparation. The full config is needed for
+    // route/workspace/permission validation, but nothing is launched and no
+    // adapter is imported.
+    const config = await loadConfig(opt.config);
+    output(await runPrepare({ config, spec: await readJSON(path.resolve(opt.spec), { privateFile: false, maxBytes: 256 * 1024 }), out: opt.out ?? null }));
+    return 0;
+  }
+  if (opt.command === 'collect') {
+    // Read-only batch-index view; never loads an adapter, never waits.
+    const config = await loadControlConfig(opt.config);
+    output(await collectBatch({ config, batchId: opt.batch }));
+    return 0;
   }
   const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';
   const config = controlOnly ? await loadControlConfig(opt.config) : await loadConfig(opt.config);

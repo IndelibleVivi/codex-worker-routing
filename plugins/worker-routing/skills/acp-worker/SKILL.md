@@ -25,6 +25,19 @@ node ENTRY cancel --config CONFIG --session UUID
 node ENTRY close --config CONFIG --session UUID
 ```
 
+For an approved independent batch, prepare mechanically turns one coordinator-authored
+order spec into per-item order files plus a batch manifest, and collect reads one batch's
+settled results so far without waiting for the rest:
+
+```sh
+node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
+node ENTRY collect --config CONFIG --batch BATCH_ID
+```
+
+Both are coordination aids only: prepare launches nothing (batch admission re-validates
+every generated job), and collect is read-only. Their guarantees live with the swarm
+skill's batch reference.
+
 Choose read or full from the current task's existing authority on EVERY run/continue.
 Category is metadata, no mode is inherited, and the user need not approve work again.
 A pre-submission PERMISSIONS_REQUIRED means correct the omitted argument and retry

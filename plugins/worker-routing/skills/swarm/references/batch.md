@@ -4,6 +4,17 @@ Read when a task actually contains independent approved responsibilities. The in
 installed CLI/help and canonical operator guide own exact arguments and supported interfaces;
 this method describes the coordination guarantees they must preserve.
 
+## Order preparation
+
+Author ONE order spec: shared background plus each item's task, explicit per-item
+permissions and exact scope. The prepare verb mechanically assembles per-item order files
+and a standard manifest from it. It validates permissions, current route/workspace
+authorization and any continued session binding before anything launches, fills an omitted
+run route from the config's CURRENT default (recorded per item), and refuses to overwrite
+existing outputs. It launches nothing and loads no adapter; batch admission re-validates
+every generated job, so preparation never widens authority. Write the spec from the actual
+goal; never let the mechanical step invent scope, permissions or acceptance criteria.
+
 ## Admission and resource ownership
 
 Use independent CLI subprocesses for ACP jobs. The CLI scrubs its process environment, so
@@ -34,6 +45,17 @@ visibly without starving a valid receipt, and a truncated stdout is refused as a
 when the retained prefix parses as valid JSON.
 Collect the report through the coordinator side so read workers need no new write authority.
 A report format failure does not authorize replaying implementation.
+
+Every settled result is published into the batch's durable index as it lands, so the
+read-only collect verb returns what is known SO FAR without waiting for outstanding items;
+the index always carries the full batch size, so settled and outstanding stay distinguishable.
+Each result carries a bounded worker-reported delivery excerpt (marked worker_reported, a
+verbatim clipped projection, never runner judgment) and candidate next actions derived only
+from trusted runner state. Candidates are a fixed hint vocabulary — reconcile the session,
+inspect the receipt, consolidate the report on the same session, answer the worker's
+questions — for the coordinator to judge. They are never commands, never worker text and
+never auto-executed; a continue-class hint is offered only for a known session with terminal
+runtime, confirmed cleanup and a matching handle.
 
 De-duplicate the same session/request and preserve explicit revision lineage. Late older
 results do not replace newer results. Retain useful partial artifacts and exceptions; don't

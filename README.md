@@ -193,7 +193,8 @@ worker 的完整责任包括范围内自检、自修与收尾；普通测试失�
 再交给一个平级 worker。主脑围绕关键结论和具体疑点验收，不从头重查每份来源。
 
 日常 `run/continue/close` 保持简单。复杂成果可选 `--deliver`，有限批次可选 `batch`；
-报告不完整只修交付，不自动重放写工单。shared HOME 并发未验证时串行该资源，read 模式与
+批次工单由一份 order spec 经 `prepare` 机械生成（准备不启动任何进程），已结算结果
+随时可用 `collect` 只读读取，不等整批结束。报告不完整只修交付，不自动重放写工单。shared HOME 并发未验证时串行该资源，read 模式与
 不同 worktree 不等于隔离。完整接口、恢复与实验边界见[Worker 交付与有限批次](docs/worker-delivery.md)。
 
 ## 行为场景

@@ -22,7 +22,9 @@ plugin and its optional main-session context integration.
   authored worker responsibility contract. ACP assembles it into every actual order;
   native handoffs deliver the same body. Keep optional report schemas out of ordinary
   prompts. `delivery.mjs` owns bounded per-request collection; `batch.mjs` owns finite
-  CLI subprocess admission and collection, local to one batch. The shared nonce
+  CLI subprocess admission and collection, local to one batch, publishing every settled
+  result into the durable index as it lands; `prepare.mjs` owns mechanical order-spec to
+  orders+manifest assembly and launches nothing. The shared nonce
   cancellation writer lives in `state.mjs`; a start handle records
   locks held, not prompt acknowledgement. Check actual child admission against its
   planned resources before launch. Worker reports remain declarations, separate from observed runtime/check evidence. Missing, stale or

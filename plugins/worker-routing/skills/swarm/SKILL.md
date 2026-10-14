@@ -23,7 +23,9 @@ to expand the goal or require the user to configure each worker manually.
 Use the operator's current authorized channel. ACP follows acp-worker with explicit current
 permissions; native uses the live host tools and their existing boundaries. Use the actual
 finite-batch interface the installed integration exposes, not a fabricated slash command.
-Read [batch execution and collection](references/batch.md) before launching a batch.
+One authored order spec mechanically becomes the order files and manifest; nothing needs
+hand-assembling per item. Read [batch execution and collection](references/batch.md) before
+launching a batch.
 
 ## Keep useful work on the worker side
 
@@ -42,6 +44,8 @@ supported artifacts, original identity and stop/cleanup facts before rework or r
 
 Collect bounded summaries and expandable artifacts. Mechanical collection can check identity,
 duplicates, coverage, missing/stale evidence and source locations; it cannot prove semantics.
+Settled results are readable while the rest of the batch still runs; each carries a bounded
+worker-reported excerpt and candidate next actions that stay hints, never auto-executed.
 Keep ready/partial/needs_input declarations, runtime status and coordinator acceptance
 separate. A result with unknown evidence stays unknown; an access failure is not no-support.
 

@@ -243,7 +243,7 @@ test('REAL acpx: cancelling one shared-home turn does not cancel the other',asyn
  assert.notEqual(otherDone.receipt.session_id,cancelledId);
  assert.notEqual(otherDone.receipt.runtime_status,'cancelled','a single cancel must not cancel the sibling session');
 });
-test('REAL acpx: batch runs two independent jobs as real subprocesses with machine handles',async t=>{
+test('REAL acpx: batch runs two independent jobs as real subprocesses with handles, excerpts and collect readback',async t=>{
  await loadAcpx();
  const f=ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000}));
  const cwdB=path.join(f.root,'workspace-b');await fs.mkdir(cwdB,{mode:0o700});
@@ -260,7 +260,33 @@ test('REAL acpx: batch runs two independent jobs as real subprocesses with machi
  assert.equal(code,0,stderr);
  assert.equal(receipt.status,'complete');
  assert.equal(receipt.jobs.length,2);
- for(const j of receipt.jobs){assert.ok(j.start_handle,'each job must expose a machine start handle');assert.equal(j.runtime_status,'completed');assert.equal(j.cleanup,'confirmed');}
+ for(const j of receipt.jobs){
+  assert.ok(j.start_handle,'each job must expose a machine start handle');
+  assert.equal(j.runtime_status,'completed');assert.equal(j.cleanup,'confirmed');
+  // deliver defaults to true: the synthetic adapter echoes a cwr-delivery block,
+  // so each result carries the bounded worker-reported projection. A clean
+  // completed+ready result has no candidate follow-up.
+  assert.equal(j.delivery_status,'ready');
+  assert.equal(j.delivery_excerpt.source,'worker_reported');
+  assert.equal(j.delivery_excerpt.summary,'synthetic delivery');
+  assert.equal(j.delivery_excerpt.summary_truncated,false);
+  assert.deepEqual(j.next_actions,[]);
+ }
+ // The durable index reached its terminal status with the same projection…
+ const index=JSON.parse(await fs.readFile(receipt.index_path,'utf8'));
+ assert.equal(index.status,'complete');
+ assert.equal(index.total,2);
+ assert.equal(index.results.length,2);
+ assert.equal(index.results.find(r=>r.id==='a').delivery_excerpt.summary,'synthetic delivery');
+ // …and the read-only collect verb serves it back without loading any adapter.
+ const collected=await command(f,'collect',['--batch',receipt.batch_id]);
+ assert.equal(collected.code,0,collected.stderr);
+ assert.equal(collected.receipt.schema,'cwr.acp.batch-collect/1');
+ assert.equal(collected.receipt.status,'complete');
+ assert.equal(collected.receipt.total,2);
+ assert.equal(collected.receipt.settled,2);
+ assert.equal(collected.receipt.outstanding,0);
+ assert.equal(collected.receipt.results.find(r=>r.id==='a').delivery_excerpt.summary,'synthetic delivery');
 });
 
 // Runs only on windows-latest. The unit contract double cannot prove that the

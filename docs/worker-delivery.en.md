@@ -115,6 +115,54 @@ unverified shared HOME within the batch; expand only an authorized, validated ar
 Do not copy credentials, widen parent roots or change cwd to bypass locks. Batch limits do
 not claim global admission across every separate CWR instance.
 
+## Order preparation and incremental reads
+
+The coordinator authors ONE order spec: shared background plus each item's task, explicit
+permissions and exact scope. `prepare` mechanically assembles the per-item order files and
+one standard manifest. Before anything launches it validates the explicit permissions, the
+current route/workspace authorization and any continued session binding; a run job that
+omits its route is filled from the config's CURRENT `routing.default` and marked in the
+result's `defaulted_jobs`; existing outputs are never overwritten. It launches nothing and
+loads no adapter, and batch admission re-validates every generated job — preparation caches
+no authorization and infers no permission from category or keywords.
+
+```sh
+node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
+node ENTRY collect --config CONFIG --batch BATCH_ID
+```
+
+This minimal spec is synthetic; actual content is authored from the real goal, and the
+mechanical step never invents scope, permissions or acceptance criteria.
+
+```json
+{
+  "schema": "cwr.acp.order-spec/1",
+  "shared": "Shared background every item needs.",
+  "jobs": [
+    {"id": "a", "verb": "run", "cwd": "/workspace/a", "permissions": "read",
+     "task": "Map the importer call chain."}
+  ]
+}
+```
+
+Every result is published into the batch's durable index as it settles; `collect` is a
+read-only view of that index, returning the batch status, the full size, captured handles,
+settled results, the outstanding count and the per-item records SO FAR — without waiting,
+without loading an adapter, and with no per-item wakeup: the coordinator reads it between
+its host's own waits. A corrupted or unknown index is an explicit error, never a fabricated
+pass. Each settled record carries two coordination aids:
+
+- `delivery_excerpt`: a bounded verbatim projection of the worker-reported delivery
+  (`source:"worker_reported"`) — the summary with its truncation marker, criterion totals
+  with the unsatisfied list, check totals with failing names, and the first few questions.
+  The program adds no semantic judgment; worker declarations stay separate from
+  runner-observed facts.
+- `next_actions`: candidate hints derived only from trusted runner state, from a fixed
+  vocabulary: `reconcile_session`, `inspect_receipt`, `consolidate_report`,
+  `answer_questions`. A continue-class hint appears only for a known session whose runtime
+  is terminal with confirmed cleanup and a matching handle. Candidates are hints for the
+  coordinator to judge — never commands, never auto-executed.
+
 ## Accept results without repeating discovery
 
 Mechanical collection checks identity, coverage, duplicates, missing records, references

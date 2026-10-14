@@ -97,6 +97,47 @@ adapter HOME/session store/cache、端口和数据库已经隔离。共享 HOME 
 批次串行该资源；只有已有授权且完成对应能力验收的安排才能展开。不能为并行复制凭据、
 扩大父目录或改 cwd 绕锁。批次并发限制只约束这个运行器，不冒充所有 CWR 实例的全局限额。
 
+## 工单准备与增量读取
+
+协调者只需写一份 order spec：共享背景加每项的任务、显式权限与确切范围。`prepare`
+机械装配出每项工单文件和一份标准 manifest。它在启动任何东西之前校验显式权限、当前
+route/workspace 授权与 continue 项的 session 绑定；run 项省略 route 时填入配置当前
+`routing.default` 并在结果的 `defaulted_jobs` 里标明；已有输出一律拒绝覆盖。它不启动
+任何进程、不加载 adapter，batch 准入仍会逐项重验生成的每个 job——准备不缓存授权，
+也不从类别或关键词推断权限。
+
+```sh
+node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
+node ENTRY collect --config CONFIG --batch BATCH_ID
+```
+
+以下是合成的最小 spec；实际内容由协调者从真实目标撰写，机械步骤不发明范围、权限或
+验收条件。
+
+```json
+{
+  "schema": "cwr.acp.order-spec/1",
+  "shared": "Shared background every item needs.",
+  "jobs": [
+    {"id": "a", "verb": "run", "cwd": "/workspace/a", "permissions": "read",
+     "task": "Map the importer call chain."}
+  ]
+}
+```
+
+每个结果一结算就写入批次的持久索引；`collect` 是该索引的只读视图，返回批次状态、
+总数、已捕获句柄数、已结算数、outstanding 与逐项结果——不等待、不加载 adapter、
+没有逐项唤醒，协调者在自己宿主的事等待间隙读取。索引损坏或不存在是明确错误，
+不伪造通过。逐项结果附带两个协调辅助字段：
+
+- `delivery_excerpt`：worker 自述交付的有界逐字投影（`source:"worker_reported"`）：
+  带截断标记的摘要、条件总数与未满足清单、检查计数与失败名单、前几条问题。程序不做
+  语义扩写；worker 自述与运行器观察保持分开。
+- `next_actions`：仅从受信运行器状态推导的候选提示，固定词表：`reconcile_session`、
+  `inspect_receipt`、`consolidate_report`、`answer_questions`。continue 类提示只在
+  session 已知、runtime 已终态、cleanup confirmed 且句柄匹配时出现。候选是供协调者
+  判断的提示，不是命令，从不自动执行。
+
 ## 主脑如何验收一批结果
 
 程序先检查身份、覆盖、重复、缺失、引用与证据新鲜度。语义判断仍有归属。复杂跨结果

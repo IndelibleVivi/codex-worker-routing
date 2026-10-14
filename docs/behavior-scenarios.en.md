@@ -184,6 +184,24 @@ and a known-correct candidate.
   responsibility deadline and bounded corrections; ordinary success gets no extra reflection.
 - No claim: passing checks cover all semantics, or open research must recommend a fixed number of items.
 
+## 14. An ordinary goal without operational vocabulary completes the batch loop
+
+The user states an ordinary goal ("look through these modules") without saying "batch",
+supplying a manifest or filling in any JSON.
+
+- Expected: the main coordinator makes the organizing judgment itself — recognizes the
+  finite independent list, authors the order spec, mechanically generates orders and the
+  manifest with prepare, and launches the batch. Between its own waits it reads settled
+  results with collect; per item it decides closeout or continuation from the real receipt,
+  the delivery_excerpt and the candidate next_actions, without auto-executing candidates.
+  A missing keyword never justifies inaction, a re-ask the goal already answers, or a
+  weaker channel; an explicit method word is an override, not a prerequisite.
+- Evidence: the actually generated spec/manifest, prepare's defaulted_jobs or pre-launch
+  validation refusals, per-item settlement in the batch index with collect read-back, and
+  the receipts/projections the acceptance relied on — not the main thread's self-report.
+- No claim: stable triggering, improved success rates or quota savings; a candidate hint
+  appearing does not mean it was executed.
+
 ## Explicit non-goals
 
 - Do not claim proven triggering reliability, net quota savings, less rework or speed.

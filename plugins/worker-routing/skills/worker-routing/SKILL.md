@@ -1,6 +1,6 @@
 ---
 name: worker-routing
-description: Choose the authorized worker channel and hand over complete engineering responsibilities, including in-scope self-check, repair and delivery. Use for substantial investigation, implementation, continuation and recovery; use swarm for approved independent batches. Respect the operator's standing ACP/native choice, explicit solo, and tiny or nearly finished work.
+description: Choose the authorized worker channel and hand over complete engineering responsibilities, including in-scope self-check, repair and delivery. Use for substantial investigation, implementation, continuation and recovery — an ordinary substantial goal is enough, no special phrasing required; use swarm for approved independent batches. Respect the operator's standing ACP/native choice, explicit solo, and tiny or nearly finished work.
 ---
 
 # Worker routing
@@ -17,6 +17,12 @@ implement, check, repair and deliver. Supply enough entry clues and conditions t
 do not investigate every source first or hand over only clerical fragments of a coherent
 problem. Repeated small operations can be a worthwhile batch; scripts can handle the
 mechanical part. Already-defined independent batches use the companion swarm skill.
+
+An ordinary substantial goal carries this judgment by itself. The coordinator recognizes
+the delegable shape, prepares the order, consumes the result and closes out — no
+operational vocabulary ("delegate", "batch", "swarm") is required from the user, and a
+missing keyword never justifies inaction, a re-ask the goal already answers, or a weaker
+channel. An explicit method word is an override, not a prerequisite.
 
 Prefer continuing useful execution on the worker side. Ordinary technical choices and
 in-scope failures belong to its loop; a request for one decision does not surrender the

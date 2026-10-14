@@ -231,7 +231,10 @@ missing items and evidence. A peer can merge complex results; the main agent acc
 conclusions and concrete doubts rather than repeating every original investigation.
 
 Ordinary run/continue/close stays simple. Complex outcomes can opt into --deliver and finite
-lists into batch. Report failure repairs delivery without automatically replaying edits.
+lists into batch. One order spec mechanically becomes the batch's orders and manifest via
+prepare (preparation launches nothing), and settled results are readable at any time with
+the read-only collect, without waiting for the rest. Report failure repairs delivery without
+automatically replaying edits.
 Serialize unverified shared-HOME concurrency; read mode and separate worktrees are not
 isolation. See [worker delivery and finite batches](docs/worker-delivery.en.md) for interfaces,
 recovery and experimental boundaries.

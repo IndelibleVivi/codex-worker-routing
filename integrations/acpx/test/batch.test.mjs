@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { parseManifest, runBatch, MANIFEST_SCHEMA, HANDLE_SCHEMA } from '../src/batch.mjs';
+import { parseManifest, runBatch, collectBatch, MANIFEST_SCHEMA, HANDLE_SCHEMA } from '../src/batch.mjs';
 import { writeDeliverySidecar, deliveryFile } from '../src/delivery.mjs';
 import { fixture } from './helpers.mjs';
 
@@ -58,14 +58,14 @@ function fakeSpawner(state, behavior = {}) {
       const handleCwd = behavior.handleCwd ?? await fs.realpath(job.cwd).catch(() => job.cwd);
       await fs.writeFile(handleFile, JSON.stringify({ schema: HANDLE_SCHEMA, session_id: sid, request_id: req, cwd: handleCwd, route: job.route ?? 'worker' }));
       if (behavior.marker) behavior.marker(job, state, { sid, req });
-      await new Promise(r => setTimeout(r, behavior.delay ?? 20));
+      await new Promise(r => setTimeout(r, behavior.delays?.[job.id] ?? behavior.delay ?? 20));
       if (stopped) { state.active--; return; }
       if (behavior.failIds?.includes(job.id)) { state.active--; resolveDone({ code: 2, stdout: JSON.stringify({ schema: 'cwr.acp.error/1', code: 'X' }), stderr: 'boom' }); return; }
       if (job.deliver && behavior.writeDelivery !== false) {
-        const overstated = behavior.deliverStatus ? { status: behavior.deliverStatus } : {};
-        await writeDeliverySidecar({ stateDir: behavior.stateDir, session: sid, requestId: req, finishedAt: new Date().toISOString(), text: blockFor(req, sid, overstated) });
+        const overrides = behavior.block?.(job, req, sid) ?? (behavior.deliverStatus ? { status: behavior.deliverStatus } : {});
+        await writeDeliverySidecar({ stateDir: behavior.stateDir, session: sid, requestId: req, finishedAt: new Date().toISOString(), text: blockFor(req, sid, overrides) });
       }
-      const receipt = { schema: 'cwr.acp.receipt/1', session_id: sid, request_id: req, runtime_status: behavior.status ?? 'completed', cleanup: 'confirmed', receipt_path: `/r/${job.id}.json`, error_code: null };
+      const receipt = { schema: 'cwr.acp.receipt/1', session_id: sid, request_id: req, runtime_status: behavior.status ?? 'completed', cleanup: behavior.cleanup ?? 'confirmed', receipt_path: `/r/${job.id}.json`, error_code: null };
       state.active--;
       resolveDone({ code: behavior.status === 'failed' ? 1 : 0, stdout: JSON.stringify(receipt), stderr: '' });
     };
@@ -545,4 +545,137 @@ test('a truncated stdout is never accepted as a receipt, even when the retained 
   assert.equal(j.output_received, false, 'a truncated receipt is refused even if the prefix is valid JSON');
   assert.equal(batch.status, 'partial');
   assert.deepEqual(batch.missing, ['o']);
+});
+
+// --- Bounded delivery excerpt, candidate next actions, incremental index ---
+
+test('batch results carry a bounded worker-reported delivery excerpt and candidate next actions', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
+  ]);
+  const code = await run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, {
+    stateDir: f.config.stateDir,
+    block: () => ({
+      status: 'needs_input',
+      summary: 'investigated the importer; one contract conflict remains',
+      criteria: [{ criterion: 'map the call chain', state: 'satisfied' }, { criterion: 'decide which contract wins', state: 'unsatisfied' }],
+      checks: [{ name: 'npm run check', state: 'passed', detail: 'all green' }, { name: 'contract probe', state: 'blocked', detail: 'needs a decision' }],
+      questions: ['Which of the two conflicting contracts should win?'],
+    }),
+  }));
+  // A valid needs_input delivery is complete collection, not engineering acceptance.
+  assert.equal(code, 0);
+  const j = out.at(-1).jobs.find(r => r.id === 'a');
+  assert.equal(j.delivery_status, 'needs_input');
+  const ex = j.delivery_excerpt;
+  assert.equal(ex.source, 'worker_reported');
+  assert.equal(ex.summary, 'investigated the importer; one contract conflict remains');
+  assert.equal(ex.summary_truncated, false);
+  assert.deepEqual(ex.criteria, { total: 2, unsatisfied: 1, unsatisfied_list: ['decide which contract wins'] });
+  assert.equal(ex.checks.total, 2);
+  assert.deepEqual(ex.checks.by_state, { passed: 1, blocked: 1 });
+  assert.deepEqual(ex.checks.failing, ['contract probe']);
+  assert.deepEqual(ex.questions, ['Which of the two conflicting contracts should win?']);
+  assert.equal(ex.questions_total, 1);
+  assert.deepEqual(j.next_actions, [{ action: 'answer_questions', session_id: j.session_id, reason: 'worker returned precise questions or a blocker' }]);
+});
+
+test('the delivery excerpt is bounded: long fields are clipped, never expanded', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
+  ]);
+  await run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, {
+    stateDir: f.config.stateDir,
+    block: () => ({ status: 'ready', summary: 'x'.repeat(900), criteria: [], checks: [], questions: ['q1', 'q2', 'q3', 'q4', 'q5'] }),
+  }));
+  const ex = out.at(-1).jobs[0].delivery_excerpt;
+  assert.equal(ex.summary.length, 400);
+  assert.equal(ex.summary_truncated, true);
+  assert.equal(ex.questions.length, 4);
+  assert.equal(ex.questions_total, 5);
+});
+
+test('candidate next actions follow trusted state only', async t => {
+  const mk = async (behavior, jobOver = {}) => {
+    const cwdA = path.join((await jobRoot(t)), `a${randomUUID().slice(0, 8)}`);
+    const { f, manifestFile, out } = await batchFixture(t, [job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md'), ...jobOver })]);
+    await run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, { stateDir: f.config.stateDir, ...behavior }));
+    return out.at(-1).jobs[0];
+  };
+  // Failed runtime: inspect the receipt; no continue-class hint.
+  const failed = await mk({ status: 'failed' });
+  assert.equal(failed.runtime_status, 'failed');
+  assert.deepEqual(failed.next_actions.map(a => a.action), ['inspect_receipt']);
+  assert.equal(failed.next_actions[0].receipt_path, failed.receipt_path);
+  // Completed runtime with a missing report: consolidate the report on the same
+  // session, never replay the work.
+  const missingReport = await mk({ writeDelivery: false });
+  assert.equal(missingReport.delivery_problem, 'DELIVERY_MISSING');
+  assert.deepEqual(missingReport.next_actions.map(a => a.action), ['consolidate_report']);
+  // Unconfirmed cleanup must NOT get a continue-class hint even with questions pending.
+  const unconfirmed = await mk({ cleanup: 'unconfirmed', block: () => ({ status: 'needs_input', summary: 's', criteria: [], checks: [], questions: ['q?'] }) });
+  assert.equal(unconfirmed.cleanup, 'unconfirmed');
+  assert.deepEqual(unconfirmed.next_actions, []);
+  // No receipt at all: reconcile the session; nothing else is claimed.
+  const noReceipt = await mk({ failIds: ['a'] });
+  assert.equal(noReceipt.output_received, false);
+  assert.deepEqual(noReceipt.next_actions.map(a => a.action), ['reconcile_session']);
+});
+
+test('settled results publish to the index mid-batch and collect reads them without waiting', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const cwdB = path.join((await jobRoot(t)), 'b');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
+    job({ id: 'b', cwd: cwdB, file: path.join(cwdB, 'o.md') }),
+  ]);
+  const p = run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, { stateDir: f.config.stateDir, delays: { a: 10, b: 600 } }));
+  const batchesDir = path.join(f.config.stateDir, 'batches');
+  let mid = null;
+  for (let i = 0; i < 160 && !mid; i++) {
+    const ids = await fs.readdir(batchesDir).catch(() => []);
+    if (ids.length === 1) {
+      try {
+        const idx = JSON.parse(await fs.readFile(path.join(batchesDir, ids[0], 'index.json'), 'utf8'));
+        if (idx.results?.some(r => r.id === 'a')) {
+          assert.ok(!idx.results.some(r => r.id === 'b'), 'the slow job must not have settled yet');
+          mid = idx;
+        }
+      } catch { /* retry while the index is being replaced */ }
+    }
+    if (!mid) await new Promise(r => setTimeout(r, 25));
+  }
+  assert.ok(mid, 'the settled fast job must appear in the index while the batch is still running');
+  assert.equal(mid.status, 'running');
+  assert.equal(mid.total, 2, 'the index carries the full batch size before every job settles');
+  // The settling job's own handle is captured synchronously during collection;
+  // the still-running job's handle arrives via its own poll, so it may lag.
+  assert.ok(mid.jobs.some(j => j.id === 'a' && j.start_handle), 'the settled job publishes its start handle');
+  const midA = mid.results.find(r => r.id === 'a');
+  assert.equal(midA.delivery_excerpt.summary, 'ok');
+  assert.equal(await p, 0);
+  // collectBatch is a read-only view over the final index.
+  const batchId = out.at(-1).batch_id;
+  const collected = await collectBatch({ config: { stateDir: f.config.stateDir }, batchId });
+  assert.equal(collected.schema, 'cwr.acp.batch-collect/1');
+  assert.equal(collected.status, 'complete');
+  assert.equal(collected.total, 2);
+  assert.equal(collected.settled, 2);
+  assert.equal(collected.outstanding, 0);
+  assert.equal(collected.results.find(r => r.id === 'a').delivery_excerpt.summary, 'ok');
+});
+
+test('collect refuses a corrupted or unknown index instead of fabricating a pass', async t => {
+  const cwdA = path.join((await jobRoot(t)), 'a');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
+  ]);
+  await run(f, manifestFile, out, fakeSpawner({ active: 0, maxActive: 0 }, { stateDir: f.config.stateDir }));
+  const batchId = out.at(-1).batch_id;
+  await assert.rejects(collectBatch({ config: { stateDir: f.config.stateDir }, batchId: 'not-a-uuid' }), { code: 'BAD_BATCH_ID' });
+  await assert.rejects(collectBatch({ config: { stateDir: f.config.stateDir }, batchId: randomUUID() }), { code: 'BATCH_NOT_FOUND' });
+  await fs.writeFile(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), '{"schema":"wrong"}\n', { mode: 0o600 });
+  await assert.rejects(collectBatch({ config: { stateDir: f.config.stateDir }, batchId }), { code: 'CORRUPT_INDEX' });
 });
