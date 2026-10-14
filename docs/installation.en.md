@@ -14,7 +14,7 @@ do not overwrite another plugin.
 
 After updating source, inspect the marketplace and source directory through the current
 host's `codex plugin marketplace list --json`. Update the plugin manifest version
-(`0.3.0` for this update), then reinstall through
+(`0.4.0` for this update), then reinstall through
 `codex plugin add worker-routing@MARKETPLACE --json`. If the host provides bundled
 authoring helpers, they can verify the marketplace or update the cachebuster; do not
 assume an old helper path still exists. Never edit an installed cache in place. Check
@@ -27,6 +27,12 @@ only edit that private file; do not copy the current route name into SessionStar
 See [ACP setup](acp-integration.en.md#defaults-and-fallbacks) for configuration and revocation.
 
 ## Delivery and swarm upgrade
+
+Version 0.4.0 adds `prepare` order assembly and incremental `collect` reads, and fixes
+batch cancellation admission, error settlement, late handles and stream budgets.
+Existing run/continue calls, batch manifests and historical receipts remain compatible;
+no model pool or service is required. `collect` reads settled results without promising
+per-item wakeups.
 
 Update canonical ACP source and reinstall the plugin together. Version 0.3.0 adds the
 packaged shared worker contract and on-demand recovery/Dispatch/swarm methods. Native

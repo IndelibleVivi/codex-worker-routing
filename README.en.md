@@ -14,7 +14,7 @@ their main-session personal context intact.
 [Your first delegated task](docs/first-delegated-task.en.md) · [Install the plugin](#installation) ·
 [Local Dispatch guide](docs/dispatch.en.md) · [Configure custom models](docs/native-model-picker.en.md)
 
-Current source version: 0.3.0. Routing is provided by an instruction-only
+Current source version: 0.4.0. Routing is provided by an instruction-only
 plugin; the optional ACP integration connects a registered external coding agent through
 `acpx/runtime`; and the optional main-session integration uses a native `SessionStart`
 hook to load local private instructions automatically. There is no additional MCP

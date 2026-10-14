@@ -1,6 +1,6 @@
 {
   "name": "worker-routing",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Instruction-only worker routing with autonomous delivery and optional finite ACP batches.",
   "author": {
     "name": "Faye"

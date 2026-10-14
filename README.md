@@ -11,7 +11,7 @@
 [从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
 [本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
 
-当前源码版本为 0.3.0。调度由一个 instruction-only plugin 提供；可选 ACP integration
+当前源码版本为 0.4.0。调度由一个 instruction-only plugin 提供；可选 ACP integration
 通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
 `SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
 proxy 或固定 planner/tester/reviewer 流水线。
