@@ -879,6 +879,50 @@ test('taken_over beats accepted; failed/cancelled/unconfirmed open work is needs
   assert.equal(p.summary.review.needs_attention, 3);
 });
 
+test('an explicit review after compromised open work clears needs_attention; a later new failure restores it', async t => {
+  const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
+  const failed = randomUUID(), cancelled = randomUUID(), unconfirmed = randomUUID();
+  // One compromised open runtime per kind, each cleared by a distinct explicit
+  // review event.
+  const cases = [
+    [failed, { runtime_status: 'failed' }, 'submitted', 'awaiting_review'],
+    [cancelled, { runtime_status: 'cancelled' }, 'revision_requested', 'changes_requested'],
+    [unconfirmed, { cleanup: 'unconfirmed' }, 'accepted', 'accepted'],
+  ];
+  for (const [id, over] of cases) {
+    await writeBinding(stateDir, bindingFor(id, { dispatch: dispatchedMeta({ title: 'Compromised' }) }));
+    await writeReceipt(stateDir, id, receiptFor(id, 'req-1', { ...over, started_at: at(5), finished_at: at(8) }));
+  }
+  let p = await createProjectionReader(stateDir).read();
+  let byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  for (const [id] of cases) assert.equal(byId[id], 'needs_attention');
+
+  // A later explicit review event supersedes the transient compromise and
+  // yields its own state.
+  for (const [id, , kind] of cases) {
+    await recordEvent(stateDir, id, eventInput(id, { kind, reason: kind === 'revision_requested' ? 'validation_failed' : null }), { stamp: at(20) });
+  }
+  p = await createProjectionReader(stateDir).read();
+  byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  for (const [id, , , cleared] of cases) assert.equal(byId[id], cleared);
+
+  // Deriving a new state never rewrites the receipt that produced the compromise.
+  const detail = await createProjectionReader(stateDir).detail(failed);
+  assert.equal(detail.turns.find(tr => tr.request_id === 'req-1').runtime_status, 'failed');
+
+  // A still later new failure on open work brings needs_attention back.
+  for (const [id] of cases) {
+    await writeReceipt(stateDir, id, receiptFor(id, 'req-2', { runtime_status: 'failed', started_at: at(25), finished_at: at(30) }));
+  }
+  p = await createProjectionReader(stateDir).read();
+  byId = Object.fromEntries(p.sessions.map(s => [s.id, s.review_state]));
+  for (const [id] of cases) assert.equal(byId[id], 'needs_attention');
+  assert.equal(p.summary.review.needs_attention, 3);
+  // Both failures remain runtime history; only the derived state moved.
+  const settled = await createProjectionReader(stateDir).detail(failed);
+  assert.deepEqual(settled.turns.map(tr => [tr.request_id, tr.runtime_status]), [['req-1', 'failed'], ['req-2', 'failed']]);
+});
+
 test('intentionally closed work without a review decision is not_requested, not an obligation', async t => {
   const { stateDir, cleanup } = await syntheticState(); t.after(cleanup);
   const closedClean = randomUUID(), closedAccepted = randomUUID(), closedCompromised = randomUUID();
