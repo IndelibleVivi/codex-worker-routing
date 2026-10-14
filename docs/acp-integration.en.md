@@ -1,4 +1,4 @@
-# Optional ACP execution route · v0.3
+# Optional ACP execution route
 
 [中文](acp-integration.md) | English
 
@@ -211,8 +211,9 @@ local Git / folders by binding.cwd, and shows the saved path and limitation when
 directory is unavailable; it does not claim Codex project identity. Dates are bucketed by
 the selected time zone; the CLI accepts `stats --time-zone IANA_ZONE`. Current acpx only
 exposes runtime error codes and cannot confirm a provider HTTP 429 or internal retries;
-details provide the same-source structured trail. `stats`, `record` and `pending` only read
-local private state and do not load the adapter. The projection derives a mutually
+details provide the same-source structured trail. These commands do not load the adapter;
+`stats` and `pending` only read local private state, while `record` appends an optional
+collaboration event without rewriting a runtime receipt. The projection derives a mutually
 exclusive `review_state` per responsibility (`summary.review` gives the count per state);
 an unregistered legacy responsibility is `legacy_untracked`, merely quiet history. See
 [Dispatch](dispatch.en.md) for complete operations and the [data contract](dispatch-data.md)

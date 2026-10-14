@@ -106,6 +106,9 @@ route/workspace 授权与 continue 项的 session 绑定；run 项省略 route �
 任何进程、不加载 adapter，batch 准入仍会逐项重验生成的每个 job——准备不缓存授权，
 也不从类别或关键词推断权限。
 
+工单与 manifest 以排他创建写入；在 POSIX 上使用 `0600`。Windows 的 Node mode 不表示
+ACL 隐私，CWR 不据此声称已验证 owner-only 访问；需要由 operator 独立核对输出目录的 ACL。
+
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
 node ENTRY collect --config CONFIG --batch BATCH_ID
@@ -140,7 +143,8 @@ node ENTRY collect --config CONFIG --batch BATCH_ID
 
 ## 主脑如何验收一批结果
 
-程序先检查身份、覆盖、重复、缺失、引用与证据新鲜度。语义判断仍有归属。复杂跨结果
+程序先检查身份、覆盖、重复、缺失与引用可定位性。batch/collect 不自动判定检查证据的新鲜度；
+这需要在任务确认的 candidate identity 上另行核对 runner-observed 记录。语义判断仍有归属。复杂跨结果
 比较可交给一个平级归并 worker，输入是报告与必要证据；它保留版本差异、淘汰理由、反证
 与未决冲突，只把会改变决策的小问题送回原责任，不重新通读全部来源。
 

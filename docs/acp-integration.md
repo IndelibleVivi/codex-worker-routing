@@ -1,4 +1,4 @@
-# 可选 ACP 执行通道 · v0.3
+# 可选 ACP 执行通道
 
 [English](acp-integration.en.md) | 中文
 
@@ -146,8 +146,9 @@ private state，按需供本地回放；它们不进入公开分享。读取历�
 worker home 或原 workspace 仍然可用。项目入口按 binding.cwd 查本机 Git / 文件夹，
 目录不可用时显示保存的路径与限制；不声称 Codex project 身份。日期按选中时区分组；
 CLI 可传 `stats --time-zone IANA_ZONE`。当前 acpx 只暴露 runtime 错误码，不能确认
-provider HTTP 429 或内部重试，详情提供同源结构化经过。`stats`、`record`、`pending` 只读本机 private
-state，不加载 adapter。投影为每个责任派生互斥的 `review_state`（`summary.review`
+provider HTTP 429 或内部重试，详情提供同源结构化经过。这些命令不加载 adapter；`stats`、
+`pending` 只读本机 private state，`record` 按需追加协作事件，不改写 runtime receipt。
+投影为每个责任派生互斥的 `review_state`（`summary.review`
 给出各状态计数）；未登记的 legacy 责任为 `legacy_untracked`，只是安静的历史记录。
 完整操作见[Dispatch](dispatch.md)，数据语义见[数据契约](dispatch-data.zh-CN.md)。
 

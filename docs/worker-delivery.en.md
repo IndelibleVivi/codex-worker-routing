@@ -126,6 +126,10 @@ result's `defaulted_jobs`; existing outputs are never overwritten. It launches n
 loads no adapter, and batch admission re-validates every generated job — preparation caches
 no authorization and infers no permission from category or keywords.
 
+Order files and the manifest use exclusive creation, with mode `0600` on POSIX.
+Windows Node modes do not encode ACL privacy; CWR does not claim verified owner-only
+access from that metadata. The operator must independently check the output directory's ACL.
+
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
 node ENTRY collect --config CONFIG --batch BATCH_ID
@@ -165,8 +169,10 @@ pass. Each settled record carries two coordination aids:
 
 ## Accept results without repeating discovery
 
-Mechanical collection checks identity, coverage, duplicates, missing records, references
-and freshness, not semantic truth. A peer merger can handle complex cross-result reasoning
+Mechanical collection checks identity, coverage, duplicates, missing records and reference
+locatability. Batch/collect do not automatically establish check freshness; compare
+runner-observed records separately against a task-confirmed candidate identity. Semantic
+judgment retains its owner. A peer merger can handle complex cross-result reasoning
 from collected reports and necessary evidence. It retains version distinctions, exclusions,
 counterevidence and unresolved conflicts, returning only decision-relevant narrow questions
 to their original owners rather than rereading every source.

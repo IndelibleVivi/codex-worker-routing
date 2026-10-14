@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { parseSpec, assembleOrder, runPrepare, SPEC_SCHEMA } from '../src/prepare.mjs';
 import { parseManifest, MANIFEST_SCHEMA } from '../src/batch.mjs';
 import { parseArgs, main } from '../src/cli.mjs';
-import { atomicJSON, paths } from '../src/state.mjs';
+import { atomicJSON, paths, exposesPosixModes } from '../src/state.mjs';
 import { fixture } from './helpers.mjs';
 
 const SPEC = SPEC_SCHEMA;
@@ -80,8 +80,12 @@ test('runPrepare writes exact order files and a manifest the real batch validato
   assert.equal(orderA, 'Common background.\n\n---\n\nDo A.\n');
   const orderB = await fs.readFile(result.orders[1].file, 'utf8');
   assert.equal(orderB, 'Common background.\n\n---\n\nDo B.\n');
-  // Private files, not world-readable.
-  assert.equal((await fs.stat(result.orders[0].file)).mode & 0o777, 0o600);
+  // POSIX mode bits prove owner-only permissions where exposed; Windows's
+  // synthesized mode does not encode ACL privacy (the shared state contract).
+  if (exposesPosixModes()) {
+    assert.equal((await fs.stat(result.orders[0].file)).mode & 0o777, 0o600);
+    assert.equal((await fs.stat(result.manifest_path)).mode & 0o777, 0o600);
+  }
   const manifest = JSON.parse(await fs.readFile(result.manifest_path, 'utf8'));
   assert.equal(manifest.schema, MANIFEST_SCHEMA);
   assert.equal(manifest.maxConcurrency, 3);
