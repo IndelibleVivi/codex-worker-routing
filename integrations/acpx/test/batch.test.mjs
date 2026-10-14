@@ -20,6 +20,16 @@ async function jobRoot(t) {
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   return dir;
 }
+// Whether this filesystem folds case, so a case-only alias names a real
+// directory. Windows and default macOS APFS do; Linux CI does not.
+async function caseInsensitiveFs() {
+  const probe = await fs.mkdtemp(path.join(os.tmpdir(), 'cwr-case-'));
+  try {
+    await fs.mkdir(path.join(probe, 'CwrCaseProbe'));
+    try { return (await fs.stat(path.join(probe, 'cwrcaseprobe'))).isDirectory(); }
+    catch { return false; }
+  } finally { await fs.rm(probe, { recursive: true, force: true }); }
+}
 const blockFor = (req, sid, over = {}) => '```cwr-delivery\n' + JSON.stringify({ schema: 'cwr.acp.delivery/1', status: 'ready', summary: 'ok', criteria: [], checks: [], artifacts: [], questions: [], request_id: req, session_id: sid, ...over }) + '\n```';
 
 test('manifest validation is strict: schema, ids, verbs, permissions, absolute paths, deliver', () => {
@@ -520,6 +530,37 @@ test('a noisy child cannot starve the stdout receipt: stderr and stdout keep sep
   assert.equal(j.output_truncated, false);
   assert.equal(j.stderr_truncated, true, 'stderr truncation stays visible');
   assert.ok(j.start_handle, 'the published handle still matches');
+  assert.equal(code, 0);
+  assert.equal(batch.status, 'complete');
+});
+
+// The REAL child double must canonicalize its cwd EXACTLY as the batch parent
+// does. The parent uses `node:fs/promises`.realpath (the native resolver, which
+// also expands Windows 8.3 short names and case aliases); the double must not
+// fall back to the `node:fs` JS walk, which only strips symlinks and keeps the
+// lexical alias. Windows temporary paths may contain 8.3 short components;
+// a case-only alias reproduces this identity mismatch on a case-insensitive
+// filesystem without depending on the host's temporary path spelling.
+test('the real child double canonicalizes an aliased cwd exactly like the batch parent', async t => {
+  if (!(await caseInsensitiveFs())) return t.skip('case-sensitive filesystem: no alias to resolve');
+  const base = await jobRoot(t);
+  const realDir = path.join(base, 'WorkSpace');
+  await fs.mkdir(realDir, { recursive: true });
+  const aliasCwd = path.join(base, 'workspace'); // same directory, aliased case
+  const order = path.join(realDir, 'o.md');
+  const { f, manifestFile, out } = await batchFixture(t, [job({ id: 'n', cwd: aliasCwd, file: order, deliver: false })]);
+  await fs.writeFile(order, 'flood-stderr');
+  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixture-noisy-child.mjs');
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config }, // REAL spawnJob
+    output: r => out.push(r), text: () => {}, cliPath,
+  });
+  const batch = out.at(-1);
+  const j = batch.jobs[0];
+  assert.equal(j.handle_mismatch, false, 'an aliased cwd is not an identity mismatch');
+  assert.ok(j.start_handle, 'the published handle still matches');
+  assert.equal(j.runtime_status, 'completed');
   assert.equal(code, 0);
   assert.equal(batch.status, 'complete');
 });

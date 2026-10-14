@@ -11,7 +11,12 @@ const order = fs.readFileSync(arg('--file'), 'utf8').trim();
 const session_id = randomUUID(), request_id = randomUUID();
 fs.writeFileSync(arg('--start-handle'), JSON.stringify({
   schema: 'cwr.acp.start-handle/1', session_id, request_id,
-  cwd: fs.realpathSync(arg('--cwd')), route: arg('--route'),
+  // Canonicalize with the NATIVE resolver (the same uv_fs_realpath the real CLI
+  // and `batch.mjs` reach via node:fs/promises realpath), which expands Windows
+  // 8.3 short names and case aliases. The plain `node:fs`.realpathSync JS walk
+  // resolves symlinks but can preserve lexical aliases, publishing a cwd the
+  // parent correctly rejects as an identity mismatch.
+  cwd: fs.realpathSync.native(arg('--cwd')), route: arg('--route'),
 }));
 const receipt = JSON.stringify({
   schema: 'cwr.acp.receipt/1', session_id, request_id,
