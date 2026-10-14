@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { parseManifest, runBatch, MANIFEST_SCHEMA, HANDLE_SCHEMA } from '../src/batch.mjs';
 import { writeDeliverySidecar, deliveryFile } from '../src/delivery.mjs';
@@ -294,4 +295,254 @@ test('a parent cancellation settles boundedly even if an owned child does not ac
   assert.equal(code, 1); assert.ok(Date.now() - started < 8000);
   assert.equal(out.at(-1).jobs[0].cleanup, 'unconfirmed');
   assert.equal(out.at(-1).cancelled, true);
+});
+
+// Cancellation lands DURING the admission config reload: the scheduler must
+// re-check the live cancelled state after the await, before spawn. Asserting the
+// final status alone would miss this — the broken shape also ended `partial`.
+test('cancellation during the first admission await launches nothing', async t => {
+  const base = await jobRoot(t);
+  const a = path.join(base, 'a'), b = path.join(base, 'b'), c = path.join(base, 'c');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md'), deliver: false }),
+  ], { maxConcurrency: 3 });
+  let reads = 0, starts = 0;
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: {
+      loadConfig: async () => { if (++reads === 2) process.emit('SIGINT'); return f.config; },
+      spawnJob: () => { starts++; return { done: new Promise(() => {}), stop: () => {} }; },
+    },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.equal(starts, 0, 'cancellation during the admission await must fence every launch');
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'partial');
+  assert.equal(batch.cancelled, true);
+  assert.deepEqual(batch.missing, ['a', 'b', 'c']);
+  assert.equal(batch.jobs.length, 0, 'no fabricated results for jobs that never launched');
+});
+
+// One job is already running while the next admission yields: the running job
+// receives the stop request, the pending admission never launches.
+test('cancellation while one job runs stops it and skips the pending admission', async t => {
+  const base = await jobRoot(t);
+  const a = path.join(base, 'a'), b = path.join(base, 'b');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', route: 'backup', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+  ], { maxConcurrency: 2 });
+  const cfg = { ...f.config, routes: { ...f.config.routes, backup: { ...f.config.routes.worker, workerHome: path.join(f.root, 'backup-home') } } };
+  let reads = 0;
+  const started = [], stopped = [];
+  const spawner = ({ job: j, handleFile }) => {
+    started.push(j.id);
+    let resolveDone, isStopped = false;
+    const done = new Promise(r => { resolveDone = r; });
+    void (async () => {
+      await fs.writeFile(handleFile, JSON.stringify({ schema: HANDLE_SCHEMA, session_id: uuid(), request_id: uuid(), cwd: await fs.realpath(j.cwd), route: j.route }));
+    })();
+    return { done, stop: () => { if (isStopped) return; isStopped = true; stopped.push(j.id); resolveDone({ code: null, stdout: '', stderr: 'cancelled' }); } };
+  };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: {
+      loadConfig: async () => { if (++reads === 3) process.emit('SIGTERM'); return cfg; },
+      spawnJob: spawner,
+    },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(started, ['a'], 'the pending admission must not launch after cancellation');
+  assert.deepEqual(stopped, ['a'], 'the already-running job receives the stop request');
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'partial');
+  assert.equal(batch.cancelled, true);
+  assert.ok(batch.missing.includes('a') && batch.missing.includes('b'));
+  assert.equal(batch.jobs.find(j => j.id === 'b'), undefined, 'an unlaunched job has no fabricated record');
+});
+
+// An index publication failure sets the same admission-closed state. The batch
+// lets in-flight work finish but must not spawn the next job afterwards.
+test('an index publication failure closes admission before the next spawn', async t => {
+  const base = await jobRoot(t);
+  const a = path.join(base, 'a'), b = path.join(base, 'b');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', route: 'backup', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+  ], { maxConcurrency: 2 });
+  const cfg = { ...f.config, routes: { ...f.config.routes, backup: { ...f.config.routes.worker, workerHome: path.join(f.root, 'backup-home') } } };
+  let reads = 0, starts = 0;
+  const counting = fakeSpawner(state, { stateDir: f.config.stateDir, delay: 120 });
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: {
+      loadConfig: async () => {
+        reads++;
+        if (reads === 2) {
+          // Replace the just-published index with a directory: the next
+          // publication (triggered by the first captured handle) must fail.
+          const batchesDir = path.join(f.config.stateDir, 'batches');
+          const [bid] = await fs.readdir(batchesDir);
+          const indexPath = path.join(batchesDir, bid, 'index.json');
+          await fs.rm(indexPath);
+          await fs.mkdir(indexPath);
+        }
+        // Let the failing publication land before this admission resolves.
+        if (reads === 3) await new Promise(r => setTimeout(r, 400));
+        return cfg;
+      },
+      spawnJob: args => { starts++; return counting(args); },
+    },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.equal(starts, 1, 'no new launch after the index publication failure');
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'partial');
+  assert.equal(batch.index_warning, 'UNSAFE_FILE');
+  assert.deepEqual(batch.missing, ['b']);
+  assert.equal(batch.jobs[0].id, 'a');
+  assert.equal(batch.jobs[0].output_received, true);
+});
+
+// A config reload that THROWS after the batch started is a runtime error, not a
+// pre-launch validation failure: admission closes, collected results are kept,
+// the index settles to a final status, and the batch still reports.
+test('a config reload failure mid-batch still settles and reports a partial batch', async t => {
+  const base = await jobRoot(t);
+  const a = path.join(base, 'a'), b = path.join(base, 'b');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+  ], { maxConcurrency: 1 });
+  let reads = 0;
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: {
+      loadConfig: async () => { if (++reads === 3) throw Object.assign(new Error('config unreadable'), { code: 'BAD_JSON' }); return f.config; },
+      spawnJob: fakeSpawner(state, { stateDir: f.config.stateDir, delay: 20 }),
+    },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1, 'a mid-batch admission error must not escape as an unsettled batch');
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'partial');
+  assert.deepEqual(batch.admission_error, { job: 'b', code: 'BAD_JSON' });
+  assert.equal(batch.jobs.find(j => j.id === 'a')?.output_received, true, 'the completed job keeps its collected result');
+  assert.equal(batch.jobs.find(j => j.id === 'b')?.error_code, 'BAD_JSON');
+  assert.deepEqual(batch.missing, ['b']);
+  const index = JSON.parse(await fs.readFile(batch.index_path, 'utf8'));
+  assert.equal(index.status, 'partial', 'the durable index reaches a terminal status, not stale "running"');
+  assert.ok(index.results.some(r => r.id === 'a' && r.output_received), 'collected results reach the index');
+});
+
+// A child launched BEFORE cancellation may publish its start handle only after
+// the handle polls were cleared (e.g. it acquired its locks during settlement).
+// The end of the bounded wait does one final read: persisted for recovery,
+// trusted only on identity match, cleanup stays unconfirmed.
+test('a handle published during cancellation settlement is still captured for recovery', async t => {
+  const base = await jobRoot(t);
+  const a = path.join(base, 'a'), b = path.join(base, 'b');
+  const { f, manifestFile, out } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', route: 'backup', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+  ], { maxConcurrency: 2 });
+  const cfg = { ...f.config, routes: { ...f.config.routes, backup: { ...f.config.routes.worker, workerHome: path.join(f.root, 'backup-home') } } };
+  const sid = uuid(), req = uuid();
+  let reads = 0;
+  const startedAt = Date.now();
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: {
+      loadConfig: async () => {
+        // Once both admissions have read, cancel while both children run.
+        if (++reads === 3) setTimeout(() => process.emit('SIGINT'), 50);
+        return cfg;
+      },
+      spawnJob: ({ job: j, handleFile }) => {
+        let scheduled = false;
+        return {
+          done: new Promise(() => {}), // never settles within the bounded wait
+          stop: () => {
+            if (j.id !== 'a' || scheduled) return;
+            scheduled = true;
+            // The handle appears only AFTER cancellation began and the polls died.
+            setTimeout(() => {
+              void fs.realpath(j.cwd).then(cwd => fs.writeFile(handleFile, JSON.stringify({
+                schema: HANDLE_SCHEMA, session_id: sid, request_id: req, cwd, route: j.route,
+              }))).catch(() => {});
+            }, 150);
+          },
+        };
+      },
+    },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.ok(Date.now() - startedAt < 8000, 'settlement stays bounded');
+  const batch = out.at(-1);
+  assert.equal(batch.cancelled, true);
+  const ja = batch.jobs.find(j => j.id === 'a');
+  assert.equal(ja.start_handle?.session_id, sid, 'the late-published handle is captured');
+  assert.equal(ja.session_id, sid);
+  assert.equal(ja.cleanup, 'unconfirmed', 'holding a handle never upgrades to a confirmed stop');
+  assert.equal(ja.handle_mismatch, false);
+  assert.equal(ja.output_received, false);
+  const jb = batch.jobs.find(j => j.id === 'b');
+  assert.equal(jb.start_handle, null);
+  assert.ok(jb.handle_file.endsWith('b.handle.json'), 'a locatable handle-file clue remains when nothing was published');
+  const index = JSON.parse(await fs.readFile(batch.index_path, 'utf8'));
+  assert.equal(index.jobs.find(j => j.id === 'a')?.start_handle?.session_id, sid, 'the late handle reaches the durable index');
+});
+
+// The REAL spawnJob collector: a child floods stderr past the retention budget
+// and only then prints a valid receipt. Diagnostics may truncate; the receipt
+// must survive in stdout's own budget.
+test('a noisy child cannot starve the stdout receipt: stderr and stdout keep separate budgets', async t => {
+  const cwd = path.join((await jobRoot(t)), 'n');
+  const order = path.join(cwd, 'o.md');
+  const { f, manifestFile, out } = await batchFixture(t, [job({ id: 'n', cwd, file: order, deliver: false })]);
+  await fs.writeFile(order, 'flood-stderr');
+  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixture-noisy-child.mjs');
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config }, // REAL spawnJob
+    output: r => out.push(r), text: () => {}, cliPath,
+  });
+  const batch = out.at(-1);
+  const j = batch.jobs[0];
+  assert.equal(j.output_received, true, 'the valid receipt survives a flooded stderr');
+  assert.equal(j.runtime_status, 'completed');
+  assert.equal(j.output_truncated, false);
+  assert.equal(j.stderr_truncated, true, 'stderr truncation stays visible');
+  assert.ok(j.start_handle, 'the published handle still matches');
+  assert.equal(code, 0);
+  assert.equal(batch.status, 'complete');
+});
+
+// The reverse failure shape: padding pushes stdout past its budget AFTER a
+// complete receipt, so the retained prefix still parses. A truncated stdout is
+// refused as a receipt; the job lands in missing, never guessed successful.
+test('a truncated stdout is never accepted as a receipt, even when the retained prefix parses', async t => {
+  const cwd = path.join((await jobRoot(t)), 'o');
+  const order = path.join(cwd, 'o.md');
+  const { f, manifestFile, out } = await batchFixture(t, [job({ id: 'o', cwd, file: order, deliver: false })]);
+  await fs.writeFile(order, 'stdout-overflow');
+  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixture-noisy-child.mjs');
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config }, // REAL spawnJob
+    output: r => out.push(r), text: () => {}, cliPath,
+  });
+  assert.equal(code, 1);
+  const batch = out.at(-1);
+  const j = batch.jobs[0];
+  assert.equal(j.output_truncated, true);
+  assert.equal(j.output_received, false, 'a truncated receipt is refused even if the prefix is valid JSON');
+  assert.equal(batch.status, 'partial');
+  assert.deepEqual(batch.missing, ['o']);
 });

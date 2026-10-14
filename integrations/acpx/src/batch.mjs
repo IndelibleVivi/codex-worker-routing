@@ -151,21 +151,26 @@ function spawnJob({ cliPath, configFile, stateDir, expectedAdmission, job, handl
   base.push('--file', job.file, '--permissions', job.permissions, '--start-handle', handleFile, '--expected-admission', expectedAdmission);
   if (job.deliver) base.push('--deliver');
   const child = spawn(process.execPath, base, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true, detached: process.platform !== 'win32' });
-  let stdout = '', stderr = '', outBytes = 0, outTruncated = false;
+  // stdout carries the machine receipt; stderr is diagnostic. Each stream keeps
+  // its OWN bounded retention budget: flooded diagnostics may truncate stderr,
+  // but can never starve a valid receipt out of stdout's budget. A truncated
+  // stdout is refused downstream, never parsed as a receipt.
+  let stdout = '', stderr = '', stdoutBytes = 0, stderrBytes = 0, stdoutTruncated = false, stderrTruncated = false;
   const feed = (buf, which) => {
-    const remaining = MAX_CHILD_OUTPUT - outBytes;
-    outBytes += buf.length;
-    if (remaining <= 0) { outTruncated = true; return; }
+    const isOut = which === 'out';
+    const remaining = MAX_CHILD_OUTPUT - (isOut ? stdoutBytes : stderrBytes);
+    if (isOut) stdoutBytes += buf.length; else stderrBytes += buf.length;
+    if (remaining <= 0) { if (isOut) stdoutTruncated = true; else stderrTruncated = true; return; }
     const text = buf.toString('utf8', 0, Math.min(buf.length, remaining));
-    if (which === 'out') stdout += text; else stderr += text;
-    if (buf.length > remaining) outTruncated = true;
+    if (isOut) stdout += text; else stderr += text;
+    if (buf.length > remaining) { if (isOut) stdoutTruncated = true; else stderrTruncated = true; }
   };
   child.stdout.on('data', d => feed(d, 'out'));
   child.stderr.on('data', d => feed(d, 'err'));
   const done = new Promise(resolve => {
     let spawnError = null;
     child.on('error', e => { spawnError = e.code ?? 'SPAWN_ERROR'; });
-    child.on('close', (code, signal) => resolve({ code: code ?? spawnError ?? signal, signal, stdout, stderr, outTruncated }));
+    child.on('close', (code, signal) => resolve({ code: code ?? spawnError ?? signal, signal, stdout, stderr, stdoutTruncated, stderrTruncated }));
   });
   const stop = () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
@@ -251,6 +256,10 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   const order = [...prepared];
   const spawn = deps.spawnJob ?? spawnJob;
   let cancelled = false;
+  // A mid-batch admission failure (config reload throws, spawn refuses) closes
+  // admission for the rest of THIS batch: nothing new launches, outstanding work
+  // settles, and the batch still reports every result it already owns.
+  let admissionError = null;
   let indexWarning = null, indexQueue = Promise.resolve(), indexStatus = 'running';
   const writeIndex = status => {
     if (status !== 'running') indexStatus = status;
@@ -270,7 +279,9 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   const collectResult = async (out, record) => {
       const startHandle = handles.get(record.id) ?? await captureHandle(record.handleFile);
       if (startHandle && !handles.has(record.id)) { handles.set(record.id, startHandle); await writeIndex('running').catch(() => {}); }
-      const receipt = parseReceipt(out.stdout);
+      // A truncated stdout is NEVER a receipt, even if the retained prefix
+      // happens to parse as a complete JSON document.
+      const receipt = out.stdoutTruncated ? null : parseReceipt(out.stdout);
       // Validate the handle against the receipt identity (or the manifest for a
       // continue); a mismatch is a partial, never a trusted handle.
       const expectedCwd = record.entry.targets.cwd;
@@ -303,7 +314,8 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
         receipt_path: receipt?.receipt_path ?? null,
         exit_code: out.code ?? null,
         output_received: Boolean(receipt),
-        output_truncated: Boolean(out.outTruncated),
+        output_truncated: Boolean(out.stdoutTruncated),
+        stderr_truncated: Boolean(out.stderrTruncated),
         error_code: receipt?.error_code ?? null,
         // Collection coverage is separate from engineering acceptance.
         delivery_path: delivery ? deliveryFile(full.stateDir, receipt.session_id, receipt.request_id) : null,
@@ -316,8 +328,12 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
   try {
     while (order.length || running.size) {
-      const drainOnly = cancelled;
-      for (let i = 0; !drainOnly && i < order.length;) {
+      // `cancelled` is read LIVE here and re-checked after every admission await:
+      // it is the irreversible admission-closed state for this batch, whether set
+      // by a parent signal or by an index publication failure. A `drainOnly`
+      // snapshot taken at the top of the iteration would let an admission that
+      // yielded the event loop launch a child AFTER cancellation took effect.
+      for (let i = 0; !cancelled && !admissionError && i < order.length;) {
         if (running.size >= concurrency) break;
         const entry = order[i];
         let conflict = false;
@@ -325,14 +341,35 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
         if (conflict) { i++; continue; }
         order.splice(i, 1);
         const handleFile = path.join(indexDir, `${entry.job.id}.handle.json`);
-        const fresh = await loadConfigImpl(config.configPath);
+        let fresh;
+        try {
+          fresh = await loadConfigImpl(config.configPath);
+        } catch (e) {
+          // The batch has already started: a failing config reload is a runtime
+          // error for this admission, not a pre-launch validation failure. Record
+          // it, close admission, and settle what is already running below.
+          admissionError = { job: entry.job.id, code: e.code ?? 'CONFIG_RELOAD_FAILED' };
+          results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
+          break;
+        }
+        // Cancellation or an index publication failure may have landed during the
+        // await above. Re-check BEFORE spawn: a cancelled batch launches nothing.
+        // The unlaunched job keeps no fabricated result, so it lands in `missing`.
+        if (cancelled) break;
         if (fresh.stateDir !== full.stateDir || JSON.stringify(fresh.routes[entry.targets.routeName]) !== JSON.stringify(entry.targets.route)) {
           results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: 'CONFIG_CHANGED', cleanup: null });
           continue;
         }
         const expectedAdmission = digest({ stateDir: full.stateDir, routeName: entry.targets.routeName, route: entry.targets.route, cwd: entry.targets.cwd, permissions: entry.job.permissions });
         const env = buildChildEnv(entry.targets.route, cliHome);
-        const handle = spawn({ cliPath, configFile: config.configPath, stateDir: full.stateDir, expectedAdmission, job: entry.job, handleFile, env });
+        let handle;
+        try {
+          handle = spawn({ cliPath, configFile: config.configPath, stateDir: full.stateDir, expectedAdmission, job: entry.job, handleFile, env });
+        } catch (e) {
+          admissionError = { job: entry.job.id, code: e.code ?? 'SPAWN_FAILED' };
+          results.set(entry.job.id, { id: entry.job.id, output_received: false, error_code: admissionError.code, cleanup: null });
+          break;
+        }
         const record = { id: entry.job.id, entry, handleFile, keys: entry.keys, handle };
         for (const k of entry.keys) heldKeys.add(k);
         running.set(entry.job.id, { record });
@@ -368,13 +405,31 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
     clearTimeout(settleTimer);
     for (const r of outstanding) {
       if (r.record.settled) await collectResult(r.record.settled, r.record);
-      else r.record.handle.abandon?.();
+      else {
+        r.record.handle.abandon?.();
+        // One FINAL handle read at the end of the bounded wait: a child that was
+        // launched before cancellation may publish its start handle only after
+        // the last poll (e.g. it acquired its locks during settlement). Persist
+        // what is observed so recovery can find it; trust it in the result only
+        // when it matches this job's identity. cleanup stays unconfirmed either
+        // way — holding a handle never upgrades to a confirmed stop.
+        if (!handles.has(r.record.id)) {
+          const late = await captureHandle(r.record.handleFile);
+          if (late) handles.set(r.record.id, late);
+        }
+      }
       if (!results.has(r.record.id)) {
+        const observed = handles.get(r.record.id) ?? null;
+        const trusted = Boolean(observed) && observed.cwd === r.record.entry.targets.cwd && observed.route === r.record.entry.targets.routeName;
         results.set(r.record.id, {
-          id: r.record.id, session_id: r.record.entry.job.session ?? null, request_id: null,
-          route: r.record.entry.targets.routeName, start_handle: handles.get(r.record.id) ?? null,
-          handle_mismatch: false, runtime_status: null, cleanup: 'unconfirmed', receipt_path: null,
-          exit_code: null, output_received: false, output_truncated: false, error_code: null,
+          id: r.record.id,
+          session_id: (trusted ? observed.session_id : null) ?? r.record.entry.job.session ?? null,
+          request_id: trusted ? observed.request_id : null,
+          route: r.record.entry.targets.routeName, start_handle: trusted ? observed : null,
+          handle_mismatch: Boolean(observed) && !trusted, runtime_status: null, cleanup: 'unconfirmed', receipt_path: null,
+          exit_code: null, output_received: false, output_truncated: false, stderr_truncated: false, error_code: null,
+          // Locatable recovery clue when no handle could be captured at all.
+          handle_file: r.record.handleFile,
           delivery_status: null, delivery_questions: null, delivery_problem: null,
         });
       }
@@ -390,13 +445,14 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
     const r = results.get(id);
     if (!r || !r.output_received || !r.start_handle || r.handle_mismatch || (p.job.deliver && r.delivery_problem)) missing.push(id);
   }
-  const status = cancelled || missing.length || indexWarning ? 'partial' : 'complete';
+  const status = cancelled || missing.length || indexWarning || admissionError ? 'partial' : 'complete';
   const batch = {
     schema: BATCH_SCHEMA, batch_id: batchId, status, cancelled, concurrency,
     shared_home_validated: manifest.manifestValidated,
     job_count: prepared.length, missing, jobs,
     admission_scope: 'batch_local_only',
     index_path: path.join(indexDir, 'index.json'), index_warning: indexWarning,
+    admission_error: admissionError,
   };
   await writeIndex(status).catch(() => {});
   if (indexWarning) { batch.status = 'partial'; batch.index_warning = indexWarning; }

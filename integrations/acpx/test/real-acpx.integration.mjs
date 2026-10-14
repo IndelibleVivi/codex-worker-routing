@@ -236,8 +236,12 @@ test('REAL acpx: cancelling one shared-home turn does not cancel the other',asyn
  assert.equal(done.r.receipt.runtime_status,'cancelled');
  const other=done.who==='a'?b:a;
  const otherDone=await other.done;
- // The other turn must not have been cancelled by the first cancel.
+ // The other turn must not have been cancelled by the first cancel. Distinct
+ // session ids alone would ALSO pass a double-cancel, so assert the surviving
+ // turn's own terminal state: this fixture's waited turn ends failed by the
+ // turn deadline on its own; it must never read cancelled.
  assert.notEqual(otherDone.receipt.session_id,cancelledId);
+ assert.notEqual(otherDone.receipt.runtime_status,'cancelled','a single cancel must not cancel the sibling session');
 });
 test('REAL acpx: batch runs two independent jobs as real subprocesses with machine handles',async t=>{
  await loadAcpx();

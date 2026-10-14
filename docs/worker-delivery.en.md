@@ -91,17 +91,29 @@ Otherwise serialize conservatively. Complete means result coverage, not engineer
 A start handle records locks_held; adapter initialization and prompt acknowledgement may still be pending.
 The runner verifies actual child selection against its resource plan and rejects changed configuration
 before launch. Parent cancellation uses the same nonce-bound control writer as ordinary cancel.
+Cancellation or an index publication failure is a batch-level admission stop: the scheduler
+re-confirms admission after every asynchronous admission step and before the actual launch, so a
+cancelled batch starts nothing new. A config reload or launch failure after the batch started does
+not swallow batch settlement: admission closes, collected results are kept, and the batch reports a
+partial carrying `admission_error`; unlaunched jobs land in missing without fabricated handles or receipts.
+
+Child stdout and stderr keep independent bounded retention budgets: diagnostics that exhaust their
+own budget truncate stderr only (visible as `stderr_truncated`) and cannot starve the machine
+receipt; once stdout itself is truncated, the retained prefix is refused as a receipt even when it
+happens to parse as valid JSON, and the job lands in missing.
+
+When a parent stops, launch no new items and request cancellation from its owned CLI processes,
+then wait boundedly for cleanup. Unsettled operations remain unconfirmed. At the end of the bounded
+wait, children without a captured handle get one final real read: a late-published handle is
+persisted to the index for recovery after an identity check, and cleanup stays unconfirmed. Ambiguous submission or unknown cleanup preserves recoverable state;
+a missing report does not authorize replaying a write order. Healthy progress stays in
+tool-owned waits, with meaningful exceptions or a batch overview reaching the coordinator.
 
 Retain exact-cwd locks. Different directories, worktrees or read mode do not isolate actual
 writes, Git common state, adapter HOME/session store/cache, ports or databases. Serialize an
 unverified shared HOME within the batch; expand only an authorized, validated arrangement.
 Do not copy credentials, widen parent roots or change cwd to bypass locks. Batch limits do
 not claim global admission across every separate CWR instance.
-
-When a parent stops, launch no new items and request cancellation from its owned CLI processes,
-then wait boundedly for cleanup. Unsettled operations remain unconfirmed with handles/receipts for recovery. Ambiguous submission or unknown cleanup preserves recoverable state;
-a missing report does not authorize replaying a write order. Healthy progress stays in
-tool-owned waits, with meaningful exceptions or a batch overview reaching the coordinator.
 
 ## Accept results without repeating discovery
 
