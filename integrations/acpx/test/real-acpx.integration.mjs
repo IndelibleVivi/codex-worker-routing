@@ -24,10 +24,10 @@ async function command(f,verb,extra=[],entry=cli){return start(f,verb,extra,entr
 // A blocking `run` must be started without awaiting it so a second control
 // command can race it. Progress is detected by a real condition, never a fixed
 // sleep.
-function start(f,verb,extra=[],entry=cli){
+function start(f,verb,extra=[],entry=cli,env={}){
  const mode=['run','continue'].includes(verb)&&!extra.includes('--permissions')?['--permissions','read']:[];
  const args=[entry,verb,'--config',f.configFile,...mode,...extra];
- const child=execFile(process.execPath,args,{timeout:25000,killSignal:'SIGKILL',maxBuffer:512*1024,env:{...process.env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
+ const child=execFile(process.execPath,args,{timeout:25000,killSignal:'SIGKILL',maxBuffer:512*1024,env:{...process.env,...env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
  let closed=false;
  const done=new Promise(resolve=>{
   let stdout='',stderr='',spawnError;
@@ -391,7 +391,10 @@ test('REAL acpx: two coexisting batches publish start handles and collect withou
  ]}));
  // Start BOTH real CLI batches without awaiting. Each must publish its handle
  // BEFORE it launches anything.
- const runA=start(f,'batch',['--manifest',manifestA,'--start-handle',handleA]);
+ const stopFile=path.join(f.root,'cancel-parent.marker');
+ const runA=start(f,'batch',['--manifest',manifestA,'--start-handle',handleA],
+  process.platform==='win32'?path.resolve('test/fixture-batch-cancel.mjs'):cli,
+  process.platform==='win32'?{CWR_TEST_PARENT_CANCEL_FILE:stopFile}:{});
  const runB=start(f,'batch',['--manifest',manifestB,'--start-handle',handleB]);
  const readHandle=async file=>{try{return JSON.parse(await fs.readFile(file,'utf8'))}catch{return null}};
  const hA=await until(async()=>{const h=await readHandle(handleA);return h&&h.schema==='cwr.acp.batch-handle/1'?h:null},'batch A must publish its start handle');
@@ -420,10 +423,17 @@ test('REAL acpx: two coexisting batches publish start handles and collect withou
  assert.ok(bCollected.receipt.items.some(i=>i.id==='solo'));
  assert.ok(bCollected.receipt.items.every(i=>i.id==='solo'),'batch B returns only its own job');
  assert.ok(!JSON.stringify(bCollected.receipt).includes(hA.batch_id),'batch B never references batch A');
- // Stop batch A through the real parent signal; it settles and reports partial.
- runA.child.kill('SIGTERM');
+ // POSIX delivers the OS signal. Windows force-kills a target via child.kill,
+ // so use the existing test-only wrapper to emit the parent handler instead.
+ // Both paths must exercise production cancellation and durable settlement.
+ if(process.platform==='win32')await fs.writeFile(stopFile,'cancel');
+ else runA.child.kill('SIGTERM');
  const aDone=await runA.done;
+ assert.equal(aDone.code,1,aDone.stderr);
  assert.equal(aDone.receipt?.status,'partial');
  assert.equal(aDone.receipt?.cancelled,true);
+ assert.equal(aDone.receipt.jobs.length,2);
+ assert.equal(aDone.receipt.jobs.find(j=>j.id==='slow').runtime_status,'cancelled');
+ assert.equal(aDone.receipt.jobs.find(j=>j.id==='slow').cleanup,'confirmed');
  assert.ok(aDone.receipt.jobs.every(j=>['fast','slow'].includes(j.id)),'batch A only ever owns its own jobs');
 });
