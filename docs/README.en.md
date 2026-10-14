@@ -2,11 +2,14 @@
 
 [中文](README.md) | English
 
-Start with [your first delegated task](first-delegated-task.en.md), or explore the [website and on-site guide](https://indeliblevivi.github.io/codex-worker-routing/guide/).
+To understand the mechanism, read the [architecture overview](architecture.en.md); to start
+using it, begin with [your first delegated task](first-delegated-task.en.md). Or explore the
+[website and on-site guide](https://indeliblevivi.github.io/codex-worker-routing/guide/).
 
 | Topic | 中文 | English |
 | --- | --- | --- |
 | Your first delegated task | [中文](first-delegated-task.md) | [English](first-delegated-task.en.md) |
+| Architecture overview | [中文](architecture.md) | [English](architecture.en.md) |
 | Installation, verification and recovery | [中文](installation.md) | [English](installation.en.md) |
 | Custom models in the native picker | [中文](native-model-picker.md) | [English](native-model-picker.en.md) |
 | Optional ACP integration | [中文](acp-integration.md) | [English](acp-integration.en.md) |

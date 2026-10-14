@@ -38,6 +38,18 @@
 历史首次部署：[run 35536211919](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/35536211919)，
 源码 `d84458c`；其公网中英文入口、资源及浏览器交互已在当次验收。
 
+## 0.4 系列的阅读入口
+
+首页先展示目标、完整责任、worker 自查与主 agent 验收，再画出帮助返回原 worker 的路径。
+随后区分可选 ACP 的 `prepare → batch → collect`：主 agent 编写分工，CLI 机械生成工单、
+按资源准入并逐项持久化结果，`collect` 只读已经结算的部分。执行状态、worker 自述与
+工程验收分别说明。Dispatch 与分享卡继续作为下方的记录与展示入口。
+
+站内指南的 `#architecture` 提供相同协作图，并链接到对应语言的[完整架构](architecture.md)。
+`workflow.mjs` 是首页与指南两张视图的共同 authored source，`style.css` 把横向流程在窄屏
+改为纵向阅读，帮助与原会话续做的说明保留。两张图都是语义 HTML，关闭 JavaScript 仍可读；
+不新增浏览器依赖，不把实际工单或回执放进公开图中。
+
 ## 构建与预览
 
 从仓库根目录运行：
@@ -130,6 +142,7 @@ FAQ 用六个短问题说明安装选项、委派控制、模型与访问范围�
 
 - `page.mjs` / `style.css`：共享页面外壳、双语首页、响应式布局与四页搜索元数据（title、description、canonical、hreflang、社交卡片、JSON-LD）；其中产品名称、仓库与许可为模块内公开常量，不含私有字段。
 - `guide.mjs`：站内双语指南正文；复用页面外壳，不加载首页交互脚本。
+- `workflow.mjs`：首页与指南共用的双语协作闭环和有限 batch 视图；只渲染公开说明。
 - `client.mjs`：渐进增强；无 API 请求、持久存储、cookies 或 analytics。
 - `demo.mjs`：明确标注的合成数据，24 份任务 / 42 轮 / 840K observed tokens。
 - `artwork.mjs`：组合 Canon 猫、线条产品标识、针脚与便签；不修改原始猫矢量。

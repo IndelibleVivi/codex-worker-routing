@@ -16,7 +16,7 @@ const expected=['index.html','zh/index.html','guide/index.html','zh/guide/index.
  ...['en','zh'].flatMap(l=>['hero','banner','social','demo-sage'].map(n=>`assets/${n}-${l}.svg`).concat(`assets/social-${l}.png`)),
  ...['share','share-style','brand','mark','mascots','themes','ornaments','time'].map(n=>`assets/lib/${n}.mjs`)].sort();
 assert.deepEqual(paths,expected,'Only the explicit public projection may be deployed');
-for(const file of ['artwork.mjs','build.mjs','check.mjs','client.mjs','demo.mjs','page.mjs','guide.mjs']){
+for(const file of ['artwork.mjs','build.mjs','check.mjs','client.mjs','demo.mjs','page.mjs','guide.mjs','workflow.mjs']){
  const result=spawnSync(process.execPath,['--check',path.join(root,file)],{encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);
 }

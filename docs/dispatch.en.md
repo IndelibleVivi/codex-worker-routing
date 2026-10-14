@@ -5,6 +5,7 @@
 Delegate as usual; receipts leave a trail. Dispatch is a local view of read-only ACP
 receipts and deliberate coordinator review notes. It does not schedule work or introduce a second job database. Native Codex
 activity has no connected data source here; every metric is explicitly ACP-only.
+See the [architecture overview](architecture.en.md) for the full ownership and channel topology.
 
 ## Open the dashboard
 

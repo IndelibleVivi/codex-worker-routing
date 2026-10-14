@@ -4,32 +4,106 @@
 
 [English](README.en.md) | 中文
 
-**面向 Codex 的多模型委派工具，配有本地 Dispatch 派工台。**
-把一块完整工程责任交给原生 Codex worker，或通过可选 ACP integration 交给已登记的外部 coding agent；
-主 agent 保留目标、整合与交付责任。一个默认小工就能完整使用；适合希望分配执行工作，同时保留主会话个人上下文的使用者。
+**面向 Codex 的多模型委派工具：把完整的工程责任交给 worker，同时把目标、判断与最终交付留在
+主 agent 手里。**
+它指导主 agent 从实质工程目标中识别可独立交付的责任，沿用 operator 选择的原生 Codex
+或外部 ACP 通道。worker 连贯调查、实现、自查与修正；需要关键判断时，主 agent 提供帮助，
+再把下一步送回原 worker。一个默认小工就能开始，微小、临近完成或 solo 的工作直接做。
 
 [从零到第一次成功派工](docs/first-delegated-task.md) · [安装插件](#安装) ·
-[本地派工台使用指南](docs/dispatch.md) · [配置自定义模型](docs/native-model-picker.md)
+[架构总览](docs/architecture.md) · [本地派工台使用指南](docs/dispatch.md) ·
+[配置自定义模型](docs/native-model-picker.md)
 
-当前源码版本为 0.4.1。调度由一个 instruction-only plugin 提供；可选 ACP integration
-通过 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生
-`SessionStart` hook 自动加载本机私人说明。没有额外 MCP、job database、provider
-proxy 或固定 planner/tester/reviewer 流水线。
+## 0.4 系列：这次改变什么
 
-## 产品页面与 Banner
+当前源码版本为 0.4.1。调度由一个 instruction-only plugin 提供；可选 ACP integration 通过
+`acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生 `SessionStart` hook
+自动加载本机私人说明。没有额外 MCP、job database、provider proxy 或固定 planner/tester/reviewer
+流水线。0.4 系列把重点从组件接线移到「一个能端到端背起整块责任」的 worker。
 
-双语产品页沿用鼠尾草、浅粉卡纸与折耳猫圆章，介绍委派流程和本地 Dispatch；
-可点选柱状图查看合成示例的逐日轮次，也可切换四位伙伴、选择文案并下载示例分享卡。页面不连接私人派工台，
-不读取回执，不使用 analytics。访问[中文产品页](https://indeliblevivi.github.io/codex-worker-routing/zh/)
-或 [English](https://indeliblevivi.github.io/codex-worker-routing/)。
-安装、Dispatch 与边界说明可在[站内使用指南](https://indeliblevivi.github.io/codex-worker-routing/zh/guide/)阅读。
-本地预览与发布方法见[产品页面指南](docs/website.md)。中英 Banner 位于
-[`plugins/worker-routing/assets/`](plugins/worker-routing/assets/)。
+| 能力 | 0.4 的当前能力 |
+| --- | --- |
+| 完整责任 | 路由说明把实质工程目标视为足以识别一块完整、可委派责任；调查、实施、自检、自修与收尾都由 worker 负责。微小或 solo 工作仍直接完成。 |
+| 同一 worker 协助 | 需要一次判断或某项能力时，答复回到同一个 child，保留已接受的结果，不默认另派 reviewer，也不强制接管。 |
+| 有界交付 | `--deliver` 收集 worker 的结构化交付声明，与 runtime 回执及其有界文本摘录分开保存。 |
+| 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 对有限清单做 admission 并以独立 CLI 进程执行；`collect` 读取已结算结果，不必等其余项目。没有全局 scheduler 或 job database。 |
+| 证据边界 | worker 声明只是候选，不是验收；只有任务确认的检查会执行，绝不执行来自报告的指令。 |
+| ACP 持久授权 | 每次 run/continue 都重查显式每轮权限；恢复绑定确切的 session 与回执；已配置的备用只在启动前触发。 |
+
+## 一次任务怎样流动
+
+先尊重 operator 已有的通道选择：可用的原生工具不覆盖常设 ACP 选择。对已登记的 ACP route，
+在现有 Git 外 `routes.json` 加入 `routing.default`，普通 `run` 即可省略 `--route`。派出后主
+agent 不重复实施同一责任；出现缺口就回到同一个 worker，主 agent 保留整合与交付。
+
+```mermaid
+flowchart TD
+  Goal["工程目标"] --> Main["主 agent<br/>组织分工"]
+  Main -->|实质工程目标| Worker["Worker：native / ACP<br/>调查 / 实现<br/>自查 / 修正"]
+  Main -->|微小或 solo| Direct["主 agent<br/>直接完成"]
+  Worker -->|成果 + 证据| Review["主 agent 验收"]
+  Review -->|接受| Deliver["整合与交付"]
+  Review -->|帮助 · 补充条件 · 具体返修| Worker
+  Direct --> Deliver
+  classDef coordinator fill:#edf2e5,stroke:#8fa77c,color:#51415f
+  classDef worker fill:#faedf1,stroke:#c69eae,color:#51415f
+  classDef evidence fill:#fffefa,stroke:#c1b3c9,color:#51415f
+  class Main,Review,Direct,Deliver coordinator
+  class Worker worker
+  class Goal evidence
+```
+
+## 日常使用
+
+安装后正常提出工程任务即可。主 agent 在有收益时交出完整责任：调查、实现、自测和必要文档可以由
+同一个 worker 连贯完成，需要修正时继续同一个 child。
+
+```text
+修复 CSV 导入时空行导致的失败，补能复现问题的检查。
+可以把导入模块的调查、修复和自测交给一个 worker；你负责整合与交付。
+```
+
+`全权接住`、`从头做到位` 允许内部委派；`solo`、`亲自做`、`别派小弟` 保持主 agent 执行。
+微小、接近完成或交接成本过高的工作也直接完成。派工顺序是先保住完整结果、质量与权限，再在不牺牲
+这三者的前提下减少主订阅模型的执行消耗，同时控制端到端耗时与 coordinator 返工。模型与 provider
+名留在 operator 配置里，插件不做排行榜、价格查询或评测矩阵。
+
+## 交付、批次与恢复
+
+日常 `run` / `continue` / `close` 保持简单，每轮显式权限，不要求额外记录。复杂成果可选
+`--deliver`，有限独立清单可选 `batch`；`prepare` 机械生成 order 与 manifest 且不启动任何 worker，
+`collect` 只读并随时返回已结算结果。worker 声明为 `ready`、`partial` 或 `needs_input`，只是候选，
+不是验收；runtime 完成同样不是验收。完整接口见
+[Worker 交付与有限批次](docs/worker-delivery.md)。
+
+恢复绑定确切的 session 与回执。每次 ACP `run` / `continue`（包括普通续做）都必须显式带
+`--permissions read|full`，省略会在派工前被拒绝。超时或取消一旦成立，迟到的结果不会改写终态，
+已有输出保留为进度证据。已配置的备用只在启动前因入口不可用或缺少必要环境凭据而触发；权限、
+workspace、停用、初始化或执行失败都不会触发。`enabled: false` 阻止后续 run/continue，同时保留
+status/cancel/close；更换默认只影响新责任。配置与恢复细节见
+[ACP 默认与备用](docs/acp-integration.md#默认与备用)与[安装与恢复](docs/installation.md)。
+
+同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式：修复具体
+环境问题、缩小剩余责任或部分接管。新需求、阶段推进和未送达权限不计为质量失败。
+
+## 上下文怎样分开
+
+| 内容 | 主 session | 临时 worker |
+| --- | --- | --- |
+| 共享工程 AGENTS 与项目规则 | 依赖宿主，宿主提供时附加 | 依赖宿主，宿主提供时附加 |
+| 本机私人主会话说明 | 可选 SessionStart 集成在首次模型请求前注入 | 不由该 hook 注入 |
+| 具体工单 | 主 agent 组织 | 明确接收 |
+| 主对话历史 | 保留 | 新原生工单使用 `fork_turns="none"`；ACP 使用独立 session 与最小工单 |
+
+仅增加一份 worker AGENTS 不会移除宿主已附加的私人规则。启用上下文分离时，需要把私人内容移出
+自动共享 AGENTS，并先验证启动 hook 已受信任且完整送达。这属于输入装配边界，**不是文件访问
+sandbox**。模型和 reasoning effort 由使用者的实时库存与授权决定；插件不绑定供应商、不提供
+API key、不改变主模型，也不通过试跑申请私人数据传输权限。
 
 ## Dispatch · 派工台
 
-Dispatch 是可选的本地派工台，只读展示已有的 ACP 回执——不使用它不影响 Worker
-Routing；它不安排工作、不建 job database，也没有原生 Codex 活动的数据源（页面数字明确只覆盖 ACP）。
+Dispatch 是可选的本地派工台，对已有 ACP 回执做只读投影——不使用它不影响 Worker Routing；
+它不安排工作、不建 job database，也没有原生 Codex 活动的数据源（页面数字明确只覆盖 ACP）。
 配置好[可选的 ACP integration](#安装)后，在 canonical checkout 中启动：
 
 ```sh
@@ -37,188 +111,36 @@ node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.j
 node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json --since 7d
 ```
 
-命令会在前台运行并打印一个私人 loopback URL（默认随机端口，可用 `--port 4317` 固定）；
-需要你自己打开这个 URL，并保持进程运行，直到点击关闭面板或按 Ctrl+C。第一次派发 ACP 任务之前，
-派工台打开时是空的，这是预期行为——它只投影已经存在的回执。分享卡从面板页首的
-「分享小卡 / Share card」按钮进入。
+命令会在前台运行并打印一个私人 loopback URL（默认随机端口，可用 `--port 4317` 固定）；需要你
+自己打开这个 URL，并保持进程运行，直到点击关闭面板或按 Ctrl+C。第一次派发 ACP 任务之前，派工台
+打开时是空的，这是预期行为——它只投影已经存在的回执。
 
-Home 默认显示聚合统计：时间走势、准确占比的状态条、route 分工、明确返修与 runtime notes；具体工单回放在 Sessions。
-Sessions 可按真实工作目录归入 Git 仓库或文件夹，同 repo 的 worktree 合并，再筛选具体目录；
-不把这些归组冒充 Codex 保存的 project 名称。浏览器默认机器时区，日期柱、下钻与分享保持一致。
+Home 显示聚合的按时间走势、route 分工、明确返修与 runtime notes；Sessions 回放单块责任。分享卡
+导出聚合白名单加上你自己填写的文案与署名，文件名形如
+`worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`。面板提供四套纸张配色（鼠尾草猫、燕麦玫瑰兔、
+雾蓝奶油狗、薰衣草杏熊），配色应用到面板与图表，陪伴动物出现在首页标签与分享图圆章。主题、语言
+和时区是仅有的可写偏好，保存在 Git 外；派工台仅监听 loopback、按需运行，没有 analytics 或额外
+frontend dependency。累计 tokens 去重并标明用量覆盖率，缺少数据保持未知；观察到的工作量不是
+节省 Codex 额度的估算。命令、导出白名单与数据契约见[派工台使用指南](docs/dispatch.md)。
 
-给日常协作留下一条看得见的轨迹：按时间窗口查看 ACP 工作量，展开同一 worker
-的续做、送验、修正、接受与接管，分别检查主机验证和 worker 自述。本地面板提供四套纸张配色，
-各配一只同族动物：默认「鼠尾草猫 / Sage cat」（折耳猫就是 Canon 身份），另有
-「燕麦玫瑰兔 / Oat bunny」「雾蓝奶油狗 / Mist puppy」「薰衣草杏熊 / Lilac bear」。
-配色应用到面板与图表，陪伴动物出现在首页标签与分享图圆章；主题、语言、时区保存在 Git 外的本地偏好文件，换端口或重启后恢复。
-导出窗口每次从面板当前配色打开，可单独改配色而不影响面板，并可选择中文 / English 与横版 / 竖版，
-生成 SVG、PNG 分享图；文件名形如 `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`。
-分享图把主任务数与布艺陪伴圆章组合成主视觉，分层展示执行轮次、已知用量与运行状态；仓库地址右对齐。
-Slogan 可从四组双语文案开始自由编辑，支持可选分享者署名、三种数字字体，以及绕线 / 小花 / 留白装饰；
-预览实时更新，中英文草稿分别保留在当前页面，刷新后重置。面板也使用同源手绘 SVG 线纹。
-导出包括汇总白名单与你主动填写的文案、署名，不自动带入工单、私有 route 名、路径或内部 ID。Canon 是「折耳猫 + 默认鼠尾草」这一组：
-陪伴贴纸与 plugin icon 保留原始猫矢量；页首、favicon 与分享图页首改用固定线条产品标识。
-两种标识可独立下载，图片说明包含同一份安全汇总与当前文案、署名。
+## 产品页面与 Banner
 
-统计自动读取执行回执，普通完成不需要另写验收标记，也不会变成待办。真正需要保留的返修
-可通过 `continue --revision-reason` 顺手记录；`pending` 仅按需列出异常和明确提出的复查。
+双语产品页把鼠尾草、浅粉卡纸与折耳猫圆章带进委派指南和一份合成 Dispatch 预览，含可点选的逐日
+轮次柱状图与可下载的示例分享卡。页面不连接私人派工台，不读取回执，不使用 analytics。访问
+[中文产品页](https://indeliblevivi.github.io/codex-worker-routing/zh/)或
+[English](https://indeliblevivi.github.io/codex-worker-routing/)；安装、Dispatch 与边界说明可在
+[站内使用指南](https://indeliblevivi.github.io/codex-worker-routing/zh/guide/)阅读。本地预览与
+发布方法见[产品页面指南](docs/website.md)，中英 Banner 位于
+[`plugins/worker-routing/assets/`](plugins/worker-routing/assets/)。
 
-业务数据只读，仅写入三个本地展示偏好；仅监听 loopback、按需运行；没有 analytics 或额外 frontend dependency。
-累计 tokens 去重并标明用量覆盖率，缺少数据保持未知；不把 runtime 完成冒充验收，
-也不估算节省的 Codex 额度。首版统计范围明确为 ACP。见[派工台使用指南](docs/dispatch.md)。
+## 深入了解
 
-## 架构
-
-```mermaid
-flowchart LR
-  subgraph Source["Public canonical source / 公开真源"]
-    Policy["Worker Routing plugin<br/>delegation + channel policy"]
-    ACPSource["Optional ACP integration<br/>acp-worker + cwr-acp"]
-    Adapter["Optional SessionStart integration<br/>installer + adapter"]
-  end
-
-  subgraph Local["Local Codex runtime / 本机运行时"]
-    Cache["Installed plugin cache<br/>derived copy"]
-    Hook["Trusted SessionStart hook<br/>root-only injection"]
-    Main["Main coordinating agent<br/>goal · integration · delivery"]
-    Native["Native Codex worker<br/>bounded responsibility"]
-    ACPBridge["cwr-acp + registered adapter<br/>persistent ACP session"]
-    External["External ACP worker<br/>bounded responsibility"]
-    Dispatch["Local Dispatch dashboard<br/>read-only receipt projection"]
-  end
-
-  Private["Private main-session instructions<br/>outside Git"]
-  RouteConfig["Private route config<br/>provider/model preference"]
-  Shared["Shared engineering/project rules<br/>共享工程规则"]
-  User["User / 用户"]
-
-  Policy -->|plugin install| Cache
-  ACPSource -->|plugin install| Cache
-  ACPSource -->|npm ci| ACPBridge
-  Cache -->|routing instructions| Main
-  Adapter -->|install handler| Hook
-  Private -->|local read| Hook
-  Hook -->|private context<br/>root only| Main
-  RouteConfig -->|default / explicit route| ACPBridge
-  Shared --> Main
-  Shared --> Native
-  Shared --> External
-  Main -->|native work order<br/>fork_turns=none| Native
-  Native -->|result + evidence| Main
-  Main -->|ACP work order| ACPBridge
-  ACPBridge -->|ACP session| External
-  External -->|result + evidence| ACPBridge
-  ACPBridge -->|receipt + optional delivery| Main
-  ACPBridge -->|private receipts| Dispatch
-  Main -->|explicit review events| Dispatch
-  Main -->|integrated delivery| User
-```
-
-图中区分了 public source、derived installed copy、Git 外私人说明与可选 ACP
-执行通道。它描述输入装配和责任流：`fork_turns="none"` 不携带主对话历史，但不会
-移除宿主自动共享的工程规则，也不构成文件访问 sandbox。native、ACP、provider 与
-model 的临时优先级由 operator 在 Git 外配置，仓库本身不替使用者决定。
-
-## 第一次配置
-
-如果你还没有完整走过一次派工，先看[从零到第一次成功派工](docs/first-delegated-task.md)。
-它把 model/provider、native subagent、Worker Routing plugin、可选 ACP route 和最终验收
-分成五层，并给出三条可独立采用的路线与排错表。
-
-要把自有 API model 放进 Codex native model picker，见
-[自定义 native model picker](docs/native-model-picker.md)。该例子同时覆盖直接连接
-Responses-compatible API 与在本机 router/proxy 后汇集多个 upstream；provider、key、
-套餐优先级和具体 fallback 选择始终留在 operator 的 Git 外配置里，不写死在公共 skill 中。
-
-ACP route 的可达性另有协议边界：通道负责 session、生命周期、权限与证据，不负责
-provider wire format 的转换。为什么 route 或 model 能初始化而推理仍会失败，见
-[ACP 通道与 provider 协议边界](docs/acp-provider-protocols.md)。
-
-一个具体的端到端例子见
-[经 Codex Router 使用 Command Code Provider API](docs/commandcode-via-codex-router.md)：
-它把上游 Chat Completions 经本地 Codex Router 翻成 Codex 需要的 Responses，并可选复用
-同一台 router 配置一个隔离的 ACP worker route。
-
-## 日常使用
-
-安装后正常提出工程任务即可。主 agent 在有收益时交出完整责任：调查、实现、自测
-和必要文档可以由同一个 worker 连贯完成，需要修正时继续同一个 child。
-
-```text
-修复 CSV 导入时空行导致的失败，补能复现问题的检查。
-可以把导入模块的调查、修复和自测交给一个 worker；你负责整合与最终交付。
-```
-
-`全权接住`、`从头做到位` 允许内部委派；`solo`、`亲自做`、`别派小弟` 保持主
-agent 执行。微小、接近完成或交接成本过高的工作也直接完成。派出后主 agent 不
-重复实施同一责任，默认不另派 reviewer，需要修正时继续同一个 child。
-
-派工顺序是先保住完整结果、质量与权限，再在不牺牲这三者的前提下减少主订阅模型的
-执行消耗，同时控制端到端耗时和 coordinator 返工。使用 operator 已指定、已授权且
-适合责任、较少消耗主订阅 quota 的路线；没有已知收益就不为分工本身派工。外部
-worker API 支出单独计算，不悄悄回退到更高成本路线。模型与 provider 名留在
-operator 配置里，插件不做排行榜、价格查询或评测矩阵。
-
-先尊重 operator 已有的通道选择，再调用对应工具；native 工具可用不覆盖常设 ACP 选择。
-默认小工适用时直接派，不需要每次比较模型或填写小工简介。对已登记的 ACP，在现有
-Git 外 `routes.json` 加入 `routing.default`，正常 `run` 即可省略 `--route`；
-`routing.fallbacks` 可不填或留空。换渠道只更新这一处，无需改公共 skill 或重装插件。
-Native 继续使用宿主工具及本机授权选择；特长经验只有能改变具体选择时才值得写一句。
-
-备用只来自明确的预授权。ACP 会在启动 adapter 之前，因入口不可用或缺少必要环境凭据，
-尝试配置的备用；权限、workspace、停用、初始化或执行失败都不会触发这项自动切换。
-启动后由主 agent 查回原执行、确认停止并保留成果，再按授权恢复；质量问题走原 worker 返修。
-换默认只影响新责任；明确停用旧渠道用其 `enabled: false` 阻止后续 run/continue，
-保留 status/cancel/close。配置和恢复细节见[ACP 默认与备用](docs/acp-integration.md#默认与备用)。
-
-ACP 的每次 `run` / `continue` 都必须显式带 `--permissions read|full`，包括普通续做；
-不根据 category 猜权限，也不继承上一轮。省略参数会在派工前拒绝。超时或取消一旦成立，
-迟到的完成结果不会改写终态；已有输出保留为进度证据，cleanup 单独报告。
-续做把 execution identity 与动态授权分开：新增无关 workspace 或调整预算不破坏新身份，
-撤回绑定 cwd 或本轮权限仍会拒绝；旧 binding 只在完整旧指纹匹配时安全迁移。
-升级步骤与兼容限制见[安装与恢复](docs/installation.md)。
-
-同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式。
-可以修复具体环境问题、缩小剩余责任或部分接管；新需求、阶段推进和未送达权限不计为质量失败。
-只有 final report 缺失时先整理已有成果与检查，避免重做调查；切换 writer 前须确认原执行停止。
-
-## 自主交付与有限 swarm
-
-worker 的完整责任包括范围内自检、自修与收尾；普通测试失败先留在它自己的工具反馈循环。
-主脑提供一个关键判断或完成受限操作后，可把剩余执行交回原 session，保留已经成立的结果。
-达到既定条件就停止，不默认多派 reviewer 或追加反思轮次。
-
-批量找仓库、多个独立方向或重复脏活，可触发安装包里的 `swarm` 方法。主脑明确有限清单、
-权限和共享资源；运行器用独立 CLI 子进程执行，程序先收集覆盖、重复、缺失与证据，复杂归并
-再交给一个平级 worker。主脑围绕关键结论和具体疑点验收，不从头重查每份来源。
-
-日常 `run/continue/close` 保持简单。复杂成果可选 `--deliver`，有限批次可选 `batch`；
-批次工单由一份 order spec 经 `prepare` 机械生成（准备不启动任何进程），已结算结果
-随时可用 `collect` 只读读取，不等整批结束。报告不完整只修交付，不自动重放写工单。shared HOME 并发未验证时串行该资源，read 模式与
-不同 worktree 不等于隔离。完整接口、恢复与实验边界见[Worker 交付与有限批次](docs/worker-delivery.md)。
-
-## 行为场景
-
-非 runtime 的观察场景与证据标准见[行为场景](docs/behavior-scenarios.md)：
-自然语言中的中等修复、同一 child 从调查转入实施或局部返修、健康等待不取消也不
-重复启动、solo 或微小工作不派工，以及默认切换、撤回许可与备用恢复。该页是人工核对用的观察记录，不是评测平台，
-也不提供稳定触发、净省 quota、低返工或更快的结论。
-
-## 上下文怎样分开
-
-| 内容 | 主 session | 临时 worker |
-| --- | --- | --- |
-| 共享工程 AGENTS 与项目规则 | 自动加载 | 自动加载 |
-| 本机私人主会话说明 | 可选 SessionStart 集成在首次模型请求前注入 | 不由该 hook 注入 |
-| 具体工单 | 主 agent 组织 | 明确接收 |
-| 主对话历史 | 保留 | 新工单使用 `fork_turns="none"` |
-
-仅增加一份 worker AGENTS 不会移除原本共享的私人规则。启用上下文分离时，需要把
-私人内容移出自动共享 AGENTS，并先验证启动 hook 已受信任且完整送达。
-这属于输入装配边界，**不是文件访问 sandbox**。
-
-模型和 reasoning effort 由使用者的实时库存与授权决定。插件不绑定供应商、
-不提供 API key、不改变主模型，也不通过试跑申请私人数据传输权限。
+[从零到第一次成功派工](docs/first-delegated-task.md)把 model/provider、native subagent、
+Worker Routing plugin、可选 ACP route 和最终验收分成五层，并给出三条可独立采用的路线与排错表。
+要把自有 API model 放进 Codex native model picker，见[自定义 native model picker](docs/native-model-picker.md)；
+provider、key、套餐优先级和具体 fallback 选择始终留在 operator 的 Git 外配置里。ACP route 的
+可达性另有协议边界，见[ACP 通道与 provider 协议边界](docs/acp-provider-protocols.md)；一个具体的
+端到端例子见[经 Codex Router 使用 Command Code Provider API](docs/commandcode-via-codex-router.md)。
 
 ## 安装
 
@@ -246,9 +168,8 @@ npm run test:acpx
 ```
 
 route config、worker home、adapter 与账号状态留在 Git 外；具体命令和边界见
-[ACP integration](docs/acp-integration.md)。需要分离私人说明时，再按
-[安装与恢复](docs/installation.md)接入启动 hook。该集成独立于 plugin；关闭派工
-plugin 不会关闭主会话私人说明。
+[ACP integration](docs/acp-integration.md)。需要分离私人说明时，再按[安装与恢复](docs/installation.md)
+接入启动 hook。该集成独立于 plugin；关闭派工 plugin 不会关闭主会话私人说明。
 
 ## 验证
 
@@ -264,23 +185,34 @@ npm run check
 npm run test:acpx
 ```
 
-第二条是 opt-in 原生进程检查，要求 binary 提供当前 multi-agent 工具。它使用临时
-Codex home、合成说明和本机 scripted Responses 服务，验证首次 root 请求、child
-首次工作、同一 child 续做及完成后 interrupt。它不调用真实模型，也不能代替实际
-供应商与工程执行验收。Codex 自身可能仍尝试获取公共插件元数据，进程不保证完全离线。
+第二条是 opt-in 原生进程检查，要求 binary 提供当前 multi-agent 工具。它使用临时 Codex home、
+合成说明和本机 scripted Responses 服务，验证首次 root 请求、child 首次工作、同一 child 续做及
+完成后 interrupt。它不调用真实模型，也不能代替实际供应商与工程执行验收。Codex 自身可能仍尝试
+获取公共插件元数据，进程不保证完全离线。
 
-初始 native 兼容性依据为 Codex `0.154.0-alpha.6.2`；ACP integration 固定验证
-`acpx@0.15.1`，要求 Node.js 22.13 或更高。调用时仍以真实 schema 与 adapter
-能力为准。较旧的 CLI 或其他宿主未必提供相同字段。更多限制见
-[输入边界](docs/context.md)与[ACP integration](docs/acp-integration.md)。
+初始 native 兼容性依据为 Codex `0.154.0-alpha.6.2`；ACP integration 固定验证 `acpx@0.15.1`，
+要求 Node.js 22.13 或更高。调用时仍以真实 schema 与 adapter 能力为准，较旧的 CLI 或其他宿主
+未必提供相同字段。更多限制见[输入边界](docs/context.md)与[ACP integration](docs/acp-integration.md)。
 
-本仓库是独立 canonical source。`plugins/worker-routing` 的共同角色契约、协调入口和
-按需 references 以英文为 canonical text；`acp-worker` 负责可选通道调用，`swarm` 负责
-已授权有限批次。native 说明保留 `全权接住`、
-`从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例。公开安装、使用与边界文档
-提供中英文版本，见[文档目录](docs/README.md)，也可用各页顶部语言链接切换。
-Runtime 说明保留英文真源与原始命令名。私人说明、
-账号配置、请求与 continuity 不属于仓库。见[来源说明](PROVENANCE.md)。
+## 独立真源与范围
+
+本仓库是独立 canonical source。`plugins/worker-routing` 的共同角色契约、协调入口和按需
+references 以英文为 canonical text；`acp-worker` 负责可选通道调用，`swarm` 负责已授权有限批次。
+native 说明保留 `全权接住`、`从头做到位`、`solo`、`亲自做`、`别派小弟` 等触发示例。公开安装、
+使用与边界文档提供中英文版本，见[文档目录](docs/README.md)，[架构总览](docs/architecture.md)
+说明整体拓扑。Runtime 说明保留英文真源与原始命令名。
+
+**来源与范围。** 这是一个独立维护、项目原创的流程项目。初始路由策略按组件范围从一次内部工程
+工作坊中提取，独立仓库现为 canonical source；工作坊的 Git 历史、相邻项目、私人说明和工作记录
+均未迁入。仓库包含手写的路由与 worker 说明、原生 SessionStart adapter、installer、合成测试、
+使用者文档，以及一套基于公开 `acpx/runtime` API 的可选 integration。Responses 与 ACP 测试事件
+是本地协议 fixture，不含真实账号、私人请求或模型输出；没有复制任何 Codex runtime 或外部 adapter
+实现。`acpx` 及其传递依赖保留各自的第三方许可。界面参考 OpenAI 的
+[Hooks](https://learn.chatgpt.com/docs/hooks) 与
+[Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents) 文档以及对本机 binary
+的独立观察。本项目不是 OpenAI 官方产品，也不是由 OpenAI 维护的 fork。
+
+**隐私。** 私人说明、账号配置、请求与 continuity 不属于本仓库。见[来源说明](PROVENANCE.md)。
 
 ## 相关项目
 
@@ -293,11 +225,10 @@ Runtime 说明保留英文真源与原始命令名。私人说明、
 
 ## 许可
 
-软件与功能材料采用 [`SUL-1.0`](LICENSE)：允许个人、非商业和企业内部使用；
-对外分发或提供必须免费且非商业。文档采用
-[`CC BY-NC-SA 4.0`](LICENSE-DOCUMENTATION.md)：允许署名后的非商业分享与改编，
-公开改编须保持相同许可。本项目是 source-available，**不是 OSI open source**。
-具体文件范围以 [`LICENSING.md`](LICENSING.md) 为准，另有[中文许可说明](docs/licensing.zh-CN.md)。
+软件与功能材料采用 [`SUL-1.0`](LICENSE)：允许个人、非商业和企业内部使用；对外分发或提供必须
+免费且非商业。文档采用 [`CC BY-NC-SA 4.0`](LICENSE-DOCUMENTATION.md)：允许署名后的非商业分享
+与改编，公开改编须保持相同许可。本项目是 source-available，**不是 OSI open source**。具体文件
+范围以 [`LICENSING.md`](LICENSING.md) 为准，另有[中文许可说明](docs/licensing.zh-CN.md)。
 
 ---
 

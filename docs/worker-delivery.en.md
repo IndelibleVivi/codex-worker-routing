@@ -7,6 +7,7 @@ close with explicit per-turn permissions and no extra bookkeeping. The shared co
 makes one worker responsible for authorized investigation, implementation, checks, repair
 and closeout; a precise authority, capability or product-decision gap returns preserved
 artifacts and a narrow question.
+See the [architecture overview](architecture.en.md) for where delivery, batches and recovery sit.
 
 ## Complete one responsibility
 
@@ -124,7 +125,7 @@ permissions and exact scope. `prepare` mechanically assembles the per-item order
 one standard manifest. Before anything launches it validates the explicit permissions, the
 current route/workspace authorization and any continued session binding; a run job that
 omits its route is filled from the config's CURRENT `routing.default` and marked in the
-result's `defaulted_jobs`; existing outputs are never overwritten. It launches nothing and
+result's `defaulted_jobs`; existing outputs are never overwritten. It launches no worker and
 loads no adapter, and batch admission re-validates every generated job — preparation caches
 no authorization and infers no permission from category or keywords.
 

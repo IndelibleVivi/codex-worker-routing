@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: SUL-1.0
 // On-site getting-started / Dispatch / boundary guide for the public product page.
 // Pure text projection: no private paths, receipts, route names or account data.
+import {renderWorkLoop,renderBatchFlow} from './workflow.mjs';
 export function renderGuideContent(lang='en'){
  const zh=lang==='zh';
  const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,6 +16,7 @@ export function renderGuideContent(lang='en'){
 
  // Each language points to its matching full reference.
  const refs={
+  architecture: zh?doc(refZh,'architecture.md'):doc(refEn,'architecture.en.md'),
   start:   zh?doc(refZh,'first-delegated-task.md'):doc(refEn,'first-delegated-task.en.md'),
   deleg:   zh?doc(refZh,'first-delegated-task.md'):doc(refEn,'first-delegated-task.en.md'),
   acp:     zh?doc(refZh,'acp-integration.md'):doc(refEn,'acp-integration.en.md'),
@@ -24,6 +26,7 @@ export function renderGuideContent(lang='en'){
  };
 
  const toc=[
+  ['architecture',tp('协作架构','Cooperation architecture')],
   ['start',      tp('开始使用','Getting started')],
   ['delegation', tp('委托与验收','Delegation & acceptance')],
   ['optional-acp',tp('可选 ACP 通道','Optional ACP route')],
@@ -52,7 +55,10 @@ Stop and report if the fix would cross that boundary.`);
  ${refsHtml?`<p class="guide-sources">${refsHtml}</p>`:''}
 </section>`;
 
- const startBody=`<p>${tp('Worker Routing 是一个只含说明的插件：它不创建模型、不保存 API key，也不实现 Codex 的多 agent 运行时。它给主 agent 判断规则——何时委托、交出什么、如何接回结果；可以从原生 Codex workers 开始。','Worker Routing is an instruction-only plugin: it creates no models, stores no API keys, and does not implement the Codex multi-agent runtime. It gives your main agent rules for when to delegate, what to hand over, and how to return the result. You can start with native Codex workers.')}</p>
+ const architectureBody=`<p>${tp('0.4 系列把完整责任、worker 自查、主脑帮助与原会话续做放进同一条协作路径。主 agent 保留目标和验收判断；原生执行由 Codex 宿主负责，可选 ACP 运行器补上 session、回执、交付收集和有限批量执行。','The 0.4 series connects whole responsibilities, worker self-check, main-agent help and same-session continuation. The main agent keeps the goal and acceptance judgment. Codex owns native execution; the optional ACP runner adds sessions, receipts, delivery collection and finite batches.')}</p>${renderWorkLoop(lang)}
+ <div class="guide-note"><p>${tp('主 agent 依据插件说明作判断；CLI 负责已授权的机械步骤。运行完成、worker 自述和工程验收分别是不同证据。Dispatch 是可选的 ACP 回执投影。','The main agent makes judgments using plugin instructions; the CLI performs authorized mechanical steps. Runtime completion, worker reports and engineering acceptance are different evidence. Dispatch is an optional projection of ACP receipts.')}</p></div>`;
+
+ const startBody=`<p>${tp('先安装 Worker Routing 插件，让主 agent 收到何时委派、怎样交出完整责任，以及如何帮助、续做与验收的说明。原生 Codex workers 可以直接作为执行通道；ACP 与私人上下文 hook 按需添加。','Start by installing Worker Routing so your main agent receives guidance for delegation, whole responsibilities, assistance, continuation and acceptance. Native Codex workers can provide the execution channel; add ACP and the private-context hook when needed.')}</p>
  <ul>
   <li>${tp('让 Codex 内置的 plugin-creator 把 plugins/worker-routing 注册到你的个人 marketplace，保留现有主模型与 provider。','Ask Codex\u2019s built-in plugin-creator to register plugins/worker-routing into your personal marketplace, keeping your current model and provider.')}</li>
   <li>${tp('安装后新开一个主会话确认它真的加载了——注册成功不等于当前会话已生效。','Then open a new main session to confirm it loaded: registration is not activation.')}</li>
@@ -75,8 +81,9 @@ Stop and report if the fix would cross that boundary.`);
   <li>${tp('自动备用只处理启动前的入口不可用或必要环境凭据缺失。启动后先恢复原执行；改默认保留旧会话，明确停用旧渠道则阻止后续续做。','Automatic backups handle only unavailable entries or missing required environment credentials before launch. After startup, recover the original execution first. Changing the default preserves existing sessions; disabling a channel blocks further continuation.')}</li>
   <li>${tp('每次 run / continue 都必须显式带 --permissions read|full，省略会在派工前拒绝；不会继承上一轮。这个参数只决定 ACP 权限应答，不是 OS 文件沙箱。','Every run / continue requires explicit --permissions read|full; omission is rejected before dispatch and no mode is inherited. This only selects ACP permission responses, not an OS sandbox.')}</li>
   <li>${tp('超时或取消不能被迟到的完成结果覆盖；已有输出与清理状态分开保留。能启动 route 或列出模型，仍不证明真实推理成功。','A late completed result cannot overwrite timeout or cancellation; output and cleanup stay separate. A route starting or a model listed still does not prove real inference succeeds.')}</li>
-  <li>${tp('复杂成果可选交付收集，已明确独立责任可使用有限 batch / swarm：一份 order spec 经 prepare 机械生成工单与清单，已结算结果随时可用 collect 只读读取，不等整批结束。日常一个小弟无需新表单。不同 worktree 不证明共享 HOME 安全，并发未知时串行该资源。','Complex outcomes can opt into delivery collection and approved independent items into a finite batch or swarm: one order spec mechanically becomes orders and a manifest via prepare, and settled results are readable at any time with the read-only collect, without waiting for the rest. Ordinary single-worker work needs no form. Separate worktrees do not establish shared-HOME safety; serialize that resource when concurrency is unknown.')}</li>
+  <li>${tp('复杂成果可选有界交付收集；已明确独立的责任可使用下方有限 batch 流程。需要恢复时，先核实原 session、回执和清理状态，再继续已有工作。','Complex outcomes can opt into bounded delivery collection; known independent responsibilities can use the finite batch below. For recovery, establish the original session, receipt and cleanup state before continuing existing work.')}</li>
  </ul>
+ ${renderBatchFlow(lang)}
  <div class="guide-note"><p>${tp('第一次试用可以交出一个小而完整的任务：改一个函数、补一个检查，再看真实 diff 与检查结果。','For a first run, hand over a small, complete task: edit one function, add a check, then review the actual diff and result.')}</p></div>`;
 
  const dispatchBody=`<p>${tp('Dispatch 在本机呈现 ACP 回执与主动记录的复查笔记。业务数据只读；主题、语言和时区可以保存。它不安排工作，也不建第二套任务数据库。原生 Codex 活动在这里没有数据源——每个数字都明确只覆盖 ACP。','Dispatch displays local ACP receipts and review notes you add on purpose. Business data is read-only; theme, language and timezone can be saved. It schedules nothing and adds no second job database. Native Codex activity has no data source here: every metric is ACP-only.')}</p>
@@ -115,6 +122,7 @@ node integrations/acpx/src/cli.mjs stats --config /absolute/private/config.json 
  ${toc.map(([id,label])=>`<a href="#${id}">${label}</a>`).join('')}
 </nav>
 <div class="guide-sections">
+${section('architecture','0.4 / COOPERATION ARCHITECTURE',T('派出去、接回来，再推进。','Hand over. Bring back. Move forward.'),architectureBody,refs.architecture)}
 ${section('start',T('01 / 开始使用','01 / GETTING STARTED'),T('插件负责调度；其它都可以后加。','The plugin routes work. Everything else is optional.'),startBody,refs.start)}
 ${section('delegation',T('02 / 委托与验收','02 / DELEGATION & ACCEPTANCE'),T('交出一整块责任，而不是一条指令。','Hand over a whole responsibility, not a command.'),delegBody,refs.deleg)}
 ${section('optional-acp',T('03 / 可选 ACP 通道','03 / OPTIONAL ACP ROUTE'),T('外部通道可加可不加。','An external route is optional.'),acpBody,refs.acp)}

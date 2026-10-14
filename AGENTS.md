@@ -67,7 +67,9 @@ plugin and its optional main-session context integration.
   never add private config, receipts, dashboard server modules or real task data.
   `demo.mjs` owns synthetic examples and the interactive chart uses only its daily
   turn counts. `page.mjs` owns the shared shell and homepage; `guide.mjs` owns
-  the bilingual on-site guide. Home links should use the local guide; full
+  the bilingual on-site guide. `workflow.mjs` owns the shared bilingual cooperation
+  and finite-batch views; distinguish agent judgment from deterministic ACP mechanics.
+  Home links should use the local guide; full
   repository references remain explicitly labelled. `artwork.mjs` composes the existing Canon
   artwork; `--sync-banner` refreshes derived plugin banners. Verify desktop/mobile
   English and Chinese layouts and actual sampler/download/copy interactions after

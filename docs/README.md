@@ -2,11 +2,13 @@
 
 中文 | [English](README.en.md)
 
-从[第一次派工](first-delegated-task.md)开始。想先认识产品，可以浏览[中文官网与站内指南](https://indeliblevivi.github.io/codex-worker-routing/zh/guide/)。
+想先理解机制，读[架构总览](architecture.md)；要开始使用，从[第一次派工](first-delegated-task.md)开始。
+想先认识产品，可以浏览[中文官网与站内指南](https://indeliblevivi.github.io/codex-worker-routing/zh/guide/)。
 
 | 主题 | 中文 | English |
 | --- | --- | --- |
 | 第一次成功派工 | [中文](first-delegated-task.md) | [English](first-delegated-task.en.md) |
+| 架构总览 | [中文](architecture.md) | [English](architecture.en.md) |
 | 安装、验证与恢复 | [中文](installation.md) | [English](installation.en.md) |
 | 原生自定义模型 | [中文](native-model-picker.md) | [English](native-model-picker.en.md) |
 | 可选 ACP 接入 | [中文](acp-integration.md) | [English](acp-integration.en.md) |

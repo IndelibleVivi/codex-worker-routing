@@ -46,6 +46,22 @@ Historical first deployment: [run 35536211919](https://github.com/IndelibleVivi/
 source `d84458c`; its public language entries, assets and browser interactions were
 checked at that release.
 
+## The 0.4-series reader entrance
+
+The homepage starts with the goal, whole responsibility, worker self-check and main-agent
+acceptance, then shows help returning to the original worker. It separately explains optional
+ACP `prepare → batch → collect`: the main agent authors the decomposition, the CLI assembles
+orders, admits work against resources and persists settled results, and `collect` reads what
+has landed. Runtime state, worker reports and engineering acceptance remain separate.
+Dispatch and share cards follow as records and presentation surfaces.
+
+The on-site guide's `#architecture` repeats the cooperation view and links to the matching
+[full architecture reference](architecture.en.md). `workflow.mjs` is the shared authored
+source for the two views on home and guide; `style.css` turns the horizontal path into
+vertical reading on narrow screens, preserving help and same-session continuation.
+Both views use semantic HTML and remain readable without JavaScript. They add no browser
+dependency and contain no real orders or receipts.
+
 ## Build and preview
 
 Run from the repository root:
@@ -161,6 +177,7 @@ file-download acceptance.
 
 - `page.mjs` / `style.css`: shared shell, bilingual homepages, responsive layout and the four-page search metadata (title, description, canonical, hreflang, social cards, JSON-LD); product name, repository and license are public constants in the module, with no private fields.
 - `guide.mjs`: bilingual on-site guide content; shares the shell without loading the homepage script.
+- `workflow.mjs`: shared bilingual cooperation and finite-batch views for home and guide; renders public explanation only.
 - `client.mjs`: progressive enhancement; no API calls, persistent storage, cookies or analytics.
 - `demo.mjs`: explicitly synthetic data: 24 tasks / 42 turns / 840K observed tokens.
 - `artwork.mjs`: composes the Canon cat, line product mark, stitching and paper notes without changing the original cat vector.

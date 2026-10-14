@@ -5,6 +5,7 @@
 本页说明可选的交付收集与 batch 路径。日常一个 worker 仍用原有 `run` / `continue` /
 `close`，每轮显式权限，不要求额外记录。共同角色契约让 worker 在已有范围内完成调查、
 实施、自检、自修与收尾；遇到确切权限、能力或产品判断缺口时，保留成果并提出精确问题。
+交付、批次与恢复在整体系统中的位置见[架构总览](architecture.md)。
 
 ## 先让一次责任交付完整
 
@@ -104,7 +105,7 @@ adapter HOME/session store/cache、端口和数据库已经隔离。共享 HOME 
 机械装配出每项工单文件和一份标准 manifest。它在启动任何东西之前校验显式权限、当前
 route/workspace 授权与 continue 项的 session 绑定；run 项省略 route 时填入配置当前
 `routing.default` 并在结果的 `defaulted_jobs` 里标明；已有输出一律拒绝覆盖。它不启动
-任何进程、不加载 adapter，batch 准入仍会逐项重验生成的每个 job——准备不缓存授权，
+任何 worker、不加载 adapter，batch 准入仍会逐项重验生成的每个 job——准备不缓存授权，
 也不从类别或关键词推断权限。
 
 工单与 manifest 以排他创建写入；在 POSIX 上使用 `0600`。Windows 的 Node mode 不表示
