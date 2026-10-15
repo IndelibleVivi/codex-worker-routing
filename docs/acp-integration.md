@@ -129,7 +129,9 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
   volume id。这样保留打开后的文件身份检查，不会把每个正常 Windows 文件误判为被替换。
 - 目录 fsync 在 Windows 上不可用（Node 未暴露可靠的目录句柄 fsync）。`atomicJSON` 仍使用同目录
   临时文件、文件 fsync 与 atomic rename，但不再声称目录级持久化屏障；`close` 仍要求
-  cleanup confirmed。
+  cleanup confirmed。Windows 的 replacement rename 返回 `EPERM` 时，复用同一份完整临时文件，
+  以有界退避最多重试五次，每次重试前重新验证目标与祖先目录；不通过删除目标强制替换。
+  持续拒绝仍使写入失败并关闭 batch admission；其它错误和 POSIX 写入不重试。
 - 只有 SIGINT（Ctrl+C）是 Windows 上的本机信号；SIGTERM 不产生本机事件。取消仍可通过
   `cancel` 的本机控制邮箱完成。
 - 受管祖先遍历按“相对自身 root”展开，因此盘符与 UNC 前缀不会被重复拼接；`status`/`cancel`/

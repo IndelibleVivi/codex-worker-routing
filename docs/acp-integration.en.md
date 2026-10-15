@@ -185,7 +185,11 @@ reading config, then relies only on what Node actually exposes.
 - Directory fsync is unavailable on Windows (Node does not expose a reliable directory
   handle fsync). `atomicJSON` still uses a same-directory temp file, file fsync and atomic
   rename, but no longer claims a directory-level durability barrier; `close` still requires
-  cleanup confirmed.
+  cleanup confirmed. If the replacement rename returns `EPERM` on Windows, it retries
+  the same complete temp file up to five times with bounded backoff, revalidating the
+  destination and its ancestors before each retry. It never deletes the destination
+  to force replacement. Persistent denial still fails the write and closes batch
+  admission; other errors and POSIX writes are not retried.
 - Only SIGINT (Ctrl+C) is a native signal on Windows; SIGTERM produces no native event.
   Cancellation is still available through `cancel`'s native control mailbox.
 - Managed ancestor traversal is expanded "relative to its own root", so drive letters and

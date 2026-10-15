@@ -709,6 +709,31 @@ test('candidate next actions follow trusted state only', async t => {
   assert.deepEqual(noReceipt.next_actions.map(a => a.action), ['reconcile_session']);
 });
 
+test('persistent index rename denial still closes admission before the next job', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), b = path.join(base, 'b');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md'), deliver: false }),
+    job({ id: 'b', cwd: b, file: path.join(b, 'o.md'), deliver: false }),
+  ]);
+  const originalRename = fs.rename;
+  t.after(() => { fs.rename = originalRename; });
+  fs.rename = async (from, to) => {
+    if (path.basename(to) === 'index.json') {
+      const record = JSON.parse(await fs.readFile(from, 'utf8'));
+      if (record.jobs.length) throw Object.assign(new Error('persistent synthetic index denial'), { code: 'EPERM' });
+    }
+    return originalRename(from, to);
+  };
+  let starts = 0;
+  const spawn = fakeSpawner(state, { stateDir: f.config.stateDir });
+  const code = await run(f, manifestFile, out, args => { starts++; return spawn(args); });
+  assert.equal(code, 1);
+  assert.equal(starts, 1, 'persistent index denial must not admit the second job');
+  assert.equal(out.at(-1).status, 'partial');
+  assert.equal(out.at(-1).index_warning, 'EPERM');
+  assert.deepEqual(out.at(-1).missing, ['b']);
+});
+
 for (let trial = 0; trial < (process.platform === 'win32' ? 8 : 1); trial++) {
 test(`settled results publish to the index mid-batch and collect reads them without waiting (diagnostic trial ${trial + 1})`, async t => {
   const cwdA = path.join((await jobRoot(t)), 'a');
@@ -765,6 +790,7 @@ test(`settled results publish to the index mid-batch and collect reads them with
   // The settling job's own handle is captured synchronously during collection;
   // the still-running job's handle arrives via its own poll, so it may lag.
   assert.ok(mid.jobs.some(j => j.id === 'a' && j.start_handle), 'the settled job publishes its start handle');
+  if (renameFailures.length) t.diagnostic(`Recovered ${renameFailures.length} rename errors while preserving the complete batch`);
   const midA = mid.results.find(r => r.id === 'a');
   assert.equal(midA.delivery_excerpt.summary, 'ok');
   assert.equal(await p, 0);

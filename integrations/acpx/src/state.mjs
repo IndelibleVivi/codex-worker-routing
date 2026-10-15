@@ -116,13 +116,16 @@ export async function syncDirectory(dir, platform = process.platform) {
   try { await dh.sync(); } finally { await dh.close(); }
 }
 export async function atomicJSON(file, value, { platform = process.platform } = {}) {
-  await privateDir(path.dirname(file), { platform });
-  try {
-    const st = await fs.lstat(file);
-    if (!st.isFile() || st.nlink !== 1) throw new Fault('UNSAFE_FILE', 'Refusing to replace an unsafe state file.');
-    owned(st);
-    assertPrivateMode(st, 'file', platform);
-  } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const validateTarget = async () => {
+    await privateDir(path.dirname(file), { platform });
+    try {
+      const st = await fs.lstat(file);
+      if (!st.isFile() || st.nlink !== 1) throw new Fault('UNSAFE_FILE', 'Refusing to replace an unsafe state file.');
+      owned(st);
+      assertPrivateMode(st, 'file', platform);
+    } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  };
+  await validateTarget();
   const temp = `${file}.${randomUUID()}.tmp`;
   const h = await fs.open(temp, 'wx', 0o600);
   try {
@@ -130,7 +133,17 @@ export async function atomicJSON(file, value, { platform = process.platform } = 
     await h.sync();
   } finally { await h.close(); }
   try {
-    await fs.rename(temp, file);
+    // Windows can reject replacement with EPERM while another handle is open.
+    // Retry only this rename, keeping the old file and the complete temp file.
+    // Persistent denial still propagates; never unlink the destination to win.
+    for (let attempt = 0; ; attempt++) {
+      if (attempt) await validateTarget();
+      try { await fs.rename(temp, file); break; }
+      catch (error) {
+        if (platform !== 'win32' || error.code !== 'EPERM' || attempt === 5) throw error;
+        await new Promise(resolve => setTimeout(resolve, 10 * 2 ** attempt));
+      }
+    }
     await syncDirectory(path.dirname(file), platform);
   } finally { await fs.rm(temp, { force: true }); }
 }
