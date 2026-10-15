@@ -709,7 +709,8 @@ test('candidate next actions follow trusted state only', async t => {
   assert.deepEqual(noReceipt.next_actions.map(a => a.action), ['reconcile_session']);
 });
 
-test('settled results publish to the index mid-batch and collect reads them without waiting', async t => {
+for (let trial = 0; trial < (process.platform === 'win32' ? 8 : 1); trial++) {
+test(`settled results publish to the index mid-batch and collect reads them without waiting (diagnostic trial ${trial + 1})`, async t => {
   const cwdA = path.join((await jobRoot(t)), 'a');
   const cwdB = path.join((await jobRoot(t)), 'b');
   const { f, manifestFile, out } = await batchFixture(t, [
@@ -742,7 +743,14 @@ test('settled results publish to the index mid-batch and collect reads them with
     if (!mid) await new Promise(r => setTimeout(r, 25));
   }
   assert.ok(mid, 'the settled fast job must appear in the index while the batch is still running');
-  assert.equal(mid.status, 'running');
+  if (mid.status !== 'running') await p;
+  const terminal = out.at(-1);
+  assert.equal(mid.status, 'running', JSON.stringify({
+    mid_status: mid.status, result_ids: mid.results.map(r => r.id),
+    terminal_status: terminal?.status, index_warning: terminal?.index_warning,
+    admission_error: terminal?.admission_error, missing: terminal?.missing,
+    cancelled: terminal?.cancelled,
+  }));
   assert.equal(mid.total, 2, 'the index carries the full batch size before every job settles');
   // The settling job's own handle is captured synchronously during collection;
   // the still-running job's handle arrives via its own poll, so it may lag.
@@ -760,6 +768,7 @@ test('settled results publish to the index mid-batch and collect reads them with
   assert.equal(collected.outstanding, 0);
   assert.equal(collected.results.find(r => r.id === 'a').delivery_excerpt.summary, 'ok');
 });
+}
 
 test('collect refuses a corrupted or unknown index instead of fabricating a pass', async t => {
   const cwdA = path.join((await jobRoot(t)), 'a');
