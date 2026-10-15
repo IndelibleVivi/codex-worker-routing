@@ -69,11 +69,13 @@ model policy.
 Two coordination aids stay off the ordinary path. `prepare` turns one coordinator-authored
 spec into per-item orders and a manifest and launches no worker; `batch` admits the finite
 list and runs it as independent CLI subprocesses, with `--start-handle` publishing the batch
-identity after the initial index exists and before any launch, and `--compact` giving a
-byte-bounded paged terminal; `collect` reads the results already published to the durable
-index without waiting for the rest, `--compact` pages a bounded read and `--job` expands one
-full record. Admission is local to one batch, so there is no global scheduler and no
-cross-entrypoint safety claim.
+identity after the initial index exists and before any launch, and `--compact` turning the
+terminal stdout into a bounded paged response that carries the batch metadata plus the first
+page of results; `collect` reads the results already published to the durable index without
+waiting for the rest, `collect --compact --cursor` follows the remaining pages and
+`collect --job` expands one full job record. Each compact response is byte-bounded, metadata
+and trailing newline included. Admission is local to one batch, so there is no global
+scheduler and no cross-entrypoint safety claim.
 
 ```mermaid
 flowchart LR
@@ -117,11 +119,13 @@ flowchart TD
   class Receipt evidence
 ```
 
-Bounded delivery is collected only when the coordinator opts in with `--deliver`, and it
-stays separate from the runtime receipt. A declaration is `ready`, `partial` or
-`needs_input`, and its checks keep `worker_reported` provenance. Only the verification
-runner creates `runner_observed` facts, from an explicit task environment, and it never
-executes a command taken from a report.
+On `run` and `continue`, bounded delivery is collected only when the coordinator opts in with
+`--deliver`; a batch job collects it by default when its manifest omits `deliver`, and only an
+explicit `deliver:false` opts out (the batch command itself has no `--deliver` flag). Delivery
+stays separate from the runtime receipt, and neither choice removes the receipt. A
+declaration is `ready`, `partial` or `needs_input`, and its checks keep `worker_reported`
+provenance. Only the verification runner creates `runner_observed` facts, from an explicit
+task environment, and it never executes a command taken from a report.
 
 ## Input boundary
 

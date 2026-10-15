@@ -106,7 +106,7 @@ busy/conflict 错误，必须重读并重试同一操作 id；锁不会自动删
 | `taken_over` | 当前存在明确的 `taken_over` 决定。 |
 | `awaiting_review` | 一个明确的 `submitted` 事件请求复查，且其后没有决定将其取代。 |
 | `changes_requested` | 一个明确的 `revision_requested` 成立，其后没有成功的返回轮次。 |
-| `needs_attention` | 开放追踪工作的最新终态轮次失败或被取消，或其清理未确认。 |
+| `needs_attention` | 开放追踪工作的 runtime 处于受损状态：一次失败/取消/未确认的终态轮次，且其后没有成功轮次或明确复查事件将其清除。 |
 | `no_receipt` | 已打开且已追踪，但尚无回执。不是进程正在运行的证明。 |
 | `legacy_untracked` | 没有 Dispatch 追踪、也没有明确复查事件的 binding；安静的历史。 |
 
@@ -118,7 +118,12 @@ busy/conflict 错误，必须重读并重试同一操作 id；锁不会自动删
 请求，使既有决定失效并把记录置为 `awaiting_review`。之后一次成功（`completed`）
 的轮次会把未决的修正或复查请求清回 `not_requested`，并使既有验收失效，因为返修
 回来了而没有人再请求复查。之后一次失败/取消/未确认的轮次发生在开放工作上，会把
-记录标为 `needs_attention`。runtime 的 `completed` 本身从不构成验收。带未来时间
+记录标为 `needs_attention`。明确复查事件也会清除既有的 `needs_attention`：之后一个
+`submitted`、`revision_requested`、`accepted` 或 `taken_over` 会给出它自己的状态，
+改变的只是派生复查状态——失败/取消/未确认的轮次及其清理仍留在回执中。因此
+`failure -> submitted -> failure` 最终仍是 `needs_attention`：`submitted` 清除了
+第一次，更新的失败又把它重新建立，而两次失败都保留在回执里。runtime 的
+`completed` 本身从不构成验收。带未来时间
 的观察被忽略。没有追踪且没有明确复查事件的 legacy binding 是
 `legacy_untracked`——历史上下文，绝非活动的复查工作。一次变为已追踪的 legacy
 续做会记录 `tracking_started_at`，因此其更早的轮次绝不被追溯标为已复查。
