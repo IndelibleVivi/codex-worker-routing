@@ -190,3 +190,75 @@ windowsOnly('windows: an explicit UNC/device config path is rejected before any 
  for(const bad of ['\\\\server\\share\\routes.json','\\\\?\\C:\\routes.json','\\\\.\\PhysicalDrive0\\routes.json'])
   await assert.rejects(loadConfig(bad,'win32',{realpath:untouched}),{code:'UNSUPPORTED_PATH_ROOT'});
 });
+
+// Exercise the real atomic writer; only the OS rename boundary is faulted.
+test('Windows atomic replacement retries a transient EPERM without exposing a partial value', async t => {
+ const v=await f(t), file=path.join(v.root,'atomic.json');
+ await atomicJSON(file,{old:true});
+ const originalRename=fs.rename, attempts=[];
+ t.after(()=>{fs.rename=originalRename});
+ fs.rename=async(from,to)=>{
+  attempts.push({from,to});
+  if(attempts.length<=3){
+   assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{old:true});
+   throw Object.assign(new Error('synthetic Windows rename contention'),{code:'EPERM'});
+  }
+  return originalRename(from,to);
+ };
+ await atomicJSON(file,{next:'complete'},{platform:'win32'});
+ assert.equal(attempts.length,4);
+ assert.equal(new Set(attempts.map(a=>a.from)).size,1,'retry the same complete temporary file');
+ assert.ok(attempts.every(a=>a.to===file));
+ assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{next:'complete'});
+ assert.deepEqual((await fs.readdir(v.root)).filter(n=>n.startsWith('atomic.json.')),[]);
+});
+
+test('Windows atomic replacement bounds persistent EPERM and preserves the old file', async t => {
+ const v=await f(t), file=path.join(v.root,'atomic.json');
+ await atomicJSON(file,{old:true});
+ const originalRename=fs.rename;let attempts=0;
+ const denied=Object.assign(new Error('persistent synthetic denial'),{code:'EPERM'});
+ t.after(()=>{fs.rename=originalRename});
+ fs.rename=async()=>{attempts++;throw denied};
+ await assert.rejects(atomicJSON(file,{next:true},{platform:'win32'}),e=>e===denied);
+ assert.equal(attempts,6,'one initial attempt and at most five bounded retries');
+ assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{old:true});
+ assert.deepEqual((await fs.readdir(v.root)).filter(n=>n.startsWith('atomic.json.')),[]);
+});
+
+test('atomic replacement does not retry unrelated errors or POSIX EPERM', async t => {
+ const v=await f(t), file=path.join(v.root,'atomic.json');
+ await atomicJSON(file,{old:true});
+ const originalRename=fs.rename;let attempts=0;
+ t.after(()=>{fs.rename=originalRename});
+ let denied;
+ fs.rename=async()=>{attempts++;throw denied};
+ const cases=[['win32','EIO'],['win32','ENOENT']];
+ if(process.platform!=='win32')cases.push([process.platform,'EPERM']);
+ for(const [platform,code] of cases){
+  attempts=0;denied=Object.assign(new Error('synthetic nonretryable error'),{code});
+  await assert.rejects(atomicJSON(file,{next:true},{platform}),e=>e===denied);
+  assert.equal(attempts,1);
+  assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{old:true});
+ }
+ assert.deepEqual((await fs.readdir(v.root)).filter(n=>n.startsWith('atomic.json.')),[]);
+});
+
+test('Windows atomic replacement revalidates a target that becomes hardlinked during retry', async t => {
+ const v=await f(t), file=path.join(v.root,'atomic.json'), alias=path.join(v.root,'alias.json');
+ await atomicJSON(file,{old:true});
+ const originalRename=fs.rename;let attempts=0;
+ t.after(()=>{fs.rename=originalRename});
+ fs.rename=async(from,to)=>{
+  attempts++;
+  if(attempts===1){
+   await fs.link(file,alias);
+   throw Object.assign(new Error('synthetic Windows rename contention'),{code:'EPERM'});
+  }
+  return originalRename(from,to);
+ };
+ await assert.rejects(atomicJSON(file,{next:true},{platform:'win32'}),{code:'UNSAFE_FILE'});
+ assert.equal(attempts,1,'unsafe replacement is rejected before another rename');
+ assert.deepEqual(JSON.parse(await fs.readFile(alias,'utf8')),{old:true});
+ assert.deepEqual((await fs.readdir(v.root)).filter(n=>n.startsWith('atomic.json.')),[]);
+});
