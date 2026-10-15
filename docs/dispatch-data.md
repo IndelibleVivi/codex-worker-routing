@@ -122,7 +122,7 @@ zeros). The accepted values are:
 | `taken_over` | A current explicit `taken_over` decision stands. |
 | `awaiting_review` | An explicit `submitted` event requests review and no later decision supersedes it. |
 | `changes_requested` | An explicit `revision_requested` stands, with no later successful returned turn. |
-| `needs_attention` | The latest terminal turn on OPEN tracked work failed or was cancelled, or its cleanup is unconfirmed. |
+| `needs_attention` | An OPEN tracked runtime is compromised: a failed/cancelled/unconfirmed terminal turn that no later successful turn or explicit review event has cleared. |
 | `no_receipt` | Open and tracked but no receipt yet. Not proof of a running process. |
 | `legacy_untracked` | A binding with no Dispatch tracking and no explicit review event; quietly historical. |
 
@@ -136,7 +136,13 @@ that invalidates a standing decision and puts the record in `awaiting_review`. A
 successful (`completed`) turn clears an outstanding correction or review request back to
 `not_requested` and invalidates a standing acceptance, because the rework came back and
 nobody re-requested review. A later failed/cancelled/unconfirmed turn on open work marks
-the record `needs_attention`. Runtime `completed` is never acceptance by itself.
+the record `needs_attention`. An explicit review event also clears a standing
+`needs_attention`: a later `submitted`, `revision_requested`, `accepted`, or `taken_over`
+yields its own state, and only the derived state changes — the failed/cancelled/
+unconfirmed turn and its cleanup stay on the receipt. So `failure -> submitted ->
+failure` ends in `needs_attention` again: the `submitted` cleared the first one and the
+newer failure re-established it, while both failures remain runtime history. Runtime
+`completed` is never acceptance by itself.
 Future-dated observations are ignored. A legacy binding with no tracking and no explicit
 review event is `legacy_untracked` — historical context, never active review work. A
 legacy continuation that becomes tracked records `tracking_started_at`, so its earlier
