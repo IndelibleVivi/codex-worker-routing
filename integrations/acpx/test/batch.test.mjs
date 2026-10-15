@@ -734,24 +734,13 @@ test('persistent index rename denial still closes admission before the next job'
   assert.deepEqual(out.at(-1).missing, ['b']);
 });
 
-for (let trial = 0; trial < (process.platform === 'win32' ? 8 : 1); trial++) {
-test(`settled results publish to the index mid-batch and collect reads them without waiting (diagnostic trial ${trial + 1})`, async t => {
+test('settled results publish to the index mid-batch and collect reads them without waiting', async t => {
   const cwdA = path.join((await jobRoot(t)), 'a');
   const cwdB = path.join((await jobRoot(t)), 'b');
   const { f, manifestFile, out } = await batchFixture(t, [
     job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
     job({ id: 'b', cwd: cwdB, file: path.join(cwdB, 'o.md') }),
   ]);
-  const renameFailures = [];
-  const originalRename = fs.rename;
-  fs.rename = async (from, to) => {
-    try { return await originalRename(from, to); }
-    catch (error) {
-      renameFailures.push({ code: error.code, syscall: error.syscall, target: path.basename(to) });
-      throw error;
-    }
-  };
-  t.after(() => { fs.rename = originalRename; });
   // The batch id comes from its OWN published start handle, not a scan of the
   // private state directory.
   const startHandle = path.join(f.root, 'batch.handle.json');
@@ -784,13 +773,12 @@ test(`settled results publish to the index mid-batch and collect reads them with
     mid_status: mid.status, result_ids: mid.results.map(r => r.id),
     terminal_status: terminal?.status, index_warning: terminal?.index_warning,
     admission_error: terminal?.admission_error, missing: terminal?.missing,
-    cancelled: terminal?.cancelled, rename_failures: renameFailures,
+    cancelled: terminal?.cancelled,
   }));
   assert.equal(mid.total, 2, 'the index carries the full batch size before every job settles');
   // The settling job's own handle is captured synchronously during collection;
   // the still-running job's handle arrives via its own poll, so it may lag.
   assert.ok(mid.jobs.some(j => j.id === 'a' && j.start_handle), 'the settled job publishes its start handle');
-  if (renameFailures.length) t.diagnostic(`Recovered ${renameFailures.length} rename errors while preserving the complete batch`);
   const midA = mid.results.find(r => r.id === 'a');
   assert.equal(midA.delivery_excerpt.summary, 'ok');
   assert.equal(await p, 0);
@@ -804,7 +792,6 @@ test(`settled results publish to the index mid-batch and collect reads them with
   assert.equal(collected.outstanding, 0);
   assert.equal(collected.results.find(r => r.id === 'a').delivery_excerpt.summary, 'ok');
 });
-}
 
 test('collect refuses a corrupted or unknown index instead of fabricating a pass', async t => {
   const cwdA = path.join((await jobRoot(t)), 'a');
