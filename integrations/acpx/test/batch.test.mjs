@@ -717,6 +717,16 @@ test(`settled results publish to the index mid-batch and collect reads them with
     job({ id: 'a', cwd: cwdA, file: path.join(cwdA, 'o.md') }),
     job({ id: 'b', cwd: cwdB, file: path.join(cwdB, 'o.md') }),
   ]);
+  const renameFailures = [];
+  const originalRename = fs.rename;
+  fs.rename = async (from, to) => {
+    try { return await originalRename(from, to); }
+    catch (error) {
+      renameFailures.push({ code: error.code, syscall: error.syscall, target: path.basename(to) });
+      throw error;
+    }
+  };
+  t.after(() => { fs.rename = originalRename; });
   // The batch id comes from its OWN published start handle, not a scan of the
   // private state directory.
   const startHandle = path.join(f.root, 'batch.handle.json');
@@ -749,7 +759,7 @@ test(`settled results publish to the index mid-batch and collect reads them with
     mid_status: mid.status, result_ids: mid.results.map(r => r.id),
     terminal_status: terminal?.status, index_warning: terminal?.index_warning,
     admission_error: terminal?.admission_error, missing: terminal?.missing,
-    cancelled: terminal?.cancelled,
+    cancelled: terminal?.cancelled, rename_failures: renameFailures,
   }));
   assert.equal(mid.total, 2, 'the index carries the full batch size before every job settles');
   // The settling job's own handle is captured synchronously during collection;
