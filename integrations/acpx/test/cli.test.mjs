@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseArgs,main,localStatus,requestCancel } from '../src/cli.mjs';
+import { parseArgs,main,localStatus,requestCancel,renderDeliveryText } from '../src/cli.mjs';
 import { loadBinding,paths,privateDir,lock } from '../src/state.mjs';
 import { fixture,fakeAcpx,sleep,deferred } from './helpers.mjs';
 async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);const api=fakeAcpx(behavior),results=[];return {...f,api,results,deps:{loadAcpx:async()=>api,replaceEnvironment:()=>{},output:r=>results.push(r),progress:()=>{}}}}
@@ -145,6 +145,60 @@ test('delivery on a session with no collected report returns an explicit null, n
  const f=await setup(t);assert.equal(await main(args(f),f.deps),0);const id=f.results.at(-1).session_id;
  const out=[];assert.equal(await main(['delivery','--config',f.configFile,'--session',id,'--json'],{...f.deps,output:r=>out.push(r),text:()=>{}}),0);
  assert.deepEqual(out.at(-1),{schema:'cwr.acp.delivery-sidecar/1',session_id:id,delivery:null});
+});
+
+// The text view is a convenience over the stored sidecar. These synthetic records
+// pin the boundaries: declarations stay declared, unsupplied or failed runtime
+// facts stay honest, and a missing/malformed report is never dressed up as ready.
+const readyRecord=()=>({schema:'cwr.acp.delivery-sidecar/1',session_id:'synthetic-session',request_id:'synthetic-request',
+ worker:{checks_source:'worker_reported',status:'ready',code:null,block:{summary:'synthetic done',criteria:[],checks:[],artifacts:[],questions:[]}},
+ observed:{checks_source:'runner_observed',runtime_status:'completed',cleanup:'confirmed'}});
+
+test('delivery text keeps worker-declared check counts labelled worker_reported even with observed facts',()=>{
+ const text=renderDeliveryText('synthetic-session',{...readyRecord(),
+  worker:{status:'ready',code:null,block:{summary:'synthetic done',criteria:[{criterion:'c',state:'satisfied'}],checks:[{name:'a',state:'passed'},{name:'b',state:'passed'}],artifacts:[],questions:[]}},
+  observed:{checks_source:'runner_observed',runtime_status:'completed',cleanup:'confirmed'}});
+ assert.match(text,/checks 2 \(worker_reported\)/);
+ assert.match(text,/runtime_status completed; cleanup confirmed/);
+ assert.ok(!/runner_observed/.test(text),'a worker declaration must not be promoted to runner_observed');
+ assert.ok(!/accepted|satisfied/.test(text),'the text view must not infer acceptance from the declaration');
+});
+
+test('delivery text omits absent observations and zero warnings but keeps failed runtime facts visible',()=>{
+ for(const observed of [undefined,{checks_source:'runner_observed',runtime_status:null,cleanup:null}]){
+  const quiet=renderDeliveryText('synthetic-session',{...readyRecord(),observed});
+  assert.ok(!/runtime_status/.test(quiet),'absent observed runtime data stays absent');
+  assert.ok(!/invalid sidecars/.test(quiet),'warnings are not printed when none were supplied');
+ }
+ const failed=renderDeliveryText('synthetic-session',{...readyRecord(),
+  observed:{checks_source:'runner_observed',runtime_status:'failed',cleanup:'unconfirmed'},collection_warnings:{invalid_sidecars:2}});
+ assert.match(failed,/runtime_status failed; cleanup unconfirmed/);
+ assert.match(failed,/invalid sidecars skipped: 2/);
+ const zero=renderDeliveryText('synthetic-session',{...readyRecord(),collection_warnings:{invalid_sidecars:0}});
+ assert.ok(!/invalid sidecars/.test(zero),'a zero warning count is not printed');
+});
+
+test('delivery text keeps a missing report and a missing/malformed worker block distinct from ready',()=>{
+ assert.equal(renderDeliveryText('synthetic-session',null),'No delivery collected for session synthetic-session.\n');
+ const missing=renderDeliveryText('synthetic-session',{...readyRecord(),worker:{status:'missing',code:'NO_BLOCK',block:null}});
+ assert.match(missing,/request synthetic-request: missing \(NO_BLOCK\)/);
+ assert.ok(!/summary:|criteria /.test(missing),'a missing block invents no summary or check facts');
+ const malformed=renderDeliveryText('synthetic-session',{...readyRecord(),worker:{status:'malformed',code:'BAD_JSON',block:null}});
+ assert.match(malformed,/malformed \(BAD_JSON\)/);
+ assert.ok(!/summary:|criteria /.test(malformed),'a malformed block invents no summary or check facts');
+ const ready=renderDeliveryText('synthetic-session',readyRecord());
+ assert.match(ready,/ready/);assert.match(ready,/summary: synthetic done/);
+ assert.notEqual(missing,malformed);assert.notEqual(ready,missing);assert.notEqual(ready,malformed);
+});
+
+test('delivery text shows only the declared summary and counts, never nested detail',()=>{
+ const text=renderDeliveryText('synthetic-session',{...readyRecord(),
+  worker:{status:'partial',code:null,block:{summary:'SYNTHETIC_SUMMARY',criteria:[{criterion:'SYNTHETIC_CRITERION',state:'unsatisfied'}],
+   checks:[{name:'SYNTHETIC_CHECK',state:'failed',detail:'SYNTHETIC_DETAIL'}],artifacts:[{kind:'file',ref:'src/SYNTHETIC_ARTIFACT.mjs',note:'SYNTHETIC_NOTE'}],questions:['SYNTHETIC_QUESTION']}}});
+ assert.ok(text.includes('summary: SYNTHETIC_SUMMARY'),'a supplied summary appears verbatim');
+ assert.match(text,/criteria 1 \| checks 1 \(worker_reported\) \| artifacts 1 \| questions 1/);
+ for(const hidden of ['SYNTHETIC_CRITERION','SYNTHETIC_CHECK','SYNTHETIC_DETAIL','SYNTHETIC_ARTIFACT','SYNTHETIC_NOTE','SYNTHETIC_QUESTION'])
+  assert.ok(!text.includes(hidden),`${hidden} should stay out of the summary/count view`);
 });
 
 
