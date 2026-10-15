@@ -60,9 +60,10 @@ ACP 是可选的，并与 native 委派并存。当 operator 的默认或当前�
 两项协调辅助不进入日常路径。`prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与一份
 manifest，不启动任何 worker；`batch` 对这份有限清单做 admission，并以独立 CLI 子进程执行；
 `batch --start-handle` 在初始索引落盘后、启动任何子进程前给出本批 identity，`batch
---compact` 给出整份受字节预算约束的分页终态；`collect` 读取已发布到持久索引的结果，
-`collect --compact` 做分页有界读取、`collect --job` 展开单条完整记录，都不必等其余项目
-结束。admission 只作用于本批，因此没有全局 scheduler，也不宣称跨入口的并发安全。
+--compact` 则把终态 stdout 收成有界分页响应，先给出 batch metadata 与第一页结果；`collect`
+读取已发布到持久索引的结果，`collect --compact --cursor` 续读其余分页、`collect --job`
+展开单条完整 job 记录，都不必等其余项目结束。每份 compact 响应（含 metadata 与结尾换行）
+受字节预算约束。admission 只作用于本批，因此没有全局 scheduler，也不宣称跨入口的并发安全。
 
 ```mermaid
 flowchart LR
@@ -103,7 +104,9 @@ flowchart TD
   class Receipt evidence
 ```
 
-有界交付只在主协调者用 `--deliver` 明确选择时收集，并与 runtime 回执分开保存。交付声明为
+有界交付在 `run` / `continue` 上要由主协调者显式加 `--deliver` 才收集；batch 的 job 在
+manifest 中省略时默认收集（`deliver:true`），只有显式写 `deliver:false` 才退出收集，batch
+本身没有 `--deliver` 开关。交付与 runtime 回执分开保存，收不收都不删回执。交付声明为
 `ready`、`partial` 或 `needs_input`，其检查保留 `worker_reported` 来源。只有验证 runner 会在
 明确的任务环境中产生 `runner_observed` 事实，并且绝不执行来自报告的指令。
 
