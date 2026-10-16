@@ -153,10 +153,15 @@ test('REAL recovery: progress without RPC final reaches CWR deadline despite coo
  assert.equal(a.receipt.error_code,'TURN_TIMEOUT');assert.equal(a.receipt.stop_reason,null);
  assert.equal(a.receipt.cleanup,'confirmed');assert.match(a.receipt.output_excerpt,/Synthetic progress, no final response/);
  assert.ok(Date.parse(a.receipt.finished_at)-Date.parse(a.receipt.budget.prompt_started_at)>=2000);
+ assert.equal(Date.parse(a.receipt.budget.task_deadline_at)-Date.parse(a.receipt.budget.prompt_started_at),2000);
+ assert.ok(a.receipt.budget.task_elapsed_ms>=1900);assert.ok(a.receipt.activity.event_count>0);
+ assert.ok(a.receipt.activity.last_event_age_ms>=1000,'the initial progress is retained as an old observation at the deadline');
  const audit=(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-audit.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
  assert.equal(audit.filter(e=>e.method==='session/prompt').length,1);
  assert.ok(audit.some(e=>e.method==='session/cancel'));
  const s=await command(f,'status',['--session',a.receipt.session_id]);assert.equal(s.receipt.active,'idle');
+ assert.equal(s.receipt.last_error_code,'TURN_TIMEOUT');assert.equal(s.receipt.receipt_evidence.source,'binding');
+ assert.deepEqual(s.receipt.receipt_evidence.activity,a.receipt.activity);assert.deepEqual(s.receipt.receipt_evidence.budget,a.receipt.budget);
 });
 test('REAL recovery: public zero turn timeout overrides a shorter inherited runtime timer',async t=>{
  const f=await setup(t,{timeoutMs:6000});

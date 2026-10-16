@@ -84,6 +84,8 @@ flowchart TD
 workspace、停用、初始化或执行失败都不会触发。`enabled: false` 阻止后续 run/continue，同时保留
 status/cancel/close；更换默认只影响新责任。配置与恢复细节见
 [ACP 默认与备用](docs/acp-integration.md#默认与备用)与[安装与恢复](docs/installation.md)。
+任务预算是不会被活动事件刷新的 hard deadline；receipt 保存最小 activity/timing 证据。
+status 可只读找回 binding 更新中断前已落盘的匹配回执，显示恢复不确认清理或解除锁。
 
 同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式：修复具体
 环境问题、缩小剩余责任或部分接管。新需求、阶段推进和未送达权限不计为质量失败。

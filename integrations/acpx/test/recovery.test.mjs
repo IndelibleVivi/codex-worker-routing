@@ -118,7 +118,16 @@ async function controlled(t,kind) {
    if(kind==='stream-error')result.resolve({status:'completed',stopReason:'end_turn'});
    if(kind==='stream-stuck')result.resolve({status:'completed',stopReason:'end_turn'});
    if(kind==='finalization')stream.resolve();
-   return {promptStarted:sent.promise,result:result.promise,events:{async *[Symbol.asyncIterator](){yield {type:'text_delta',stream:'output',text:'Synthetic partial progress.'};if(kind==='stream-error')throw Object.assign(new Error('synthetic stream'),{code:'STREAM_ERROR'});await stream.promise}},cancel:async()=>{cancels++;if(kind!=='unsettled')result.resolve({status:'completed',stopReason:'end_turn'})},closeStream:async()=>stream.resolve()};
+   return {promptStarted:sent.promise,result:result.promise,events:{async *[Symbol.asyncIterator](){
+    yield {type:'text_delta',stream:'output',text:'Synthetic partial progress.'};
+    if(kind==='stream-error')throw Object.assign(new Error('synthetic stream'),{code:'STREAM_ERROR'});
+    if(kind==='recent-activity'){
+     while(await Promise.race([stream.promise.then(()=>false),new Promise(resolve=>setTimeout(()=>resolve(true),10))]))
+      yield {type:'tool_call',title:'PRIVATE_TOOL_TITLE',rawInput:{path:'/synthetic/private'},rawOutput:'PRIVATE_TOOL_OUTPUT'};
+    }
+    await stream.promise;
+    if(kind==='late-stream')yield {type:'tool_call',title:'late cleanup event'};
+   }},cancel:async()=>{cancels++;if(kind!=='unsettled')result.resolve({status:'completed',stopReason:'end_turn'})},closeStream:async()=>stream.resolve()};
   };
   runtime.close=async input=>{stream.resolve();await new Promise(resolve=>setImmediate(resolve));await close(input)};
   return runtime;
@@ -132,6 +141,25 @@ test('deadline is monotonic across cooperative end_turn, late stream, and cleanu
  assert.equal(f.cancels(),1);assert.equal(f.input().timeoutMs,0);assert.match(r.output_excerpt,/partial progress/);
  // Local deadlines stay in receipt.error_code, never misattributed to acpx.
  assert.equal(r.observations.coverage,'none');
+ assert.equal(r.activity.last_event_type,'text_delta','cleanup events cannot replace the activity snapshot at failure');
+ assert.equal(r.activity.event_count,1);
+});
+test('hard task deadline retains recent runtime activity without extending the budget or exposing tool payloads',async t=>{
+ const f=await controlled(t,'recent-activity');const r=await engineRun(f);
+ assert.equal(r.runtime_status,'failed');assert.equal(r.error_code,'TURN_TIMEOUT');assert.equal(f.cancels(),1);
+ assert.equal(r.budget.task_ms,100);assert.equal(Date.parse(r.budget.task_deadline_at)-Date.parse(r.budget.prompt_started_at),100);
+ assert.ok(r.budget.task_elapsed_ms>=90);assert.ok(r.budget.task_elapsed_ms<1000);
+ assert.ok(r.activity.event_count>1);assert.equal(r.activity.last_event_type,'tool_call');
+ assert.ok(r.activity.last_event_age_ms<r.budget.task_elapsed_ms/2);
+ assert.ok(Date.parse(r.activity.last_event_at)>=Date.parse(r.activity.first_event_at));
+ assert.ok(Date.parse(r.activity.observed_at)>=Date.parse(r.activity.last_event_at));
+ for(const hidden of ['PRIVATE_TOOL_TITLE','PRIVATE_TOOL_OUTPUT','/synthetic/private'])assert.ok(!JSON.stringify(r).includes(hidden));
+});
+test('the same hard deadline reports a long event gap when only initial progress was observed',async t=>{
+ const f=await controlled(t,'finalization');const r=await engineRun(f);
+ assert.equal(r.error_code,'TURN_TIMEOUT');assert.equal(r.activity.event_count,1);
+ assert.equal(r.activity.first_event_at,r.activity.last_event_at);assert.ok(r.activity.last_event_age_ms>=80);
+ assert.ok(r.activity.last_event_age_ms>=r.budget.task_elapsed_ms*0.8);
 });
 test('operator abort cannot be relabelled completed by cooperative end_turn',async t=>{
  const f=await controlled(t,'abort'),controller=new AbortController();const promise=engineRun(f,{signal:controller.signal});
@@ -141,6 +169,7 @@ test('operator abort cannot be relabelled completed by cooperative end_turn',asy
 test('submission has a separate setup deadline and records no prompt timestamp when never written',async t=>{
  const f=await controlled(t,'setup');const r=await engineRun(f);
  assert.equal(r.runtime_status,'failed');assert.equal(r.error_code,'PROMPT_SETUP_TIMEOUT');assert.equal(r.budget.prompt_started_at,null);assert.equal(r.cleanup,'confirmed');
+ assert.equal(r.budget.task_deadline_at,null);assert.equal(r.budget.task_elapsed_ms,null);
 });
 test('task budget begins at promptStarted instead of consuming submission time',async t=>{
  const f=await controlled(t,'slow-submit');const promise=engineRun(f);await f.began.promise;

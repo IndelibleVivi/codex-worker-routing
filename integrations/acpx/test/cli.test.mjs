@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs,main,localStatus,requestCancel,renderDeliveryText } from '../src/cli.mjs';
-import { loadBinding,paths,privateDir,lock } from '../src/state.mjs';
+import { loadBinding,paths,privateDir,lock,atomicJSON } from '../src/state.mjs';
 import { fixture,fakeAcpx,sleep,deferred } from './helpers.mjs';
 async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);const api=fakeAcpx(behavior),results=[];return {...f,api,results,deps:{loadAcpx:async()=>api,replaceEnvironment:()=>{},output:r=>results.push(r),progress:()=>{}}}}
 const args=f=>['run','--permissions', 'read', '--config',f.configFile,'--route','worker','--cwd',f.cwd,'--file',f.orderFile];
@@ -86,6 +86,100 @@ test('an ownerless lock is reported as unreconciled, never idle',async t=>{
  const f=await setup(t);const p=paths(f.config.stateDir,f.binding.id);
  await privateDir(p.lock);await fs.writeFile(path.join(p.lock,'cancel.json'),'{}',{mode:0o600});
  assert.equal((await localStatus(f.config,f.binding)).active,'unreconciled');
+});
+async function interruptedReceipt(t) {
+ const f=await setup(t,{terminal:{status:'failed',error:{code:'TURN_TIMEOUT'}}});
+ assert.equal(await main(args(f),f.deps),1);
+ const receipt=f.results.at(-1),p=paths(f.config.stateDir,receipt.session_id);
+ const binding=await loadBinding(f.config.stateDir,receipt.session_id);
+ // Reproduce an exit after the receipt rename and before the final binding
+ // rename. The previous turn's cleanup may still say confirmed in that binding.
+ delete binding.lastReceipt;delete binding.lastStatus;binding.cleanup='confirmed';
+ binding.active_turn={request_id:receipt.request_id,started_at:receipt.started_at};
+ await atomicJSON(p.binding,binding);
+ await lock(p.lock,{nonce:'interrupted-owner',pid:process.pid,session:binding.id});
+ return {...f,receipt,binding,p};
+}
+test('status recovers an exactly matching persisted terminal receipt without repairing state or releasing locks',async t=>{
+ const f=await interruptedReceipt(t);
+ const files=[f.p.binding,f.receipt.receipt_path,path.join(f.p.lock,'owner.json')];
+ const before=await Promise.all(files.map(file=>fs.readFile(file,'utf8')));
+ const tree=await fs.readdir(f.config.stateDir,{recursive:true});
+ let loaded=false;const results=[];
+ assert.equal(await main(['status','--config',f.configFile,'--session',f.binding.id],{...f.deps,loadAcpx:async()=>{loaded=true;throw new Error('status must stay local')},output:r=>results.push(r)}),0);
+ const view=results.at(-1);
+ assert.equal(view.last_runtime_status,'failed');assert.equal(view.last_receipt,f.receipt.receipt_path);
+ assert.equal(view.last_error_code,'TURN_TIMEOUT');assert.equal(view.receipt_evidence.source,'active_turn');
+ assert.equal(view.receipt_evidence.request_id,f.receipt.request_id);
+ assert.equal(view.active_request.request_id,f.receipt.request_id);assert.equal(view.active_request.runtime_status,'failed');
+ assert.equal(view.active_request.error_code,'TURN_TIMEOUT');assert.equal(view.active_request.receipt,f.receipt.receipt_path);
+ assert.equal(view.cleanup,'unconfirmed','a recovered receipt cannot confirm a stale binding cleanup');
+ assert.equal(view.active,'owner_process_present');assert.equal(loaded,false);
+ assert.deepEqual(await Promise.all(files.map(file=>fs.readFile(file,'utf8'))),before);
+ assert.deepEqual(await fs.readdir(f.config.stateDir,{recursive:true}),tree);
+});
+test('status ignores foreign, stale and malformed active receipts instead of inferring a terminal result',async t=>{
+ const f=await interruptedReceipt(t);
+ const invalid=[
+  {session_id:'00000000-0000-0000-0000-000000000000'},
+  {request_id:'00000000-0000-0000-0000-000000000000'},
+  {route:'another-route'}, {acpx_record_id:'another-record'}, {acp_session_id:'another-session'},
+  {started_at:new Date(Date.parse(f.receipt.started_at)-1000).toISOString()},
+  {finished_at:'not-a-date'}, {finished_at:new Date(Date.parse(f.receipt.started_at)-1).toISOString()},
+  {schema:'foreign/1'}, {backend:'other'}, {runtime_status:'running'}, {cleanup:'probably'},
+  {receipt_path:path.join(f.root,'foreign.json')},
+ ];
+ for(const fields of invalid){
+  await atomicJSON(f.receipt.receipt_path,{...f.receipt,...fields});
+  const view=await localStatus(f.config,f.binding);
+  assert.equal(view.last_runtime_status,null,JSON.stringify(fields));assert.equal(view.last_receipt,null,JSON.stringify(fields));
+  assert.equal(view.receipt_evidence,null);assert.equal(view.cleanup,'unconfirmed');
+ }
+ await fs.writeFile(f.receipt.receipt_path,'{malformed');
+ assert.equal((await localStatus(f.config,f.binding)).receipt_evidence,null);
+ // A symlink must not turn the exact local request filename into another file.
+ await fs.unlink(f.receipt.receipt_path);
+ const elsewhere=path.join(f.root,'foreign.json');await atomicJSON(elsewhere,f.receipt);
+ await fs.symlink(elsewhere,f.receipt.receipt_path);
+ assert.equal((await localStatus(f.config,f.binding)).receipt_evidence,null);
+});
+test('status prefers the interrupted active request over a stale binding pointer and sanitizes timing evidence',async t=>{
+ const f=await interruptedReceipt(t);
+ f.binding.lastReceipt=path.join(f.p.receipts,'00000000-0000-0000-0000-000000000000.json');f.binding.lastStatus='completed';
+ const activity={observed_at:f.receipt.finished_at,event_count:2,first_event_at:f.receipt.started_at,last_event_at:f.receipt.finished_at,last_event_type:'tool_call',last_event_age_ms:0,payload:'PRIVATE_PAYLOAD'};
+ const budget={...f.receipt.budget,task_deadline_at:f.receipt.finished_at,task_elapsed_ms:100,private_path:'/synthetic/private'};
+ await atomicJSON(f.receipt.receipt_path,{...f.receipt,activity,budget});
+ const view=await localStatus(f.config,f.binding);
+ assert.equal(view.last_receipt,f.receipt.receipt_path);assert.equal(view.last_runtime_status,'failed');
+ assert.equal(view.receipt_evidence.activity.last_event_type,'tool_call');assert.equal(view.receipt_evidence.budget.task_elapsed_ms,100);
+ assert.ok(!JSON.stringify(view).includes('PRIVATE_PAYLOAD'));assert.ok(!JSON.stringify(view).includes('/synthetic/private'));
+});
+test('status rejects an out-of-directory binding receipt pointer and does not guess the latest receipt',async t=>{
+ const f=await interruptedReceipt(t);
+ delete f.binding.active_turn;f.binding.lastReceipt=path.join(f.root,'elsewhere.json');
+ await atomicJSON(f.binding.lastReceipt,f.receipt);
+ const view=await localStatus(f.config,f.binding);
+ assert.equal(view.last_receipt,null);assert.equal(view.receipt_evidence,null);
+});
+test('a duplicate binding pointer cannot bypass active-request timestamp validation',async t=>{
+ const f=await interruptedReceipt(t);
+ f.binding.lastReceipt=f.receipt.receipt_path;f.binding.lastStatus='failed';
+ f.binding.active_turn.started_at=new Date(Date.parse(f.receipt.started_at)+1000).toISOString();
+ const view=await localStatus(f.config,f.binding);
+ assert.equal(view.last_runtime_status,null);assert.equal(view.receipt_evidence,null);
+});
+test('a prior completed receipt never becomes the outcome of a newer active request without its own receipt',async t=>{
+ const f=await interruptedReceipt(t);
+ await atomicJSON(f.receipt.receipt_path,{...f.receipt,runtime_status:'completed',error_code:null});
+ f.binding.lastReceipt=f.receipt.receipt_path;f.binding.lastStatus='completed';
+ const marker={request_id:'00000000-0000-0000-0000-000000000000',started_at:new Date(Date.parse(f.receipt.finished_at)+1).toISOString()};
+ f.binding.active_turn=marker;
+ const view=await localStatus(f.config,f.binding);
+ assert.equal(view.last_runtime_status,'completed');assert.equal(view.last_receipt,f.receipt.receipt_path);
+ assert.equal(view.receipt_evidence.source,'binding');assert.equal(view.receipt_evidence.request_id,f.receipt.request_id);
+ assert.deepEqual(view.active_request,{...marker,runtime_status:null,error_code:null,receipt:null});
+ assert.equal(view.cleanup,'unconfirmed');assert.equal(view.active,'owner_process_present');
+ await assert.rejects(fs.stat(path.join(f.p.receipts,`${marker.request_id}.json`)),{code:'ENOENT'});
 });
 test('unconfirmed adapter cleanup preserves locks and returns failure',async t=>{
  const f=await setup(t,{cleanupError:true});assert.equal(await main(args(f),f.deps),1);const r=f.results.at(-1);

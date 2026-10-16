@@ -101,6 +101,9 @@ disabled-route, initialization and execution failures do not trigger it. `enable
 blocks later run/continue while status/cancel/close remain available, and a default change
 affects new responsibilities only. See [ACP defaults and fallbacks](docs/acp-integration.en.md#defaults-and-fallbacks)
 and [installation and recovery](docs/installation.en.md).
+The task budget is a hard deadline that activity events cannot reset; receipts retain
+minimal activity/timing evidence. Status can read a matching receipt persisted before an
+interrupted binding update; display recovery never confirms cleanup or releases locks.
 
 After two explicit reworks leave the same acceptance gap with no material progress, make a
 recovery decision before a third equivalent order: repair a concrete environment problem,

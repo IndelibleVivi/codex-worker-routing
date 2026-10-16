@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { performance } from 'node:perf_hooks';
 import { Fault, atomicJSON, privateDir, paths } from './state.mjs';
 import { assertBindingIdentity } from './config.mjs';
 import { classifyTurn, planSessionMetadata, planContinuation } from './dispatch.mjs';
@@ -10,6 +11,7 @@ import { createObservationCollector } from './observations.mjs';
 import { writeDeliverySidecar, MAX_MESSAGE_BYTES, utf8Prefix, DELIVERY_BLOCK_INSTRUCTIONS } from './delivery.mjs';
 
 const now = () => new Date().toISOString();
+const EVENT_TYPES = new Set(['text_delta', 'status', 'tool_call', 'done', 'error']);
 const safeCode = e => typeof e?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(e.code) ? e.code : 'ACP_EXECUTION_FAILED';
 // The single authored source of the always-delivered worker contract is the
 // PACKAGED file below; the runtime reads it, never a second hand-copied
@@ -179,9 +181,21 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   // as oversized rather than silently truncated into a fake complete result.
   let messageText = '', messageTruncated = false, messageBytes = 0;
   let cleanup = 'unconfirmed', touchedRuntime = false, acceptingEvents = true;
-  let stream, promptStartedAt = null;
+  let stream, promptStartedAt = null, taskStartedClock = null, taskElapsedMs = null, activity = null;
+  let firstEventAt = null, lastEventAt = null, lastEventClock = null, lastEventType = null;
   const setupMs = Math.min(selection.route.timeoutMs, 30000);
   const startedAt = now();
+  // Freeze the evidence at the terminal decision, before cancellation/cleanup
+  // can emit late events. This is observed transport activity, never proof of
+  // useful progress, writer liveness or a provider failure classification.
+  const snapshotActivity = () => {
+    if (activity) return;
+    const clock = performance.now();
+    if (taskStartedClock !== null && taskElapsedMs === null) taskElapsedMs = Math.max(0, Math.round(clock - taskStartedClock));
+    activity = { observed_at: now(), event_count: eventCount, first_event_at: firstEventAt,
+      last_event_at: lastEventAt, last_event_type: lastEventType,
+      last_event_age_ms: lastEventClock === null ? null : Math.max(0, Math.round(clock - lastEventClock)) };
+  };
   // A bounded, nonthrowing observation collector for THIS turn. It mirrors only
   // verified structured runtime fields and never changes the terminal result.
   const observations = createObservationCollector({ requestId, now });
@@ -189,6 +203,10 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     for await (const event of turn.events) {
       if (!acceptingEvents) return;
       eventCount++;
+      lastEventAt = now(); firstEventAt ??= lastEventAt; lastEventClock = performance.now();
+      // Copy only a fixed event category; producer-controlled tags, names,
+      // messages, tool data and paths never enter the activity evidence.
+      lastEventType = EVENT_TYPES.has(event.type) ? event.type : 'other';
       // Never dump thought/tool payloads into the coordinating model's context.
       if (event.type === 'text_delta' && event.stream !== 'thought' && event.tag !== 'agent_thought_chunk' && typeof event.text === 'string') {
         excerpt += event.text;
@@ -261,10 +279,12 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     streamFailure.catch(() => {});
     await deadline(Promise.race([send, streamFailure]), setupMs, 'PROMPT_SETUP_TIMEOUT', signal);
     promptStartedAt = now();
+    taskStartedClock = performance.now();
     // The budget starts only after the public prompt-written acknowledgement
     // and includes canonical result finalization. Stream drain has a separate
     // bounded allowance; no losing Promise callback can overwrite terminal.
     const resultValue = await deadline(Promise.race([result, streamFailure]), selection.route.timeoutMs, 'TURN_TIMEOUT', signal);
+    taskElapsedMs = Math.max(0, Math.round(performance.now() - taskStartedClock));
     await deadline(stream, cleanupMs, 'STREAM_TIMEOUT', signal);
     terminal = resultValue;
     if (!terminal || !['completed','cancelled','failed'].includes(terminal.status))
@@ -281,6 +301,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     // Decide BEFORE asynchronous cancellation/cleanup. A later abort or late
     // runtime success must never rewrite a deadline/error that already won.
     terminal = { status: ['CANCEL_REQUESTED', 'CANCELLED_BEFORE_START'].includes(e.code) ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
+    snapshotActivity();
     if (turn) {
       await deadline(Promise.resolve().then(() => turn.cancel({ reason: 'integration interrupted or failed' })), cleanupMs, 'CANCEL_TIMEOUT').catch(() => {});
       // cancel() acknowledges a request; wait separately for the turn to settle.
@@ -288,6 +309,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
       await deadline(Promise.resolve().then(() => turn.closeStream()), cleanupMs, 'STREAM_CLOSE_TIMEOUT').catch(() => {});
     }
   } finally {
+    snapshotActivity();
     acceptingLaunches = false;
     acceptingEvents = false;
     // The turn has settled (any terminal outcome). Clear the active-turn marker so
@@ -318,7 +340,10 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     stop_reason: terminal?.stopReason ?? null,
     error_code: caught ? safeCode(caught) : terminal?.status === 'failed' ? safeCode(terminal.error) : null,
     cleanup, started_at: startedAt, finished_at: now(), permissions: selection.permissions,
-    budget: { setup_ms: setupMs, task_ms: selection.route.timeoutMs, prompt_started_at: promptStartedAt },
+    budget: { setup_ms: setupMs, task_ms: selection.route.timeoutMs, prompt_started_at: promptStartedAt,
+      task_deadline_at: promptStartedAt === null ? null : new Date(Date.parse(promptStartedAt) + selection.route.timeoutMs).toISOString(),
+      task_elapsed_ms: taskElapsedMs },
+    activity,
     acpx_record_id: handle?.acpxRecordId ?? null,
     acp_session_id: handle?.backendSessionId ?? null,
     agent_session_id: binding.handle?.agentSessionId ?? null,

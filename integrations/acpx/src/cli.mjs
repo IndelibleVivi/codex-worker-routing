@@ -223,6 +223,55 @@ export async function loadAcpx() {
     throw e;
   }
 }
+const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const isoTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+const nonnegative = value => Number.isSafeInteger(value) && value >= 0;
+function receiptTiming(receipt) {
+  const b = receipt.budget, a = receipt.activity;
+  const budget = b && nonnegative(b.setup_ms) && nonnegative(b.task_ms) ? {
+    setup_ms: b.setup_ms, task_ms: b.task_ms,
+    prompt_started_at: isoTime(b.prompt_started_at) ? b.prompt_started_at : null,
+    task_deadline_at: isoTime(b.task_deadline_at) ? b.task_deadline_at : null,
+    task_elapsed_ms: nonnegative(b.task_elapsed_ms) ? b.task_elapsed_ms : null,
+  } : null;
+  const activity = a && isoTime(a.observed_at) && nonnegative(a.event_count) ? {
+    observed_at: a.observed_at, event_count: a.event_count,
+    first_event_at: isoTime(a.first_event_at) ? a.first_event_at : null,
+    last_event_at: isoTime(a.last_event_at) ? a.last_event_at : null,
+    last_event_type: ['text_delta','status','tool_call','done','error','other'].includes(a.last_event_type) ? a.last_event_type : null,
+    last_event_age_ms: nonnegative(a.last_event_age_ms) ? a.last_event_age_ms : null,
+  } : null;
+  return { budget, activity };
+}
+async function statusReceipt(p, binding) {
+  const candidates = [];
+  const active = binding.active_turn;
+  if (typeof active?.request_id === 'string' && UUID.test(active.request_id) && isoTime(active.started_at))
+    candidates.push({ file: path.join(p.receipts, `${active.request_id}.json`), request: active.request_id, source: 'active_turn', started: active.started_at });
+  if (typeof binding.lastReceipt === 'string' && path.dirname(binding.lastReceipt) === p.receipts) {
+    const request = path.basename(binding.lastReceipt, '.json');
+    if (UUID.test(request) && binding.lastReceipt === path.join(p.receipts, `${request}.json`) && !candidates.some(c => c.file === binding.lastReceipt))
+      candidates.push({ file: binding.lastReceipt, request, source: 'binding' });
+  }
+  // No directory scan or "latest" guess. These reads cannot repair a binding,
+  // confirm cleanup, reclaim a lock or authorize another writer.
+  if (!candidates.length) return null;
+  try { await privateDir(p.receipts, { create: false }); } catch { return null; }
+  for (const candidate of candidates) {
+    let r;
+    try { r = await readJSON(candidate.file, { privateFile: true }); } catch { continue; }
+    if (!r || r.schema !== 'cwr.acp.receipt/1' || r.backend !== 'acpx' || r.session_id !== binding.id ||
+        r.request_id !== candidate.request || r.route !== binding.route || r.receipt_path !== candidate.file ||
+        !['completed','failed','cancelled'].includes(r.runtime_status) || !['confirmed','unconfirmed'].includes(r.cleanup) ||
+        !isoTime(r.started_at) || !isoTime(r.finished_at) || Date.parse(r.finished_at) < Date.parse(r.started_at) ||
+        (candidate.started && r.started_at !== candidate.started) ||
+        (binding.handle?.acpxRecordId && r.acpx_record_id !== binding.handle.acpxRecordId) ||
+        (binding.handle?.backendSessionId && r.acp_session_id !== binding.handle.backendSessionId)) continue;
+    return { receipt: r, evidence: { source: candidate.source, request_id: r.request_id,
+      reported_cleanup: r.cleanup, ...receiptTiming(r) } };
+  }
+  return null;
+}
 export async function localStatus(config, binding) {
   const p = paths(config.stateDir, binding.id);
   let lockPresent = false;
@@ -239,9 +288,20 @@ export async function localStatus(config, binding) {
     try { process.kill(owner.pid, 0); active = 'owner_process_present'; }
     catch { /* PID is a hint only. Never auto-reclaim. */ }
   }
+  const saved = await statusReceipt(p, binding);
+  const errorCode = typeof saved?.receipt.error_code === 'string' && /^[A-Z0-9_]{1,80}$/.test(saved.receipt.error_code) ? saved.receipt.error_code : null;
+  const marker = binding.active_turn;
+  const current = saved?.evidence.source === 'active_turn' ? saved.receipt : null;
+  const activeRequest = typeof marker?.request_id === 'string' && UUID.test(marker.request_id) && isoTime(marker.started_at) ? {
+    request_id: marker.request_id, started_at: marker.started_at,
+    runtime_status: current?.runtime_status ?? null, error_code: current ? errorCode : null,
+    receipt: current?.receipt_path ?? null,
+  } : null;
   return { schema:'cwr.acp.status/1', session_id:binding.id, active,
-    closed:binding.closed === true, last_runtime_status:binding.lastStatus ?? null,
-    cleanup:binding.cleanup ?? 'unknown', last_receipt:binding.lastReceipt ?? null };
+    closed:binding.closed === true, last_runtime_status:saved?.receipt.runtime_status ?? null,
+    last_error_code:errorCode, active_request:activeRequest,
+    cleanup:binding.active_turn ? 'unconfirmed' : binding.cleanup ?? 'unknown',
+    last_receipt:saved?.receipt.receipt_path ?? null, receipt_evidence:saved?.evidence ?? null };
 }
 export { requestCancel } from './state.mjs';
 

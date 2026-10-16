@@ -64,6 +64,14 @@ test('cancellation returns a cancelled terminal, not successful acceptance',asyn
 test('pre-aborted request does not initialize or prompt',async t=>{
  const f=await setup(t);const c=new AbortController();c.abort();const r=await run(f,{signal:c.signal});
  assert.equal(r.runtime_status,'cancelled');assert.equal(f.api.calls.length,0);
+ assert.equal(r.activity.event_count,0);assert.equal(r.activity.first_event_at,null);assert.equal(r.activity.last_event_at,null);
+ assert.equal(r.activity.last_event_type,null);assert.equal(r.activity.last_event_age_ms,null);
+ assert.equal(r.budget.task_deadline_at,null);assert.equal(r.budget.task_elapsed_ms,null);
+});
+test('activity categorizes unknown event types without retaining producer-controlled names',async t=>{
+ const f=await setup(t,{events:[{type:'PRIVATE_EVENT_TYPE',payload:'PRIVATE_EVENT_PAYLOAD'}]});const r=await run(f);
+ assert.equal(r.activity.event_count,1);assert.equal(r.activity.last_event_type,'other');
+ assert.ok(!JSON.stringify(r).includes('PRIVATE_EVENT_'));
 });
 test('cleanup failure is explicit and cannot be claimed complete',async t=>{
  const f=await setup(t,{cleanupError:true});const r=await run(f);assert.equal(r.cleanup,'unconfirmed');assert.ok(r.error_code);

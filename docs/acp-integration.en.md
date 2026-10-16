@@ -421,10 +421,25 @@ Initialization and prompt submission each have a setup deadline of
 `min(route.timeoutMs, 30000)` milliseconds, reported as `INIT_TIMEOUT` or
 `PROMPT_SETUP_TIMEOUT` respectively. The task budget of `route.timeoutMs` starts at the
 public runtime's `promptStarted` acknowledgement that the transport accepted the prompt,
-and runs through canonical `result`, including runtime finalization. Connection setup
-does not consume that task budget. Receipt `budget` retains `setup_ms`, `task_ms` and
-`prompt_started_at` (null when no acknowledgement was observed; this does not prove
-the prompt was never sent).
+and runs through canonical `result`, including runtime finalization. This is a hard deadline
+for the whole turn; text/tool/status events never reset or extend it. Connection setup does
+not consume that task budget. Receipt `budget` retains `setup_ms`, `task_ms`,
+`prompt_started_at`, `task_deadline_at` and `task_elapsed_ms`. Elapsed time uses a monotonic
+clock from prompt acknowledgement through the canonical result or task interruption,
+excluding later stream drain/cleanup. The last three fields are null when no prompt
+acknowledgement was observed; this does not prove the prompt was never sent.
+
+Receipt `activity` freezes at the terminal decision, before cancellation and cleanup. It
+retains only `observed_at`, `event_count`, `first_event_at`, `last_event_at`, a fixed
+`last_event_type` enum and `last_event_age_ms`. Types are `text_delta`, `status`, `tool_call`,
+`done`, `error` or `other`; event timestamps, type and age are null when no event was seen.
+No prompt, thought, tool payload, name, path or free text is retained. Age is the monotonic
+gap from the last observed event to that snapshot, not to a later status query.
+`activity.event_count` counts events at the snapshot; the existing `observed_event_count`
+still counts everything consumed before observation stops, including possible later cleanup
+events. These fields distinguish events near the hard deadline from a long observation gap.
+Events do not prove useful progress, an event gap does not prove a stopped writer, and
+neither is used to infer a provider root cause.
 
 CWR uses public `startTurn({timeoutMs: 0})` to disable the pinned acpx version's internal
 prompt RPC timer and owns the task deadline itself. This prevents internal recovery from
@@ -447,9 +462,27 @@ by re-sending the same write work order. A normal stop and a code failure attemp
 ACP-owned connections; a cleanup failure, unresolved initialization, an observed active
 adapter, or a directly dead process keeps the lock.
 
-status's `owner_process_present` only means the PID probe hit; it is not proof of that PID's
-identity or model health. A stale lock is not automatically reclaimed, to avoid double-writes
-from PID reuse/leftover writers.
+Status reads local state only. `last_receipt` / `last_runtime_status` / `last_error_code` come
+from a valid receipt. If the receipt was persisted but the final binding update was
+interrupted, status first reads the exact request id and start time in `active_turn`, then
+checks the existing binding receipt pointer. Both must match the session, route, saved
+handle identity and the receipt's own path. Foreign/stale/malformed or unsafe files never
+become execution evidence. Without a valid pointer these values remain null; status never
+scans for a guessed latest receipt. `receipt_evidence.source` identifies `active_turn` or
+`binding`, with the request id, `reported_cleanup` and allowlisted `budget` / `activity`.
+Fields absent from old receipts remain null; historical receipts are never rewritten.
+`active_request` separately shows the binding's current request id, start time and matching
+runtime status, error code and receipt; the last three are null without a receipt for that
+turn. An earlier completed receipt may remain historical `last_*` evidence and can never
+become the completion outcome of a newer active request.
+
+This display recovery does not repair the binding, reclaim a lock or confirm that the
+writer stopped. Top-level `cleanup` comes independently from the binding and remains
+`unconfirmed` while `active_turn` exists, even if the receipt reported confirmed cleanup.
+`receipt_evidence.reported_cleanup` is only the cleanup outcome recorded at receipt time
+and grants no control authority. `owner_process_present` only means the PID probe hit; it
+is not proof of that PID's identity or model health. A stale lock is not automatically
+reclaimed, to avoid double-writes from PID reuse/leftover writers.
 
 Exception recovery is done by the local operator checking owner.json, the session receipt,
 the current adapter process and the actual diff. Only after confirming the old writer has
@@ -458,6 +491,9 @@ acpx store. cwr-acp does not implement an automatic recoverer, and in particular
 not be treated as proof that all descendants have exited. Cleanup only confirms acpx-owned
 processes/connections; it does not guarantee that a malicious daemonized or otherwise
 host-detached descendant has been terminated.
+After reconciling stopped writers and inspecting existing work, the coordinator explicitly
+authorizes the remaining responsibility through `continue --permissions read|full`. A hard
+deadline never renews itself, replays the original order or triggers post-launch fallback.
 
 ## Acceptance gate
 

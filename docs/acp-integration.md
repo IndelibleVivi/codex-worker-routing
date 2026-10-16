@@ -310,8 +310,20 @@ worktree；worktree 本身也不隔离上述非文件资源。
 初始化和 prompt 提交各有 `min(route.timeoutMs, 30000)` 毫秒 setup deadline；分别报告
 `INIT_TIMEOUT` 与 `PROMPT_SETUP_TIMEOUT`。公共 runtime 的 `promptStarted` 确认传输已接收
 prompt 后，才开始 `route.timeoutMs` 的任务预算；预算到 canonical `result` 为止，包含
-runtime finalization。连接建立所用时间不消耗任务预算。回执的 `budget` 保留
-`setup_ms`、`task_ms`、`prompt_started_at`（未观察到确认时为 null，不能据此断言未发送）。
+runtime finalization。这是整轮 hard deadline，text/tool/status 事件不会刷新或延长预算。
+连接建立所用时间不消耗任务预算。回执的 `budget` 保留 `setup_ms`、`task_ms`、
+`prompt_started_at`、`task_deadline_at` 与 `task_elapsed_ms`。elapsed 使用 monotonic clock，
+从 prompt 确认计到 canonical result 或任务中断，不包括后续 stream drain/cleanup；未观察到
+prompt 确认时，后三项为 null，不能据此断言未发送。
+
+回执的 `activity` 在终态决定时、取消与清理之前冻结，只保留 `observed_at`、`event_count`、
+`first_event_at`、`last_event_at`、固定枚举 `last_event_type` 与 `last_event_age_ms`。
+类型为 `text_delta`、`status`、`tool_call`、`done`、`error` 或 `other`，没有事件时各 event
+时间、类型与 age 为 null。它不保存 prompt、thought、tool payload、名称、路径或自由文本。
+age 是最后观察事件到冻结时的 monotonic 间隔，不是到 status 查询时的间隔。
+`activity.event_count` 是该冻结点的计数；原 `observed_event_count` 仍是停止消费前的总数，
+可包含后续收尾事件。这样可以辨认 hard deadline 附近仍有事件和较长时间未观察到事件；
+事件不证明有效进展，无事件不证明 writer 已停止，也不据此推断 provider 根因。
 
 CWR 通过公开 `startTurn({timeoutMs: 0})` 关闭所固定 acpx 版本内部的 prompt RPC timer，
 由自身 deadline 管理任务，避免 acpx 把“已有 progress 但没有 RPC final”的内部超时恢复成
@@ -328,13 +340,29 @@ CWR 通过公开 `startTurn({timeoutMs: 0})` 关闭所固定 acpx 版本内部�
 不要靠再次发送同一写工单来“确认”。正常停止和代码失败会尝试关闭 ACP-owned 连接；
 清理失败、初始化未决、仍观测到活跃 adapter 或进程直接死亡时保留锁。
 
-status 的 `owner_process_present` 仅表示 PID 探针命中，不是该 PID 身份或模型健康证明。
+status 只读本机状态。`last_receipt` / `last_runtime_status` / `last_error_code` 来自有效回执；
+若回执已落盘而最后的 binding 更新中断，优先按 `active_turn` 的确切 request id 和开始时间
+读取对应文件，再检查 binding 的既有回执指针。两者都必须匹配 session、route、保存的
+handle 身份及回执自身路径；foreign/stale/malformed 或不安全文件不会成为执行证据。
+没有有效指针时保持 null，不扫描并猜测最新回执。`receipt_evidence.source` 标记
+`active_turn` 或 `binding`，并提供 request id、`reported_cleanup` 及筛选后的 `budget` /
+`activity`；旧回执没有的新字段保持 null，历史回执不改写。
+`active_request` 单独显示 binding 中的当前 request id、开始时间及匹配的 runtime status、
+error code、receipt；没有本轮回执时后三项为 null。较早的 completed 回执仍可作为
+`last_*` 的历史证据，不能成为较新 active request 的完成结果。
+
+这条显示恢复路径不修复 binding、不回收锁，也不确认 writer 停止。顶层 `cleanup` 独立取自
+binding；`active_turn` 仍存在时保持 `unconfirmed`，即使回执曾报告 confirmed。
+`receipt_evidence.reported_cleanup` 只是该回执当时记录的清理结果，不授予控制操作权限。
+`owner_process_present` 仅表示 PID 探针命中，不是该 PID 身份或模型健康证明。
 过期锁不自动回收，避免 PID 重用/遗留 writer 导致双写。
 
 异常恢复由本机操作者核对 owner.json、session receipt、当前 adapter 进程和实际 diff。
 确认旧 writer 已终止后，才移除对应 operation 锁和 workspace 锁；保留 binding 和 acpx store。
 cwr-acp 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后代已退出的证明。
 清理只确认 acpx-owned 进程/连接；不保证恶意 daemon 化或脱离宿主的任意后代已被终止。
+完成停止对账并检查已有成果后，由协调者对剩余责任显式授权 `continue --permissions read|full`；
+hard deadline 不会自动续期、重放原工单或触发启动后的备用路线。
 
 ## 验收门
 

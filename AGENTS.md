@@ -15,6 +15,10 @@ plugin and its optional main-session context integration.
   excludes mutable workspace/permission/budget policy; validate those authorizations on
   every continuation. Legacy bindings migrate only after an exact old-fingerprint match
   under lock. Preserve historical receipts and monotonic timeout/cancellation outcomes.
+  Status may recover display evidence only from exact identity-matching receipt pointers;
+  this read never repairs bindings or confirms cleanup. Keep payload-free activity snapshots
+  separate from writer liveness and freeze them before cancellation/cleanup; events never
+  reset the hard task deadline.
   Keep setup, prompt-start task budget, and cleanup boundaries independently testable
   against the pinned public acpx runtime, including progress without a final response.
   Keep one selected launch and truthful selection evidence without extra dispatch tasks.
