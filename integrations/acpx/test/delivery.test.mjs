@@ -72,7 +72,42 @@ test('normalizeDelivery rejects unknown fields, bad schema, bad status and wrong
   assert.equal(normalizeDelivery({ ...READY_A, extra: 1 }).code, 'UNKNOWN_FIELD');
   assert.equal(normalizeDelivery({ ...READY_A, schema: 'x' }).code, 'BAD_SCHEMA');
   assert.equal(normalizeDelivery({ ...READY_A, status: 'done' }).code, 'BAD_STATUS');
+  assert.equal(normalizeDelivery({ ...READY_A, request_id: UUID_B }, { requestId: UUID_A }).code, 'WRONG_REQUEST_ID');
   assert.equal(normalizeDelivery({ ...READY_A, request_id: 'other' }, { requestId: UUID_A }).code, 'WRONG_REQUEST_ID');
+});
+test('delivery ids stay bounded without an expected identity', () => {
+  const badIds = [
+    { request_id: { x: 'x' } },
+    { request_id: 7 },
+    { session_id: { x: 'x' } },
+    { session_id: false },
+    { session_id: `${UUID_A}0` },
+  ];
+  for (const ids of badIds) {
+    const normalized = normalizeDelivery({ ...READY, ...ids });
+    assert.equal(normalized.ok, false);
+    assert.equal(normalized.code, 'BAD_IDENTITY');
+    assert.equal(normalized.block, undefined);
+    const extracted = extractDelivery(block({ ...READY, ...ids }));
+    assert.equal(extracted.status, 'malformed');
+    assert.equal(extracted.code, 'BAD_IDENTITY');
+    assert.equal(extracted.block, null);
+    assert.ok(JSON.stringify(extracted).length < 1024, 'invalid ids are not echoed');
+  }
+  for (const text of [
+    block({ ...READY, request_id: { x: 'x'.repeat(80 * 1024) } }),
+    block({ ...READY, request_id: 'x'.repeat(80 * 1024) }),
+  ]) {
+    const extracted = extractDelivery(text);
+    assert.equal(extracted.status, 'oversized');
+    assert.ok(['BLOCK_TOO_LARGE', 'MESSAGE_TOO_LARGE'].includes(extracted.code));
+    assert.equal(extracted.block, null);
+    assert.ok(JSON.stringify(extracted).length < 1024, 'oversized ids are not echoed');
+  }
+  const valid = normalizeDelivery({ ...READY, request_id: UUID_A, session_id: UUID_B });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.block.request_id, UUID_A);
+  assert.equal(valid.block.session_id, UUID_B);
 });
 test('a delivery block MUST carry the current ids; missing or stale ids are wrong_identity', () => {
   const noIds = { ...READY };
@@ -152,6 +187,111 @@ test('sidecar validation rejects a wrong session/request and bad timestamps', as
   assert.equal(validateSidecar({ ...good, session_id: UUID_B }, { session: f.binding.id, requestId: UUID_A }).reason, 'WRONG_SESSION');
   assert.equal(validateSidecar({ ...good, request_id: UUID_B }, { session: f.binding.id, requestId: UUID_A }).reason, 'WRONG_REQUEST');
   assert.equal(validateSidecar({ ...good, finished_at: 'not-a-date' }, { session: f.binding.id, requestId: UUID_A }).reason, 'BAD_TIMESTAMP');
+});
+
+test('stored delivery blocks must repeat the exact outer request and session identity', async t => {
+  const f = await setup(t);
+  for (const status of ['ready', 'partial', 'needs_input']) {
+    const written = await writeDeliverySidecar({
+      stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+      finishedAt: '2026-01-02T00:00:00.000Z',
+      text: block({ ...READY, request_id: UUID_A, session_id: f.binding.id, status }),
+    });
+    assert.equal(written.sidecar.worker.block.request_id, UUID_A);
+    assert.equal(written.sidecar.worker.block.session_id, f.binding.id);
+    assert.equal((await readDelivery(f.config.stateDir, f.binding.id, UUID_A)).worker.status, status);
+    await fs.rm(written.file);
+  }
+
+  // Shape a synthetic pre-change sidecar after the real writer and remove both
+  // block ids. Historical outer identity was already checked at write time.
+  const historical = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+    finishedAt: '2026-01-02T00:00:00.000Z', text: readyFor(f.binding.id),
+  });
+  const legacy = await readJSON(historical.file, { privateFile: true });
+  delete legacy.worker.block.request_id;
+  delete legacy.worker.block.session_id;
+  await fs.writeFile(historical.file, JSON.stringify(legacy), { mode: 0o600 });
+  assert.equal((await readDelivery(f.config.stateDir, f.binding.id, UUID_A)).worker.status, 'ready');
+  await fs.rm(historical.file);
+
+  const mismatches = [
+    ['wrong block request', { request_id: UUID_B }],
+    ['wrong block session', { session_id: UUID_B }],
+    ['removed block request', { request_id: undefined }],
+    ['removed block session', { session_id: undefined }],
+  ];
+  const controls = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+    finishedAt: '2026-01-02T00:00:00.000Z', text: readyFor(f.binding.id),
+  });
+  const control = await readJSON(controls.file, { privateFile: true });
+  delete control.worker.block.request_id;
+  delete control.worker.block.session_id;
+  await fs.writeFile(controls.file, JSON.stringify(control), { mode: 0o600 });
+  assert.equal(validateSidecar(control, { session: f.binding.id, requestId: UUID_A }).ok, true);
+  await fs.rm(controls.file);
+
+  for (const [name, change] of mismatches) {
+    const written = await writeDeliverySidecar({
+      stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+      finishedAt: '2026-01-02T00:00:00.000Z',
+      text: readyFor(f.binding.id),
+    });
+    const stored = await readJSON(written.file, { privateFile: true });
+    assert.equal(stored.worker.block.request_id, UUID_A, 'normal writer retains validated request identity');
+    assert.equal(stored.worker.block.session_id, f.binding.id, 'normal writer retains validated session identity');
+    for (const [key, value] of Object.entries(change)) {
+      if (value === undefined) delete stored.worker.block[key];
+      else stored.worker.block[key] = value;
+    }
+    await fs.writeFile(written.file, JSON.stringify(stored), { mode: 0o600 });
+    await assert.rejects(readDelivery(f.config.stateDir, f.binding.id, UUID_A), { code: 'CORRUPT_DELIVERY' }, name);
+    assert.equal(validateSidecar(stored, { session: f.binding.id, requestId: UUID_A }).reason, 'BAD_BLOCK', name);
+    await fs.rm(written.file);
+  }
+});
+
+test('unqualified delivery scan rejects invalid identity records and keeps warnings truthful', async t => {
+  const f = await setup(t);
+  const one = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+    finishedAt: '2026-01-01T00:00:00.000Z', text: readyFor(f.binding.id),
+  });
+  const bad = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_B,
+    finishedAt: '2026-01-03T00:00:00.000Z',
+    text: block({ ...READY, request_id: UUID_B, session_id: f.binding.id, summary: 'bad newer copy' }),
+  });
+  const corrupt = await readJSON(bad.file, { privateFile: true });
+  corrupt.worker.block.request_id = UUID_A;
+  await fs.writeFile(bad.file, JSON.stringify(corrupt), { mode: 0o600 });
+
+  const scanned = await readDelivery(f.config.stateDir, f.binding.id);
+  assert.equal(scanned.request_id, UUID_A, 'a corrupt newer record cannot win the scan');
+  assert.equal(scanned.worker.block.summary, 'done');
+  assert.deepEqual(scanned.collection_warnings, { invalid_sidecars: 1 });
+
+  await fs.rm(one.file);
+  await assert.rejects(readDelivery(f.config.stateDir, f.binding.id), { code: 'CORRUPT_DELIVERY' });
+});
+
+test('valid delivery history remains readable per request after identity validation', async t => {
+  const f = await setup(t);
+  await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_A,
+    finishedAt: '2026-01-01T00:00:00.000Z', text: readyFor(f.binding.id),
+  });
+  await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: f.binding.id, requestId: UUID_B,
+    finishedAt: '2026-01-03T00:00:00.000Z',
+    text: block({ ...READY, request_id: UUID_B, session_id: f.binding.id, summary: 'second' }),
+  });
+  assert.equal((await readDelivery(f.config.stateDir, f.binding.id, UUID_A)).worker.block.summary, 'done');
+  assert.equal((await readDelivery(f.config.stateDir, f.binding.id, UUID_B)).worker.block.summary, 'second');
+  assert.equal((await readDelivery(f.config.stateDir, f.binding.id)).worker.block.summary, 'second');
+  assert.equal(await readDelivery(f.config.stateDir, f.binding.id, '33333333-3333-4333-8333-333333333333'), null);
 });
 
 // --- Immutability / idempotence / conflict ---------------------------------

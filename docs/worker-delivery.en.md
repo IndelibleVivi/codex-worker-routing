@@ -53,6 +53,17 @@ test or dependency changes invalidate affected evidence; HEAD alone cannot ident
 content. Locatable references do not prove their support, and reports never authorize
 execution of shell strings they contain.
 
+Without `--request`, `delivery --session UUID` reads the newest valid stored delivery by
+`finished_at`, then `request_id`. Use `--request REQUEST_ID` to read one turn: a named
+missing sidecar is reported as absent (`delivery: null` in JSON), while a named corrupt
+sidecar is rejected. A scan skips invalid records and reports their count alongside a
+valid result; if only invalid records remain, the scan is rejected. An older report is never evidence for a different request.
+
+New blocks retain the validated request/session IDs. If either inner ID is present, both
+must be bounded UUIDs matching the outer sidecar; a block with neither ID is accepted only
+for the legacy stored shape. That shape cannot authenticate provenance or distinguish a
+genuine old record from one later stripped of both IDs.
+
 ## Run a finite batch
 
 Already-defined independent responsibilities can use the packaged [swarm method](../plugins/worker-routing/skills/swarm/SKILL.md).

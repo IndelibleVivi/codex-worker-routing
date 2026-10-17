@@ -119,6 +119,12 @@ export function normalizeDelivery(raw, { requestId = null, session = null } = {}
     if (raw.session_id === undefined) return { ok: false, code: 'MISSING_SESSION_ID' };
     if (raw.session_id !== session) return { ok: false, code: 'WRONG_SESSION_ID' };
   }
+  // Identity is optional without an expected turn, but whenever present it is
+  // one bounded UUID. Do not retain arbitrary values in the normalized block.
+  if (raw.request_id !== undefined && (typeof raw.request_id !== 'string' || !UUID_RE.test(raw.request_id)))
+    return { ok: false, code: 'BAD_IDENTITY' };
+  if (raw.session_id !== undefined && (typeof raw.session_id !== 'string' || !UUID_RE.test(raw.session_id)))
+    return { ok: false, code: 'BAD_IDENTITY' };
   const summary = str(raw.summary, 4000);
   if (summary === null) return { ok: false, code: 'BAD_SUMMARY' };
 
@@ -165,7 +171,12 @@ export function normalizeDelivery(raw, { requestId = null, session = null } = {}
     questions.push(s);
   }
 
-  return { ok: true, block: { schema: DELIVERY_SCHEMA, status: raw.status, summary, criteria, checks, artifacts, questions } };
+  // Keep the validated ids on the bounded block so a stored sidecar can be
+  // checked against its outer request/session, not only its mutable shell.
+  const identity = {};
+  if (raw.request_id !== undefined) identity.request_id = raw.request_id;
+  if (raw.session_id !== undefined) identity.session_id = raw.session_id;
+  return { ok: true, block: { schema: DELIVERY_SCHEMA, ...identity, status: raw.status, summary, criteria, checks, artifacts, questions } };
 }
 
 /**
@@ -268,7 +279,15 @@ export function validateSidecar(raw, { session, requestId: req }) {
   if (raw.worker.checks_source !== undefined && raw.worker.checks_source !== 'worker_reported') return { ok: false, reason: 'BAD_PROVENANCE' };
   if (!isPlain(raw.observed) || raw.observed.checks_source !== 'runner_observed') return { ok: false, reason: 'BAD_OBSERVED' };
   if (STATUS_VALUES.includes(raw.worker.status)) {
-    const normalized = normalizeDelivery(raw.worker.block);
+    const block = raw.worker.block;
+    // Sidecars written before block-level identity was retained have neither
+    // id; their outer identity was checked at write time. Once a block carries
+    // either id, it must carry both and they must match the outer identity.
+    const hasBlockIdentity = block && (block.request_id !== undefined || block.session_id !== undefined);
+    const expectedBlock = block && (hasBlockIdentity
+      ? block
+      : { ...block, request_id: request, session_id: id });
+    const normalized = normalizeDelivery(expectedBlock, { requestId: request, session: id });
     if (!normalized.ok || normalized.block.status !== raw.worker.status) return { ok: false, reason: 'BAD_BLOCK' };
   }
   if (typeof raw.message !== 'string' || typeof raw.message_truncated !== 'boolean') return { ok: false, reason: 'BAD_MESSAGE' };

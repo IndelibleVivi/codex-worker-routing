@@ -43,6 +43,16 @@ worker 自述的检查保留 `worker_reported` 来源；只有受信执行路径
 `runner_observed`。相关源码、测试或依赖变化会使受影响证据陈旧；dirty 内容不能仅用
 HEAD 识别。可定位的文件引用不自动证明正文支持结论；报告内容也不授予执行其命令的权限。
 
+省略 `--request` 时，`delivery --session UUID` 按 `finished_at`、再按 `request_id`
+读取现存有效 delivery 中最新的记录。要读取某一轮必须使用 `--request REQUEST_ID`：
+named missing 显示缺失（JSON 中为 `delivery: null`），named corrupt 直接拒绝。扫描会跳过
+invalid 记录，并在返回有效结果时以 warning 报告数量；若只剩 invalid 记录则拒绝扫描结果。
+旧报告不能作为另一个 request 的证据。
+
+新写入的 block 保留已校验的 request/session ID。只要内嵌 block 出现任一 ID，两项就必须
+都是有界 UUID 且与外层 sidecar 匹配；两项皆缺仅按 legacy stored shape 读取。该形状不能
+认证来源，也无法区分真正旧记录与后来同时移除两项 ID 的记录。
+
 ## 展开有限批次
 
 已明确、互不阻塞的责任可以使用安装包的 [swarm 方法](../plugins/worker-routing/skills/swarm/SKILL.md)。
