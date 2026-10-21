@@ -9,3 +9,6 @@ __pycache__/
 
 # Generated public website
 integrations/site/dist/
+
+# Local integration interfaces and build/test scratch
+.build/

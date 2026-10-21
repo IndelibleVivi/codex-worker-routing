@@ -16,6 +16,7 @@
 | ACP 与 provider 协议边界 | [中文](acp-provider-protocols.md) | [English](acp-provider-protocols.en.md) |
 | 经 Codex Router 使用 Command Code | [中文](commandcode-via-codex-router.md) | [English](commandcode-via-codex-router.en.md) |
 | 本机 Dispatch 与分享卡 | [中文](dispatch.md) | [English](dispatch.en.md) |
+| 存储盘点与显式清理 | [中文](storage-management.md) | [English](storage-management.en.md) |
 | Dispatch 数据契约 | [中文](dispatch-data.zh-CN.md) | [English](dispatch-data.md) |
 | 上下文与权限边界 | [中文](context.md) | [English](context.en.md) |
 | 行为场景与观察证据 | [中文](behavior-scenarios.md) | [English](behavior-scenarios.en.md) |

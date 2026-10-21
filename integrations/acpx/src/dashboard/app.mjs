@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: SUL-1.0
 import {productMark} from '/mark.mjs';
+import {createStorageView} from '/storage-view.mjs';
 import {mascotMark} from '/mascots.mjs';
 import {THEMES,getTheme} from '/themes.mjs';
 import {dayKey,resolveTimeZone} from '/time.mjs';
@@ -34,7 +35,8 @@ const status=s=>s.active_turn?'unknown':['completed','failed','cancelled'].inclu
 const kindLabel=k=>({all:T('全部','All'),completed:T('运行完成','Completed'),failed:T('执行中断','Ended in error'),cancelled:T('已取消','Cancelled'),unknown:T('无终态回执','No terminal receipt'),revision:T('明确返修','Explicit revisions'),takeover:T('主机接管','Takeovers'),multi:T('本窗口多轮','Multiple turns'),runtime:T('运行记录','Runtime notes')})[k]??k;
 const eventLabel=k=>({dispatch:T('派出工单','Task dispatched'),runtime_started:T('开始执行','Execution started'),runtime_completed:T('运行完成 · 自动回执','Completed · Automatic receipt'),runtime_failed:T('执行结束：失败','Execution ended in error'),runtime_cancelled:T('执行结束：取消','Execution cancelled'),runtime_unknown:T('终态未知','Unknown terminal outcome'),dispatched:T('派出工单','Task dispatched'),responsibility_started:T('派出工单','Task dispatched'),continued:T('同一任务续做','Continued responsibility'),completed:T('运行完成 · 自动回执','Completed · Automatic receipt'),failed:T('执行结束：失败','Execution ended in error'),cancelled:T('执行结束：取消','Execution cancelled'),closed:T('会话已关闭','Session closed'),submitted:T('主动送验记录','Explicit review request'),revision_requested:T('明确请求返修','Explicit revision request'),accepted:T('主机接受记录','Acceptance recorded'),taken_over:T('主机接管记录','Takeover recorded'),note:T('协作备注','Collaboration note')})[k]??k;
 const reasons={requirement_missed:['遗漏要求','Requirement missed'],validation_failed:['验证失败','Validation failed'],scope_changed:['范围变化','Scope changed'],constraint_added:['补充约束','Constraint added'],environment_blocked:['环境阻塞','Environment blocked'],uncertain:['原因不确定','Uncertain reason']};
-async function api(url,options={}){const r=await fetch(url,{...options,headers:{Authorization:`Bearer ${token}`,...options.headers},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?T('请使用 CLI 打印的私人链接打开。','Open the private link printed by the CLI.'):T('本地读取或保存未完成，请重试。','Local read or save did not complete. Please retry.'));return r.json();}
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{Authorization:`Bearer ${token}`,...options.headers},cache:'no-store'});if(!r.ok){const body=await r.json().catch(()=>({}));const error=new Error(r.status===401?T('请使用 CLI 打印的私人链接打开。','Open the private link printed by the CLI.'):T('本地读取或保存未完成，请重试。','Local read or save did not complete. Please retry.'));if(typeof body.error==='string'&&/^[A-Z0-9_]{1,80}$/.test(body.error))error.code=body.error;throw error;}return r.json();}
+const storageView=createStorageView({api,getLanguage:()=>lang,showDialog:()=>showDialog('#storage-dialog'),isStopped:()=>stopped,isActive:()=>view==='storage'});
 const query=()=>new URLSearchParams({since:period,timeZone:zone}).toString();
 function notice(message){$('#notice').textContent=message;$('#notice').hidden=!message;}
 function notify(message){clearTimeout(toastTimer);const host=$('dialog[open]')??document.body;host.append($('#toast'));$('#toast').textContent=message;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,3500);}
@@ -47,7 +49,7 @@ function renderStatic(){
  $('#intro-ornament').innerHTML=renderOrnamentSVG('thread',theme.id);$('#browse-ornament').innerHTML=renderOrnamentSVG('bloom',theme.id);
  document.documentElement.lang=lang==='zh'?'zh-CN':'en';
  const content={
- '#skip':T('跳到内容','Skip to content'),'#brand-edition':T('DISPATCH / 协作手记','DISPATCH / FIELD NOTES'),'#nav-overview':T('协作总览','Overview'),'#nav-records':'Sessions','#language':lang==='zh'?'EN':'中',
+ '#skip':T('跳到内容','Skip to content'),'#brand-edition':T('DISPATCH / 协作手记','DISPATCH / FIELD NOTES'),'#nav-overview':T('协作总览','Overview'),'#nav-records':'Sessions','#nav-storage':T('存储空间','Storage'),'#language':lang==='zh'?'EN':'中',
  '#heading':T('工作有去有回。','Good work comes back.'),'#intro-text':T('看看任务怎样走完，也看看途中发生了什么。','See how the work unfolded, including the detours.'),
  '#hero-title':T('这个窗口里的协作','COLLABORATION IN THIS WINDOW'),'#task-unit':T('份委派任务','delegated tasks'),'#task-note':T('同一任务续做，只计一份。','Continued work stays one task.'),'#turn-label':T('轮执行','worker turns'),'#turn-note':T('来自运行记录，无需另写回执。','Captured from execution. No extra receipt.'),'#seal-caption':T('今天也有好帮手','A little company.'),
  '#outcome-heading':T('Sessions · 运行状态','Sessions · Runtime state'),'#outcome-note':T('照常结束，不另走盖章流程。','Ordinary completion needs no extra annotation.'),'#activity-title':T('协作节奏','Activity over time'),'#chart-hint':T('点柱形，查看对应记录 ↗','Select a bar to see its records ↗'),'#chart-note':T('按所选时区的自然日分组；较长窗口合并相邻日期。','Calendar days in the selected zone; long windows combine adjacent dates.'),
@@ -119,8 +121,8 @@ function renderRecords(){renderWorkspaces();const rows=matchingRows(),chips=[];i
  $('#record-options').innerHTML=buttons(['all','revision','multi','takeover','runtime'].map(k=>[k,kindLabel(k)]),'data-kind',filter.kind??'all');
 }
 function render(){const focused=focusKey(document.activeElement);applyTheme();renderStatic();if(snapshot){renderOverview();renderRecords();const start=snapshot.period.since?dayKey(snapshot.period.since,zone):null;$('#range-label').textContent=`${start?short(start):T('全部已记录时间','All recorded time')} — ${short(dayKey(snapshot.period.until,zone))} · ${zone}`;$('#local-info').textContent=T(`本机记录 · 观察于 ${dateTime(snapshot.observed_at)}`,`Local records · Observed ${dateTime(snapshot.observed_at)}`);}
- $('#overview-view').hidden=view!=='overview';$('#records-view').hidden=view!=='records';document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);el.setAttribute('aria-current',active?'page':'false');});if(focused)$(focused)?.focus({preventScroll:true});}
-function switchView(next){if(view==='overview'&&next==='records')returnY=scrollY;view=next;render();if(next==='records'){$('#records-view').scrollIntoView({block:'start'});$('#records-heading').tabIndex=-1;$('#records-heading').focus({preventScroll:true});}else scrollTo(0,returnY);}
+ $('#overview-view').hidden=view!=='overview';$('#records-view').hidden=view!=='records';$('#storage-view').hidden=view!=='storage';$('.window-controls').hidden=view==='storage';if(view==='storage'){$('#heading').textContent=T('每份占用，都有去处。','A place for every byte.');$('#intro-text').textContent=T('看清哪些在保留，哪些还需要判断，哪些可以清理。','See what is retained, what needs inspection, and what can be cleaned.');storageView.render();}document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);el.setAttribute('aria-current',active?'page':'false');});if(focused)$(focused)?.focus({preventScroll:true});}
+function switchView(next){if(view==='overview'&&next!=='overview')returnY=scrollY;view=next;render();if(next==='storage'){void storageView.open();scrollTo(0,0);}else if(next==='records'){$('#records-view').scrollIntoView({block:'start'});$('#records-heading').tabIndex=-1;$('#records-heading').focus({preventScroll:true});}else scrollTo(0,returnY);}
 function drill(next){filter=next;limit=12;$('#record-search').value='';switchView('records');}
 // Late reads cannot replace the closed notice or re-enable controls.
 async function refresh(){if(stopped)return;const seq=++requestSequence;try{const next=await api('/api/snapshot?'+query());if(seq!==requestSequence||stopped)return;snapshot=next;notice('');render();$('#share-open').disabled=false;}catch(e){if(seq===requestSequence&&!stopped)notice(e.message);}finally{if(!stopped&&!snapshot){$('#share-open').disabled=true;$('#task-number').textContent='—';$('#turn-number').textContent='—';$('#token-number').textContent='—';}}}
@@ -209,14 +211,14 @@ $('#share-by').addEventListener('change',()=>{shareDraft.sharedBy=normalizeShare
 $('#share-reset').addEventListener('click',()=>{shareDraft=freshShareDraft();renderShare();notify(T('文案与样式已恢复。','Words and style reset.'));});
 $('#share-open').addEventListener('click',openShare);$('#save-svg').addEventListener('click',()=>download(new Blob([renderShareSVG(shareState.data,shareState.format,shareState.lang,shareState.theme,shareStyle())],{type:'image/svg+xml'}),'svg'));$('#save-png').addEventListener('click',savePNG);$('#copy-caption').addEventListener('click',copyCaption);
 for(const d of document.querySelectorAll('dialog'))d.addEventListener('close',()=>{$('#toast').hidden=true;const key=dialogTriggers.get('#'+d.id);if(key)$(key)?.focus({preventScroll:true});});
-$('#refresh').addEventListener('click',()=>void refresh());$('#stop').addEventListener('click',async()=>{try{await api('/api/close',{method:'POST'});stopped=true;clearInterval(refreshTimer);clearInterval(heartbeatTimer);notice(T('面板已关闭。回执仍保留在本机。','Dashboard closed. Receipts remain on this machine.'));$('#stop').disabled=true;$('#refresh').disabled=true;$('#share-open').disabled=true;}catch(e){if(stopped)return;notice(e.message);}});
+$('#refresh').addEventListener('click',()=>{if(view==='storage')void storageView.refresh();else void refresh();});$('#stop').addEventListener('click',async()=>{try{await api('/api/close',{method:'POST'});stopped=true;clearInterval(refreshTimer);clearInterval(heartbeatTimer);notice(T('面板已关闭。回执仍保留在本机。','Dashboard closed. Receipts remain on this machine.'));$('#stop').disabled=true;$('#refresh').disabled=true;$('#share-open').disabled=true;}catch(e){if(stopped)return;notice(e.message);}});
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(snapshot)renderOverview();},150);});
 render();notice(T('正在读取本机协作记录…','Reading local collaboration records…'));
 try{const p=await api('/api/preferences');if(!stopped){lang=p.language;theme=getTheme(p.theme);zonePreference=p.timeZone;zone=zonePreference==='local'?machineZone():resolveTimeZone(zonePreference);}}catch{if(!stopped)notify(T('显示偏好未能读取，暂用默认值。','Preferences could not be read; using defaults.'));}
 // Shutdown can happen during preferences, a snapshot read, or the retry delay.
 // Start polling only while this page is still open; late reads stay inert.
 if(!stopped){
- refreshTimer=setInterval(()=>{if(!stopped&&!document.hidden)void refresh();},15000);
+ refreshTimer=setInterval(()=>{if(!stopped&&!document.hidden&&view!=='storage')void refresh();},15000);
  heartbeatTimer=setInterval(()=>{if(!stopped)void api('/api/ping').catch(()=>{});},20000);
  for(let attempt=1;attempt<=5&&!snapshot;attempt++){
   if(stopped)break;

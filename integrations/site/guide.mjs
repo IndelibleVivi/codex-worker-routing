@@ -86,7 +86,7 @@ Stop and report if the fix would cross that boundary.`);
  ${renderBatchFlow(lang)}
  <div class="guide-note"><p>${tp('第一次试用可以交出一个小而完整的任务：改一个函数、补一个检查，再看真实 diff 与检查结果。','For a first run, hand over a small, complete task: edit one function, add a check, then review the actual diff and result.')}</p></div>`;
 
- const dispatchBody=`<p>${tp('Dispatch 在本机呈现 ACP 回执与主动记录的复查笔记。业务数据只读；主题、语言和时区可以保存。它不安排工作，也不建第二套任务数据库。原生 Codex 活动在这里没有数据源——每个数字都明确只覆盖 ACP。','Dispatch displays local ACP receipts and review notes you add on purpose. Business data is read-only; theme, language and timezone can be saved. It schedules nothing and adds no second job database. Native Codex activity has no data source here: every metric is ACP-only.')}</p>
+ const dispatchBody=`<p>${tp('Dispatch 在本机呈现 ACP 回执与主动记录的复查笔记。协作回执只读；主题、语言和时区可以保存。Storage 另提供磁盘盘点与显式的清理预览和确认。它不安排工作，也不建第二套任务数据库。原生 Codex 活动在这里没有数据源——每个数字都明确只覆盖 ACP。','Dispatch displays local ACP receipts and review notes you add on purpose. Collaboration receipts are read-only; theme, language and timezone can be saved. Storage separately offers disk inventory and explicitly previewed, confirmed cleanup. It schedules nothing and adds no second job database. Native Codex activity has no data source here: every metric is ACP-only.')}</p>
  <pre><code>${esc(`node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/config.json
 node integrations/acpx/src/cli.mjs stats --config /absolute/private/config.json --since 7d`)}</code></pre>
  <ul>

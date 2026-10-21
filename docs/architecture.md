@@ -19,6 +19,7 @@
 | 可选 ACP integration | `integrations/acpx/` | 确定性传输：session、生命周期、每轮显式权限、回执、有界交付与任务确认的验证 runner。 |
 | 可选主会话集成 | `integrations/main-session/` | 只做输入装配：在 root 首次模型请求前注入私人说明。 |
 | 本地 Dispatch | `integrations/acpx/`（可选） | 对已有 ACP 回执的只读投影。 |
+| 本地 Storage | `integrations/acpx/src/storage.mjs` | CLI 与 dashboard 共享的磁盘盘点、受管 scratch 生命周期、显式计划与确认执行；与执行 cleanup 分开。 |
 
 ## 工作与反馈
 

@@ -142,7 +142,7 @@ Windows 是第三类受支持平台，但只声明已实现且可回归的能力
 
 ## 本地 Dispatch 投影
 
-`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 面板（业务数据只读，三个本地展示偏好可保存），`record` 按需追加
+`stats` 提供文字 / JSON 统计，`dashboard` 打开 loopback 面板（协作回执只读，三个展示偏好可保存，Storage 清理需单独预览与确认），`record` 按需追加
 来源明确的送验、修正、接受和接管事件，`pending` 按需列出仍可行动的复查记录。
 runtime receipts 仍是执行真源，协作事件不修改回执中的 `task_acceptance: unverified`。
 统计是轻量、观察性的：runtime 事实自动从既有回执派生，普通完成或正常关闭**不需要**
@@ -304,6 +304,15 @@ workspace lock 只按 exact cwd 协调共享本 stateDir 的 ACP 命令；不同
 它看不到 native worker、其他安装、
 数据库、端口、服务和其他共享资源。主机仍须遵守一个重叠写入面一个 writer，或用独立
 worktree；worktree 本身也不隔离上述非文件资源。
+
+## 存储生命周期
+
+新责任的 `TMPDIR` 使用带 CWR manifest 的短 `stateDir/scratch/COMPACT_SESSION_ID/`，
+同一责任续跑沿用其已记录位置；已有 v1 managed scratch 保留原位置，pre-manifest binding 保留旧 tmp。
+已知 managed manifest 丢失不会静默退回 legacy tmp。`close` 继续保留会话历史。
+执行 `cleanup` 与磁盘清理分开：只有明确选中、正常关闭且 cleanup confirmed、无 active turn/锁、
+达到保留时长并通过当前安全检查的受管 scratch 才可计划清理。旧 tmp/cache、日志、数据库、
+工单与回执保持只读。CLI/JSON 与 dashboard 复用一个后端，见[存储管理](storage-management.md)。
 
 ## 崩溃与失败
 

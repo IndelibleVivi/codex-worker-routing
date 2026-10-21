@@ -17,6 +17,7 @@ using it, begin with [your first delegated task](first-delegated-task.en.md). Or
 | ACP and provider-protocol boundaries | [中文](acp-provider-protocols.md) | [English](acp-provider-protocols.en.md) |
 | Command Code through Codex Router | [中文](commandcode-via-codex-router.md) | [English](commandcode-via-codex-router.en.md) |
 | Local Dispatch and share cards | [中文](dispatch.md) | [English](dispatch.en.md) |
+| Storage inventory and explicit cleanup | [中文](storage-management.md) | [English](storage-management.en.md) |
 | Dispatch data contract | [中文](dispatch-data.zh-CN.md) | [English](dispatch-data.md) |
 | Context and access boundaries | [中文](context.md) | [English](context.en.md) |
 | Behavior scenarios and observation evidence | [中文](behavior-scenarios.md) | [English](behavior-scenarios.en.md) |

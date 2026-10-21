@@ -150,11 +150,19 @@ Sessions replays one responsibility, and share cards export an aggregate allowli
 own slogan and credit, named `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`. It ships four
 themes (sage cat, oat bunny, mist puppy, lilac bear) whose colours apply to the panel and charts
 while the companion appears on the overview sticker and the share seal. Theme, language and
-timezone are the only writeable preferences, saved outside Git; the dashboard is loopback-only
+timezone are the only writeable display preferences, saved outside Git; Storage separately
+offers explicit cleanup plans and confirmed application. The dashboard is loopback-only
 and on demand, with no analytics or extra frontend dependency. Cumulative tokens are
 deduplicated with explicit coverage, missing data stays unknown, and observed workload is not
 an estimate of Codex quota saved. Commands, the export allowlist and the data contract are in
 the [Dispatch guide](docs/dispatch.en.md).
+
+Storage groups disk usage by worker home and category, distinguishing logical size from
+estimated allocation. The `storage`, `storage-plan` and `storage-apply` CLI commands use the
+same backend: preview changes no original data, and applying requires explicit confirmation
+and fresh validation. Only manifest-owned session scratch with a normally closed binding
+and confirmed execution cleanup can qualify. History, databases, logs and legacy tmp/cache
+remain inspection only. See [storage management](docs/storage-management.en.md).
 
 ## Product page and banners
 

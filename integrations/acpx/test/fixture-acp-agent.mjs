@@ -104,7 +104,7 @@ input.on('line',line=>{
    // Echo only the isolation-relevant environment names. Synthetic values only;
    // no host secrets, credentials, user data or network access.
    return complete(id,params,JSON.stringify({turn:s.turn,sessionId:params.sessionId,main_marker_present:Boolean(process.env.CWR_PRIVATE_TEST_MARKER),home,
-    temp:process.env.TEMP??null,tmp:process.env.TMP??null,userprofile:process.env.USERPROFILE??null,
+    tmpdir:process.env.TMPDIR??null,temp:process.env.TEMP??null,tmp:process.env.TMP??null,userprofile:process.env.USERPROFILE??null,
     appdata:process.env.APPDATA??null,localappdata:process.env.LOCALAPPDATA??null,
     comspec:process.env.COMSPEC??null,pathext:process.env.PATHEXT??null,systemroot:process.env.SystemRoot??null}));
   }

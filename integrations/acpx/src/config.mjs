@@ -289,19 +289,19 @@ export async function resolveRouteSelection(routing, resolve) {
   throw new Fault('SELECTED_ROUTE_UNAVAILABLE', `No authorized route is available for this run (${codes}). Native routing has not been changed.`);
 }
 const DEFAULT_PATH = '/usr/local/bin:/usr/bin:/bin';
-export function buildEnvironment(route, ambient = process.env, platform = process.platform) {
+export function buildEnvironment(route, ambient = process.env, platform = process.platform, tempDir = path.join(route.workerHome, 'tmp')) {
   const h = route.workerHome;
   const systemRoot = platform === 'win32' ? readAmbient(ambient, 'SystemRoot', platform) || 'C:\\Windows' : null;
   const env = {
     HOME: h, USERPROFILE: h,
     PATH: readAmbient(ambient, 'PATH', platform) || (platform === 'win32' ? `${systemRoot}\\System32;${systemRoot}` : DEFAULT_PATH),
-    LANG: 'C.UTF-8', TMPDIR: path.join(h, 'tmp'),
+    LANG: 'C.UTF-8', TMPDIR: tempDir,
     XDG_CONFIG_HOME: path.join(h, '.config'), XDG_DATA_HOME: path.join(h, '.local/share'),
     XDG_CACHE_HOME: path.join(h, '.cache'), XDG_STATE_HOME: path.join(h, '.local/state'),
     CODEX_HOME: path.join(h, '.codex'), CLAUDE_CONFIG_DIR: path.join(h, '.claude'),
   };
   if (platform === 'win32') {
-    env.TEMP = path.join(h, 'tmp'); env.TMP = path.join(h, 'tmp');
+    env.TEMP = tempDir; env.TMP = tempDir;
     env.APPDATA = path.join(h, 'AppData', 'Roaming');
     env.LOCALAPPDATA = path.join(h, 'AppData', 'Local');
     // Loader/launcher variables the OS and acpx need before an ACP adapter can

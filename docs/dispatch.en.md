@@ -20,7 +20,9 @@ use `--port 4317` to choose one. `--since 7d`, `--since 30d` and an ISO date suc
 `--since 2026-01-01` are supported; the default is `all`. The UI offers period selection,
 project/folder grouping, search, explicit revision/takeover filters, replay and Chinese / English labels.
 The `dashboard`, `stats` and `pending` commands validate the same private `--config` file but
-read only its `stateDir`; they load no adapter and start no work. A config skeleton lives at
+read only its `stateDir` for collaboration data. Opening Storage additionally validates the
+full route config and inventories its explicitly configured worker homes. No adapter is
+loaded and no work is launched. A config skeleton lives at
 [`examples/routes.example.json`](../integrations/acpx/examples/routes.example.json).
 If the initial local statistics read fails, the dashboard makes up to five attempts; this never
 redispatches a worker. Closing stops retries and polling, and late reads cannot replace the closed notice.
@@ -45,6 +47,17 @@ node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json 
 The JSON projection is private: it includes route names, titles and session associations.
 Do not publish it as a share report. These commands do not load adapters, call models,
 read account allowances or scan Codex rollouts.
+
+## Storage
+
+Storage shows the current disk inventory by worker home and category, distinguishing logical
+size, estimated allocation and retained/selectable scratch. It is independent of the selected
+collaboration period and scans only when opened or explicitly operated. Select candidates,
+preview exact directories and sizes, then explicitly confirm application. Only new
+manifest-owned session scratch meeting lifecycle, lock and retention conditions can be
+cleaned. History, logs, databases and legacy tmp/cache remain inspection only. Local storage
+detail never enters share cards. See [storage management](storage-management.en.md) for
+commands and limits.
 
 ## Home and Sessions
 

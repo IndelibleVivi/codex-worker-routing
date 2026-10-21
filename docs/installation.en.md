@@ -92,7 +92,9 @@ Dispatch ships with the optional ACP source, without an additional frontend
 dependency or system service. Operators with the ACP runtime installed can use
 the canonical CLI's `stats`, `pending` and `dashboard`; reading history does not
 start an adapter or load the `acpx` runtime — these read-only commands validate the
-same private `--config` file but use only its `stateDir`. A config skeleton lives at
+same private `--config` file and use its `stateDir` for collaboration history. Storage
+additionally reads the full route config and explicitly configured worker homes on demand.
+A config skeleton lives at
 [`integrations/acpx/examples/routes.example.json`](../integrations/acpx/examples/routes.example.json).
 The `acp-worker` skill describes natural collaboration records.
 Refresh its installed copy and the bundled cat icon through the plugin flow above:
@@ -100,8 +102,9 @@ source edits do not replace instructions already loaded in an existing session.
 
 The dashboard initially uses the device timezone. Theme, language and timezone
 are stored in `dashboard-preferences.json` under the private, Git-external
-`stateDir`, and survive port changes. Only these display preferences can be
-written by the dashboard; business data remains read-only. See the
+`stateDir`, and survive port changes. Collaboration receipts remain read-only. Storage
+can save explicit plans and, after confirmation, clean eligible managed scratch; see
+[storage management](storage-management.en.md). See the
 [Dispatch guide](dispatch.en.md) for commands, data boundaries, exports and shutdown.
 
 ## Automatic main-session loading

@@ -12,6 +12,8 @@ import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, norma
 import { readDelivery } from './delivery.mjs';
 import { runBatch, collectBatch, collectBatchCompact, collectBatchJob } from './batch.mjs';
 import { runPrepare } from './prepare.mjs';
+import { inventoryStorage, planStorage, applyStoragePlan, createScratch, loadScratch,
+  newScratchLocation, scratchRenderEnvironment } from './storage.mjs';
 
 
 // Property tables for the argument parser. `flags` take no value; `values` take
@@ -19,6 +21,7 @@ import { runPrepare } from './prepare.mjs';
 // bare flag so the parser never mistakes it for the value of a preceding option.
 const FLAG = Object.freeze({
   stats: ['json'],
+  storage: ['json'],
   delivery: ['json'],
   run: ['deliver'],
   continue: ['deliver'],
@@ -35,6 +38,9 @@ const VALUES = Object.freeze({
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config', 'since', 'port'],
+  storage: ['config', 'max-entries', 'max-depth', 'extra-home', 'older-than'],
+  'storage-plan': ['config', 'target', 'older-than', 'max-entries', 'max-depth'],
+  'storage-apply': ['config', 'plan', 'confirm'],
   batch: ['config', 'manifest', 'concurrency', 'start-handle', 'limit', 'max-bytes'],
   delivery: ['config', 'session', 'request'],
   prepare: ['config', 'spec', 'out'],
@@ -52,12 +58,25 @@ const REQUIRED = Object.freeze({
   record: ['config', 'session', 'file'],
   pending: ['config'],
   dashboard: ['config'],
+  storage: ['config'],
+  'storage-plan': ['config'],
+  'storage-apply': ['config', 'plan', 'confirm'],
   batch: ['config', 'manifest'],
   delivery: ['config', 'session'],
   prepare: ['config', 'spec'],
   collect: ['config', 'batch'],
 });
 export const COMMANDS = Object.freeze(Object.keys(VALUES));
+export function parseStorageAge(value) {
+  if (value === 'all') return 0;
+  const match = typeof value === 'string' ? /^(\d+)(m|h|d|w)$/.exec(value) : null;
+  if (!match) throw new Fault('USAGE', '--older-than must be all or a positive duration such as 24h, 7d or 2w.');
+  const amount = Number(match[1]);
+  const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[match[2]];
+  const ms = amount * unit;
+  if (!Number.isSafeInteger(ms) || amount < 1) throw new Fault('USAGE', 'Invalid --older-than duration.');
+  return ms;
+}
 // Absolute path to THIS CLI entry, used by `batch` to spawn canonical,
 // independent subprocesses with the exact same module (never a copy).
 const cli_path = () => fileURLToPath(import.meta.url);
@@ -74,6 +93,11 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   pending  --config FILE
   stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--time-zone IANA_ZONE] [--json]
   dashboard --config FILE [--since 7d|30d|all|ISO_DATE] [--port NUMBER]
+  storage  --config FILE [--extra-home DIR ...] [--older-than 7d|24h|all]
+           [--max-entries N] [--max-depth N] [--json]
+  storage-plan --config FILE --target ID [--target ID ...]
+           [--older-than 7d|24h|all] [--max-entries N] [--max-depth N]
+  storage-apply --config FILE --plan UUID --confirm UUID
   batch    --config FILE --manifest FILE [--concurrency N]
            [--start-handle FILE]      (publishes {batch_id,index_path} before any launch)
            [--compact [--limit N] [--max-bytes N]]   (bounded paged terminal; default is full)
@@ -150,12 +174,21 @@ requested route, the actual route and bounded skipped-route codes.
 stats and pending read the private state root; record appends one collaboration
 event and never rewrites a runtime receipt. These commands never load, import or
 scrub for an ACP adapter. dashboard dynamically imports ./dashboard.mjs.
-Dashboard data is read-only; theme, language and time zone are local display preferences.
+Dashboard data is read-only; the explicit Storage view saves private plans and applies
+only after confirmation. Theme, language and time zone are local display preferences.
 
 dashboard prints a private loopback URL (ephemeral port by default; use --port to fix
 one), stays in the foreground and projects existing ACP receipts. Before the first ACP
 task it opens an expected empty state. Share cards are reached from the dashboard
 header. Open the printed URL yourself; the command never opens a browser.
+
+storage is an adapter-free, read-only inventory of configured worker homes and the
+private state root. storage-plan saves an immutable plan for explicitly selected
+managed scratch IDs. storage-apply requires the same UUID twice and revalidates the
+manifest, binding, cleanup, locks, cutoff, paths and full tree snapshot before a
+file is removed. It never deletes persistent HOME/CODEX_HOME history, caches, legacy
+tmp, logs, databases, CWR state, receipts, orders or unowned paths. Plans and apply
+receipts live under the private state root's storage directory.
 
 continue --revision-reason REASON is an OPTIONAL shortcut for a genuine
 correction: it appends a revision_requested event (using the documented reason
@@ -182,6 +215,7 @@ export function parseArgs(args) {
   // before option validation, so `<known-command> --help` and bare `--help` agree.
   if (rest.length === 1 && rest[0] === '--help') return { command: 'help' };
   const out = { command };
+  const repeatable = command === 'storage-plan' || command === 'storage';
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i]?.startsWith('--')) throw new Fault('USAGE', 'Unknown, duplicate or missing option.');
     const name = rest[i]?.slice(2);
@@ -190,12 +224,19 @@ export function parseArgs(args) {
       out[name] = true;
       continue;
     }
-    if (!values.includes(name) || out[name] !== undefined) throw new Fault('USAGE', 'Unknown, duplicate or missing option.');
+    const repeatName = command === 'storage' ? 'extra-home' : 'target';
+    if (!values.includes(name) || (out[name] !== undefined && !(repeatable && name === repeatName)))
+      throw new Fault('USAGE', 'Unknown, duplicate or missing option.');
     const value = rest[i + 1];
     if (value === undefined || value.startsWith('--')) throw new Fault('USAGE', 'Unknown, duplicate or missing option.');
-    out[name] = value; i++;
+    if (repeatable && name === 'target') (out.targets ??= []).push(value);
+    else if (repeatable && name === 'extra-home') (out.extraHomes ??= []).push(value);
+    else out[name] = value;
+    i++;
   }
   if (REQUIRED[command].some(k => !out[k])) throw new Fault('USAGE', 'Required option missing. Run --help.');
+  if (command === 'storage-plan' && !out.targets?.length)
+    throw new Fault('USAGE', 'Required option missing. Run --help.');
   if ((command === 'run' || command === 'continue') && out.permissions === undefined)
     throw new Fault('PERMISSIONS_REQUIRED', 'Choose --permissions read or --permissions full explicitly for this turn; category and earlier turns do not grant permission.');
   return out;
@@ -311,6 +352,42 @@ export async function main(args, deps = {}) {
   const text = deps.text ?? (s => process.stdout.write(s));
   if (opt.command === 'help') { (deps.help ?? (s => process.stdout.write(s)))(HELP); return 0; }
   assertSupportedPlatform();
+  if (opt.command === 'storage' || opt.command === 'storage-plan') {
+    const config = await loadConfig(opt.config);
+    const olderThanMs = opt.command === 'storage'
+      ? (opt['older-than'] === undefined ? undefined : parseStorageAge(opt['older-than']))
+      : parseStorageAge(opt['older-than'] ?? '7d');
+    const maxEntries = opt['max-entries'] === undefined ? undefined : Number(opt['max-entries']);
+    const maxDepth = opt['max-depth'] === undefined ? undefined : Number(opt['max-depth']);
+    if (maxEntries !== undefined && (!Number.isSafeInteger(maxEntries) || maxEntries < 1))
+      throw new Fault('USAGE', '--max-entries must be a positive integer.');
+    if (maxDepth !== undefined && (!Number.isSafeInteger(maxDepth) || maxDepth < 1))
+      throw new Fault('USAGE', '--max-depth must be a positive integer.');
+    if (opt.command === 'storage') {
+      const inventory = await inventoryStorage(config, {
+        maxEntries, maxDepth, extraHomes: opt.extraHomes, olderThanMs,
+      });
+      if (opt.json) output(inventory);
+      else text(renderStorageText(inventory));
+      return 0;
+    }
+    const plan = await planStorage(config, {
+      targetIds: opt.targets, olderThanMs, maxEntries, maxDepth,
+    });
+    output(plan);
+    return 0;
+  }
+  if (opt.command === 'storage-apply') {
+    const config = await loadConfig(opt.config);
+    let receipt;
+    try { receipt = await applyStoragePlan(config, { planId: opt.plan, confirm: opt.confirm }); }
+    catch (e) {
+      if (e.code === 'PLAN_TAMPERED') throw new Fault('PLAN_TAMPERED', 'The saved plan UUID is invalid, tampered or belongs to another state root; nothing was removed.');
+      throw e;
+    }
+    output(receipt);
+    return receipt.status === 'applied' ? 0 : receipt.status === 'partial' ? 1 : 2;
+  }
   if (opt.command === 'stats') {
     const config = await loadControlConfig(opt.config);
     const projection = await createProjectionReader(config.stateDir).read({ since: opt.since ?? 'all', timeZone:opt['time-zone'] ?? 'UTC' });
@@ -445,16 +522,46 @@ export async function main(args, deps = {}) {
   // Scrub this standalone CLI process BEFORE importing/executing that package.
   // This never changes the shell, Codex, or the native subagent environment.
   assertAdmission(config, selection, opt);
-  const env = buildEnvironment(selection.route);
+  // A FUTURE binding receives a compact state-root scratch directory. Existing
+  // bindings resolve from their saved descriptor/marker; legacy no-manifest
+  // bindings keep the route tmp path and can never be silently migrated.
+  const newBinding = !binding;
+  if (newBinding) {
+    const id = randomUUID();
+    binding = {
+      schema: 'cwr.acp.binding/1', id, route: selection.name,
+      executionIdentity: executionIdentity(selection), cwd: selection.cwd, closed: false,
+      createdAt: new Date().toISOString(), handle: null,
+    };
+  }
+  // Existing bindings without a manifest stay on the legacy shared tmp. The
+  // marker alone never authorizes migration of temp references an adapter may
+  // still hold in persistent conversation history.
+  let scratchDescriptor, scratchPath;
+  let legacyScratch = false;
+  if (newBinding) {
+    scratchDescriptor = newScratchLocation(config, selection.name, selection.route, binding.id);
+    scratchPath = scratchRenderEnvironment(scratchDescriptor);
+    binding.scratchDescriptor = scratchDescriptor;
+  } else {
+    try {
+      const existing = await loadScratch(config, selection.name, selection.route, binding.id,
+        binding.scratchDescriptor ?? null);
+      scratchDescriptor = existing.descriptor;
+      scratchPath = existing.scratch;
+    } catch (e) {
+      if (e.code !== 'SCRATCH_MISSING') throw e;
+      if (binding.scratchDescriptor !== undefined)
+        throw new Fault('KNOWN_SCRATCH_MISSING', 'The binding records managed scratch, but its manifest is missing.');
+      scratchPath = path.join(selection.route.workerHome, 'tmp');
+      legacyScratch = true;
+    }
+  }
+  const env = buildEnvironment(selection.route, process.env, process.platform, scratchPath);
   await (deps.replaceEnvironment ?? replaceOwnEnvironment)(env);
   const acpx = await (deps.loadAcpx ?? loadAcpx)();
   await prepareHome(selection.route);
   await privateDir(config.stateDir);
-  if (!binding) binding = {
-    schema:'cwr.acp.binding/1',id:randomUUID(),route:selection.name,
-    executionIdentity:executionIdentity(selection),cwd:selection.cwd,closed:false,
-    createdAt:new Date().toISOString(),handle:null,
-  };
   const p = paths(config.stateDir,binding.id);
   const owner = {nonce:randomUUID(),pid:process.pid,session:binding.id,startedAt:new Date().toISOString()};
   // One request id for this turn, and the exact submitted work-order text
@@ -470,6 +577,9 @@ export async function main(args, deps = {}) {
   let unlockSession;
   try { unlockSession = await lock(p.lock,owner); }
   catch (e) { await unlockWorkspace(); throw e; }
+  // Both operation locks are held before the ownership marker and new binding
+  // become visible. A failed/crashed marker creation therefore stays
+  // unreconciled and protected rather than becoming an orphan prune candidate.
   // Locks are held: retain the work order now, before the runtime is touched.
   // Retention failure is deliberately additive: it never changes runtime
   // behavior, but it is recorded durably in the receipt as a warning.
@@ -508,6 +618,26 @@ export async function main(args, deps = {}) {
     finally { checking = false; }
   },200);
   try {
+  if (!newBinding && legacyScratch) {
+    // Bindings created before scratch manifests existed retain the legacy shared
+    // route tmp forever. They are inventory-only and never silently migrated.
+    (deps.progress ?? (s => process.stderr.write(s)))('[acp] legacy binding uses inspect-only shared tmp\n');
+  } else if (!newBinding) {
+    const current = await loadBinding(config.stateDir, binding.id);
+    const existing = await loadScratch(config, selection.name, selection.route, binding.id,
+      current.scratchDescriptor ?? null);
+    if (JSON.stringify(current.scratchDescriptor ?? null) !== JSON.stringify(existing.descriptor)) {
+      current.scratchDescriptor = existing.descriptor;
+      await atomicJSON(p.binding, current);
+      binding = current;
+    }
+  }
+    if (newBinding) {
+      await (deps.createScratch ?? createScratch)(config, selection.name, selection.route, binding.id);
+      // If binding publication fails, retain the manifest as inspect-only orphan
+      // evidence. The existing guard releases locks without starting an adapter.
+      await (deps.atomicJSON ?? atomicJSON)(p.binding, binding);
+    }
     // Fresh read under BOTH held locks: a continue/run that read an open binding
     // before a concurrent close could otherwise execute its stale open binding.
     // Reload, recheck closure and route fingerprint, and use the current handle
@@ -601,6 +731,40 @@ export function renderDeliveryText(session, record) {
   if (record.collection_warnings?.invalid_sidecars) lines.push('invalid sidecars skipped: ' + record.collection_warnings.invalid_sidecars);
   return lines.join('\n') + '\n';
 }
+function storageSize(bytes) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) return 'unknown';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes, unit = 'B';
+  for (const next of units) { if (value < 1024) break; value /= 1024; unit = next; }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+}
+export function renderStorageText(inventory) {
+  const t = inventory.totals, lines = [
+    `Storage inventory observed ${inventory.observed_at}`,
+    `logical ${storageSize(t.bytes)} | allocated estimate ${storageSize(t.allocated_bytes)} | entries ${t.entries} | homes ${t.homes}`,
+    `managed scratch eligible ${t.candidate_targets} target(s), logical ${storageSize(t.candidate_bytes)} | allocated ${storageSize(t.candidate_allocated_bytes)}`,
+  ];
+  for (const home of inventory.homes) {
+    lines.push(`\n${home.route ?? 'retired profile'} [${home.status}] ${home.path}`);
+    for (const category of home.categories) {
+      lines.push(`  ${category.category.padEnd(21)} ${storageSize(category.bytes)} logical / ${storageSize(category.allocated_bytes)} allocated  ${category.entries} entries  ${category.status}`);
+    }
+  }
+  const inspect = inventory.targets.filter(x => x.eligibility !== 'candidate' && x.entries);
+  if (inspect.length) {
+    lines.push('\nInspect-only or incomplete targets:');
+    for (const target of inspect.slice(0, 100))
+      lines.push(`  ${target.id}  ${target.eligibility}  ${storageSize(target.bytes)}  ${target.path}  ${target.reasons.map(r => r.code).join(',') || 'no reason'}`);
+    if (inspect.length > 100) lines.push(`  ... ${inspect.length - 100} more omitted`);
+  }
+  const candidates = inventory.targets.filter(x => x.eligibility === 'candidate');
+  if (candidates.length) {
+    lines.push('\nManaged scratch candidates:');
+    for (const target of candidates) lines.push(`  ${target.id}  ${storageSize(target.bytes)}  ${target.path}`);
+  }
+  return lines.join('\n') + '\n';
+}
 export function renderStatsText(p) {
   const s = p.summary;
   const period = s ? (p.period.since ? `${p.period.since} .. ${p.period.until}` : `all .. ${p.period.until}`) : '';
@@ -646,7 +810,9 @@ export async function startDashboardCommand(config, opt, { text, output, deps = 
   }
   if (typeof dashboard.startDashboard !== 'function')
     throw new Fault('DASHBOARD_UNAVAILABLE', 'The dashboard module does not export startDashboard.');
-  const handle = await dashboard.startDashboard({ stateDir: config.stateDir, since, port });
+  const handle = await dashboard.startDashboard({
+    stateDir: config.stateDir, configPath: config.configPath, since, port,
+  });
   text(`Dispatch dashboard: ${handle.url}\n`);
   text('Open this private URL in your browser and keep this process running (Ctrl+C to stop).\n');
   output({ schema: 'cwr.dispatch.dashboard/1', url: handle.url, since, port: handle.port ?? port ?? null });

@@ -8,6 +8,9 @@ Dispatch 投影既有的私有状态；它不拥有 worker 执行，也不创建
 投影为 `cwr.dispatch/1`，由 ACP binding、终态回执和明确的协调者注记重建。它从不
 加载 adapter。
 
+Storage 的 inventory/plan/apply 是独立私有接口，不加入 Dispatch snapshot 或分享白名单。
+计划与结果写入 `stateDir/storage`，不改写 runtime receipt。详见[存储管理](storage-management.md)。
+
 ## 来源归属与存储
 
 | 来源（相对于私有 `stateDir`） | 含义 |

@@ -61,6 +61,24 @@ plugin and its optional main-session context integration.
   from completion.
   Validate accounting/privacy/shutdown with the ACP suite and exercise the actual
   dashboard in desktop and narrow browser viewports after UI changes.
+- `integrations/acpx/src/storage.mjs` owns the adapter-free storage inventory,
+  per-session scratch manifests, explicit cleanup plans and apply receipts.
+  CLI and dashboard use this same backend. Keep disk details out of Dispatch's
+  snapshot/share projection. Scan only exact configured roots or explicitly
+  supplied inspection-only retired homes, without following links, crossing
+  filesystems or reading session/log/database payloads. Preserve explicit scan
+  limits and incomplete results. Only matching manifest-owned scratch with a
+  closed, cleanup-confirmed CWR binding, no active turn/locks and elapsed
+  retention can qualify; legacy tmp/cache, persistent history, logs, databases,
+  orders and receipts never qualify. Keep scratch stable across continuation;
+  new scratch uses a short stateDir child with a durable binding pointer; missing
+  known managed manifests never downgrade to legacy tmp. Retain original v1
+  managed paths for existing responsibilities until their lifecycle is reconciled;
+  pre-manifest bindings retain legacy tmp. Revalidate saved plans under execution locks,
+  reject changed trees/ownership/config and uncertain writers, and report
+  partial deletion truthfully. No automatic GC or route migration. Update paired
+  storage guides and exercise the real CLI/HTTP and dashboard flows with
+  disposable synthetic data after lifecycle or deletion changes.
 - `integrations/acpx/src/brand.mjs` owns the cat logo. The plugin asset
   `plugins/worker-routing/assets/cat.svg` is derived; regenerate it with
   `npm run brand:sync` from `integrations/acpx/` after changing the cat artwork.

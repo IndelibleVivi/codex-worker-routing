@@ -95,8 +95,17 @@ test('REAL acpx: an unavailable default falls back before launch and issues exac
 test('REAL acpx plus spawned synthetic ACP process: restart, same session, clean env, preserved history',async t=>{
  const f=await setup(t);const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);assert.equal(a.receipt.cleanup,'confirmed');
  const text=JSON.parse(a.receipt.output_excerpt);assert.equal(text.turn,1);assert.equal(text.main_marker_present,false);assert.equal(text.home,f.selection.route.workerHome);
+ const scratch=text.tmpdir;
+ assert.equal(path.dirname(scratch),path.join(f.config.stateDir,'scratch'));
+ assert.ok(path.basename(scratch).length<=22,'the session component stays compact');
+ assert.equal(text.tmpdir,scratch,'the spawned ACP process sees this session’s scratch');
+ const manifest=JSON.parse(await fs.readFile(path.join(scratch,'.cwr-scratch.json'),'utf8'));
+ assert.equal(manifest.session_id,a.receipt.session_id);assert.equal(manifest.home,f.selection.route.workerHome);
  const b=await command(f,'continue',['--session',a.receipt.session_id,'--file',f.orderFile]);assert.equal(b.code,0,b.stderr);assert.equal(b.receipt.acp_session_id,a.receipt.acp_session_id);assert.equal(JSON.parse(b.receipt.output_excerpt).turn,2);
+ assert.equal(JSON.parse(b.receipt.output_excerpt).tmpdir,scratch,'continuation retains temporary references');
  const c=await command(f,'close',['--session',a.receipt.session_id]);assert.equal(c.code,0,c.stderr);assert.equal(c.receipt.history_deleted,false);
+ assert.equal((await fs.stat(scratch)).isDirectory(),true,'closing alone never deletes scratch');
+ assert.ok(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-sessions.json'),'utf8'),'provider history is retained');
 });
 test('REAL acpx: provider cannot load the old session, so no replacement prompt is issued',async t=>{
  const f=await setup(t);const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);

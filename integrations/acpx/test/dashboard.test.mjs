@@ -14,6 +14,7 @@ import {once} from 'node:events';
 import {startDashboard} from '../src/dashboard.mjs';
 import {projectShare,renderShareSVG,renderShareCaption} from '../src/share.mjs';
 import {THEMES,getTheme} from '../src/themes.mjs';
+import {formatBytes,renderStorageInventory,storageDisplay} from '../src/dashboard/storage.mjs';
 
 const THEME_IDS=['sage','rose','mist','lavender'];
 const FALLBACK_COLORS=getTheme('sage').colors;
@@ -297,4 +298,79 @@ test('share personalization changes lettering and ornament without changing stat
   const empty=renderShareSVG(data,'poster','en','sage',{slogan:'',sharedBy:'',ornament:'none'});
   assert.doesNotMatch(empty,/id="share-slogan"|id="share-credit"|id="share-ornament"/);
   assert.equal(track(empty),track(renderShareSVG(data,'poster')));
+});
+
+test('storage is an explicit authenticated local view; its metadata never enters sharing',async t=>{
+  const calls=[];
+  const storage={inventory:async options=>{calls.push(['inventory',options]);return {schema:'cwr.storage.inventory/1',homes:[{path:'/synthetic/PRIVATE_STORAGE_PATH'}],targets:[],totals:{logical_bytes:42}};},plan:async()=>{throw new Error('unexpected mutation');},apply:async()=>{throw new Error('unexpected mutation');}};
+  const d=await start(t,{storage});
+  assert.equal(calls.length,0,'normal startup must not scan storage');
+  assert.equal((await fetch(d.origin+'/api/storage')).status,401);assert.equal(calls.length,0);
+  const response=await fetch(d.origin+'/api/storage?olderThanDays=14',{headers:d.headers});
+  assert.equal(response.status,200);assert.match(JSON.stringify(await response.json()),/PRIVATE_STORAGE_PATH/);
+  assert.deepEqual(calls,[['inventory',{olderThanMs:14*86400000}]]);
+  for(const query of ['olderThanDays=0','olderThanDays=1.5','olderThanDays=7&olderThanDays=30','path=/synthetic/escape'])assert.equal((await fetch(d.origin+'/api/storage?'+query,{headers:d.headers})).status,400);
+  const exported=await (await fetch(d.origin+'/api/share',{headers:d.headers})).text();assert.doesNotMatch(exported,/PRIVATE_STORAGE_PATH|logical_bytes/);
+  assert.equal(calls.length,1,'sharing never inventories private storage');
+});
+
+test('storage plan and apply require exact origin, JSON, bounded input and explicit confirmation',async t=>{
+  const planId='11111111-2222-4333-8444-555555555555',calls=[];
+  const storage={inventory:async()=>({}),plan:async value=>{calls.push(['plan',value]);return {plan_id:planId,targets:[]};},apply:async value=>{calls.push(['apply',value]);return {plan_id:planId,status:'completed'};}};
+  const d=await start(t,{storage});
+  const post=(endpoint,body,extra={})=>fetch(d.origin+endpoint,{method:'POST',headers:{...d.headers,Origin:d.origin,'Content-Type':'application/json',...extra},body:JSON.stringify(body)});
+  const order={targetIds:['synthetic-target'],olderThanMs:7*86400000};
+  assert.equal((await fetch(d.origin+'/api/storage/plan',{method:'POST',headers:{...d.headers,'Content-Type':'application/json'},body:JSON.stringify(order)})).status,403);
+  assert.equal((await post('/api/storage/plan',order,{Origin:'https://foreign.example'})).status,403);
+  assert.equal((await post('/api/storage/plan',order,{'Content-Type':'text/plain'})).status,415);
+  assert.equal((await fetch(d.origin+'/api/storage/plan',{headers:d.headers})).status,405);
+  for(const bad of [{...order,path:'/synthetic/escape'},{...order,targetIds:[]},{...order,targetIds:['duplicate','duplicate']},{...order,olderThanMs:0}])assert.equal((await post('/api/storage/plan',bad)).status,400);
+  assert.equal((await post('/api/storage/plan',{...order,targetIds:['x'.repeat(17000)]})).status,413);assert.equal(calls.length,0);
+  assert.equal((await post('/api/storage/plan',order)).status,200);assert.deepEqual(calls,[['plan',order]]);
+  for(const bad of [{planId},{planId,confirm:'wrong'},{planId,confirm:planId,force:true},{planId:'../escape',confirm:'../escape'}])assert.equal((await post('/api/storage/apply',bad)).status,400);
+  assert.equal(calls.length,1);const confirmed={planId,confirm:planId};assert.equal((await post('/api/storage/apply',confirmed)).status,200);assert.deepEqual(calls[1],['apply',confirmed]);
+});
+
+test('storage errors expose only a code, not filesystem or payload details',async t=>{
+  const d=await start(t,{storage:{inventory:async()=>{throw new Fault('STORAGE_STALE','PRIVATE_STORAGE_PATH secret chat payload');}}});
+  const response=await fetch(d.origin+'/api/storage',{headers:d.headers});assert.equal(response.status,409);assert.deepEqual(await response.json(),{error:'STORAGE_STALE'});
+});
+
+test('dashboard shutdown is idempotent and drains an in-flight storage apply',async t=>{
+  const planId='11111111-2222-4333-8444-555555555555';
+  let began,finish;
+  const started=new Promise(resolve=>{began=resolve;});
+  const pending=new Promise(resolve=>{finish=resolve;});
+  const d=await start(t,{storage:{apply:async()=>{began();await pending;return {plan_id:planId,status:'applied'};}}});
+  const response=fetch(d.origin+'/api/storage/apply',{method:'POST',headers:{...d.headers,Origin:d.origin,'Content-Type':'application/json'},body:JSON.stringify({planId,confirm:planId})});
+  await started;
+  const first=d.close(),second=d.close();assert.equal(first,second);
+  finish();assert.equal((await (await response).json()).status,'applied');await first;
+});
+
+test('an explicitly supplied retired profile is a transient inventory input, not a route or plan write',async t=>{
+  const calls=[];
+  const d=await start(t,{storage:{inventory:async value=>{calls.push(value);return {homes:[],targets:[]};}}});
+  const query=new URLSearchParams({extraHome:'/synthetic/retired profile'});
+  assert.equal((await fetch(d.origin+'/api/storage?'+query,{headers:d.headers})).status,200);
+  assert.deepEqual(calls,[{olderThanMs:7*86400000,extraHomes:['/synthetic/retired profile']}]);
+  assert.equal((await fetch(d.origin+'/api/storage?extraHome=a&extraHome=b',{headers:d.headers})).status,400);
+  assert.equal(calls.length,1);
+});
+
+test('storage display groups exact roots without hiding managed scratch or CWR state',()=>{
+  const raw={totals:{bytes:60},homes:[{route:'synthetic',path:'/synthetic/home',categories:[{category:'scratch',path:'/synthetic/home/tmp',bytes:10,entries:1},{category:'runtime_state_config',bytes:4,entries:1},{category:'runtime_state_config',bytes:6,entries:2,status:'incomplete'},{category:'managed_scratch',bytes:20,entries:2}]},{name:'CWR state',categories:[{category:'cwr_state_receipts',bytes:20,entries:2}]}],targets:[{kind:'scratch',route:'synthetic',id:'managed',bytes:20,entries:2,eligibility:'inspect_only',reasons:[{code:'BINDING_OPEN'}]},{kind:'state',category:'cwr_state_receipts',bytes:20,entries:2}]};
+  const view=storageDisplay(raw);assert.equal(view.homes.length,2);assert.equal(view.homes[0].totals.bytes,40);assert.equal(view.homes[1].totals.bytes,20);
+  const categories=view.homes[0].categories;assert.equal(categories.find(row=>row.category==='legacy_tmp').bytes,10);assert.equal(categories.find(row=>row.category==='managed_scratch').bytes,20);assert.equal(categories.find(row=>row.category==='runtime_state_config').incomplete,true);
+  const html=renderStorageInventory(raw,{lang:'en'});assert.match(html,/Incomplete scan/);assert.match(html,/CWR state/);assert.match(html,/data-storage-target="managed" disabled/);assert.doesNotMatch(html,/\[object Object\]/);
+});
+
+test('storage rendering distinguishes logical estimates, explicit candidates and retained data without HTML injection',()=>{
+  const data={observed_at:'2026-01-01T00:00:00Z',totals:{logical_bytes:4096,allocated_bytes:8192},homes:[{route:'<synthetic-route>',path:'/synthetic/<path>',totals:{logical_bytes:4096},categories:[{category:'logs',logical_bytes:2048,files:1}]}],targets:[{id:'keep',path:'/synthetic/logs',logical_bytes:2048,eligible:false,reasons:['LEGACY_UNMANAGED']},{id:'clean',session_id:'synthetic-session',path:'/synthetic/tmp',logical_bytes:2048,eligible:true,reasons:[]}]};
+  for(const lang of ['zh','en']){
+    const html=renderStorageInventory(data,{lang,days:30,selected:new Set(['keep','clean'])});assert.match(html,/4 KiB/);assert.match(html,/8 KiB/);assert.match(html,/&lt;synthetic-route&gt;/);assert.match(html,/&lt;path&gt;/);assert.doesNotMatch(html,/<synthetic-route>|style="/);
+    assert.match(html,/1 项；保留至少 30 天|1 item; retained for at least 30 days/);
+    assert.doesNotMatch(html,/data-storage-target="keep"/,'legacy log roots are inspected in category rows, never cleanup checkboxes');assert.match(html,/data-storage-target="clean"[^>]*checked/);assert.match(html,/1 selected|已选 1 项/);
+  }
+  assert.equal(formatBytes(null),'—');assert.equal(formatBytes(0),'0 B');assert.equal(formatBytes(1024),'1 KiB');assert.match(renderStorageInventory({...data,targets:[]},{lang:'en'}),/No managed scratch candidates yet/);
 });

@@ -202,7 +202,8 @@ reading config, then relies only on what Node actually exposes.
 ## Local Dispatch projection
 
 `stats` provides text / JSON statistics, `dashboard` opens the loopback panel (business
-data read-only, three local display preferences savable), `record` appends
+receipts read-only, three local display preferences savable, Storage cleanup separately
+previewed and confirmed), `record` appends
 source-attributed submission, revision, acceptance and takeover events on demand, and
 `pending` lists still-actionable review records on demand. Runtime receipts remain the
 source of truth for execution, and collaboration events do not modify the receipt's
@@ -414,6 +415,17 @@ work, without broadening a parent-root allowlist or bypassing a denial. The lock
 native workers, other installations, databases, ports, services or other shared resources.
 The host must still obey one writer per overlapping write surface, or use a separate
 worktree; a worktree itself also does not isolate the non-file resources above.
+
+## Storage lifetime
+
+New responsibilities set `TMPDIR` to a CWR-manifested
+`stateDir/scratch/COMPACT_SESSION_ID/`, stable across continuations through a durable pointer.
+Existing v1 managed scratch retains its original location and pre-manifest bindings retain
+legacy tmp. A missing known managed manifest never silently downgrades to legacy tmp. `close` still preserves conversation history. Execution `cleanup` and disk
+cleanup are separate: only explicitly selected managed scratch with a normally closed,
+cleanup-confirmed binding, no active turn/locks, elapsed retention and fresh safety checks
+can be planned. Legacy tmp/cache, logs, databases, orders and receipts remain inspection only.
+CLI/JSON and dashboard share one backend; see [storage management](storage-management.en.md).
 
 ## Crashes and failures
 

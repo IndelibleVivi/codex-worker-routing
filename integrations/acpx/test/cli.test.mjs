@@ -25,12 +25,15 @@ test('main prints help for a known command without loading config',async()=>{
 });
 test('dashboard startup prints the URL, foreground guidance and JSON handle',async t=>{
  const f=await setup(t);const text=[],output=[];
- const stub={startDashboard:async()=>({url:'http://127.0.0.1:4317/#token=deadbeef&since=all',port:4317})};
+ let dashboardOptions;
+ const stub={startDashboard:async value=>{dashboardOptions=value;return {url:'http://127.0.0.1:4317/#token=deadbeef&since=all',port:4317};}};
  assert.equal(await main(['dashboard','--config',f.configFile,'--port','4317'],{...f.deps,text:s=>text.push(s),output:r=>output.push(r),loadDashboard:async()=>stub}),0);
  const stdout=text.join('');
  assert.match(stdout,/Dispatch dashboard: http:\/\/127\.0\.0\.1:4317\/#token=deadbeef&since=all/);
  assert.match(stdout,/keep this process running \(Ctrl\+C to stop\)/);
  assert.match(stdout,/Open this private URL/);
+ assert.equal(dashboardOptions.stateDir,f.config.stateDir);
+ assert.equal(dashboardOptions.configPath,f.configFile);
  // The structured handle is preserved and unchanged by the extra guidance line.
  assert.deepEqual(output,[{schema:'cwr.dispatch.dashboard/1',url:'http://127.0.0.1:4317/#token=deadbeef&since=all',since:'all',port:4317}]);
 });

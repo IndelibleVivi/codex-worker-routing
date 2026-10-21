@@ -123,9 +123,14 @@ Home 显示聚合的按时间走势、route 分工、明确返修与 runtime not
 导出聚合白名单加上你自己填写的文案与署名，文件名形如
 `worker-routing-THEME-LANGUAGE-FORMAT-DATE.ext`。面板提供四套纸张配色（鼠尾草猫、燕麦玫瑰兔、
 雾蓝奶油狗、薰衣草杏熊），配色应用到面板与图表，陪伴动物出现在首页标签与分享图圆章。主题、语言
-和时区是仅有的可写偏好，保存在 Git 外；派工台仅监听 loopback、按需运行，没有 analytics 或额外
+和时区是仅有的可写展示偏好，保存在 Git 外；Storage 另提供显式的清理计划与确认执行。派工台仅监听 loopback、按需运行，没有 analytics 或额外
 frontend dependency。累计 tokens 去重并标明用量覆盖率，缺少数据保持未知；观察到的工作量不是
 节省 Codex 额度的估算。命令、导出白名单与数据契约见[派工台使用指南](docs/dispatch.md)。
+
+「存储空间」按 worker home 与数据类型展示磁盘占用，区分逻辑大小和估算分配空间。
+CLI 的 `storage`、`storage-plan`、`storage-apply` 复用同一存储接口；预览不会删除数据，
+执行需要明确确认且再次核对。仅 manifest 管理、正常关闭且确认执行清理的 session scratch
+可能进入候选；会话历史、数据库、日志和旧 tmp/cache 保持只读。详见[存储管理](docs/storage-management.md)。
 
 ## 产品页面与 Banner
 

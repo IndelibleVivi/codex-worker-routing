@@ -8,6 +8,10 @@ Dispatch projects existing private state; it does not own worker execution or cr
 second task database. The projection is `cwr.dispatch/1`, rebuilt from ACP bindings,
 terminal receipts and explicit coordinator annotations. It never loads the adapter.
 
+Storage inventory/plan/apply are separate private interfaces, excluded from Dispatch snapshot
+and share allowlists. Plans and results live under `stateDir/storage` and never rewrite runtime
+receipts. See [storage management](storage-management.en.md).
+
 ## Source ownership and storage
 
 | Source, relative to private `stateDir` | Meaning |

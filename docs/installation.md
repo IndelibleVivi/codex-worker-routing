@@ -71,12 +71,14 @@ status/cancel/close 恢复能力；不要盲改 hash 或恢复已撤回的权限
 Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统服务。
 已有 ACP runtime 的 operator 可以直接运行 canonical CLI 的 `stats` / `pending` / `dashboard`；
 读取历史无需启动 adapter，也不会加载 `acpx` runtime——这些只读命令校验同一份私人
-`--config` 文件，但只使用其中的 `stateDir`。配置示例见
+`--config` 文件；读取协作历史只使用其中的 `stateDir`，Storage 另按需读取完整 route config 与
+明确配置的 worker homes。配置示例见
 [`integrations/acpx/examples/routes.example.json`](../integrations/acpx/examples/routes.example.json)。
 新增协作事件的自然记录说明位于 `acp-worker` skill，
 连同内置猫头 icon 一起按上述 Plugin 流程刷新 installed copy；只有修改 source 不会改变旧 session 已加载的说明。
 面板首次使用默认为机器时区；主题、语言、时区保存在 Git 外 stateDir 的
-`dashboard-preferences.json`，换端口后保留。仅这些展示偏好可由面板写入，业务数据仍只读。
+`dashboard-preferences.json`，换端口后保留。协作回执保持只读；Storage 可保存显式清理计划，
+并在确认后清理符合条件的受管 scratch，见[存储管理](storage-management.md)。
 完整命令、私有数据边界、导出与退出行为见[派工台](dispatch.md)。
 
 ## 主 session 自动加载

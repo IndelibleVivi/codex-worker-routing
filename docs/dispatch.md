@@ -20,7 +20,8 @@ node integrations/acpx/src/cli.mjs dashboard --config /absolute/private/routes.j
 `all`。页面可以切换窗口、按项目或工作目录找到 Sessions、搜索任务与 route、筛选明确返修 / 接管、查看完整回放，
 在「纸张与伙伴」里换配色，也可以切换中文和 English。
 `dashboard`、`stats` 与 `pending` 都校验同一份私人 `--config` 文件，但只读取其中的
-`stateDir`；它们不加载 adapter，也不启动任何工作。配置示例见
+`stateDir`；打开 Storage 才额外校验完整 route config 并盘点其中明确指定的 worker homes。
+它们不加载 adapter，也不启动任何工作。配置示例见
 [`examples/routes.example.json`](../integrations/acpx/examples/routes.example.json)。
 初次读取本机统计暂时失败时，面板最多尝试五次；这不会重派 worker。
 关闭面板后不再重试或轮询，迟到的读取响应也不会覆盖关闭提示。
@@ -42,6 +43,14 @@ node integrations/acpx/src/cli.mjs stats --config /absolute/private/routes.json 
 
 `stats --json` 是私有本地投影，包含 route、标题和 session 关联信息，**不适合直接公开**。
 它不读取账号额度，不扫描 Codex rollout，不调用模型或 adapter。
+
+## 存储空间
+
+「存储空间」独立展示当前磁盘占用：worker home、数据类型、逻辑大小、分配空间估算和
+受保护/可选择的 scratch。它不随协作时间窗口筛选；扫描只在进入该页或主动操作时触发。
+可以选择候选、预览具体目录与大小，再明确确认执行。只有新 manifest 管理且满足生命周期、
+锁和保留条件的 session scratch 可以清理。会话、日志、数据库、旧 tmp/cache 不因此可删。
+Storage 的本机明细不会进入分享卡，完整命令与限制见[存储管理](storage-management.md)。
 
 ## 首页与 Sessions
 

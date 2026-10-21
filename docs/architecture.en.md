@@ -22,6 +22,7 @@ configured route and its local batch admission.
 | Optional ACP integration | `integrations/acpx/` | Deterministic transport: session, lifecycle, explicit per-turn permissions, receipts, bounded delivery and a task-confirmed verification runner. |
 | Optional main-session integration | `integrations/main-session/` | Input assembly only: injects private instructions before the root's first model request. |
 | Local Dispatch | `integrations/acpx/` (optional) | Read-only projection of existing ACP receipts. |
+| Local Storage | `integrations/acpx/src/storage.mjs` | Shared CLI/dashboard disk inventory, managed scratch lifetime, explicit plans and confirmed application; separate from execution cleanup. |
 
 ## Active work and feedback
 
