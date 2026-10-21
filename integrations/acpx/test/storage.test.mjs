@@ -21,7 +21,8 @@ async function setup(t, { olderThanMs = 0, compact = false } = {}) {
   f.storageOlderThanMs = olderThanMs;
   const fixtureCleanup = f.cleanup;
   if (compact) {
-    const compactRoot = path.resolve('/private/tmp', `cwr-${randomUUID().slice(0, 8)}`);
+    const compactParent = process.platform === 'darwin' ? '/private/tmp' : '/tmp';
+    const compactRoot = path.join(await fs.realpath(compactParent), `cwr-socket-${randomUUID().slice(0, 8)}`);
     await fs.mkdir(compactRoot, { recursive: true, mode: 0o700 });
     f.root = compactRoot;
     f.config = { ...f.config, stateDir: path.join(compactRoot, 's') };
@@ -254,7 +255,7 @@ test('only closed, confirmed, unlocked manifest-owned scratch becomes a candidat
 });
 
 test('a compact session scratch stays stable across run and continuation while HOME and CODEX_HOME remain stable', async t => {
-  const f = await setup(t, { compact: true });
+  const f = await setup(t, { compact: process.platform !== 'win32' });
   const envs = [];
   const api = fakeAcpx();
   const deps = {
@@ -278,7 +279,7 @@ test('a compact session scratch stays stable across run and continuation while H
   assert.equal(envs[0].HOME, f.selection.route.workerHome);
   assert.equal(envs[0].CODEX_HOME, path.join(f.selection.route.workerHome, '.codex'));
   assert.ok(await fs.lstat(envs[0].TMPDIR));
-  assert.ok(Buffer.byteLength(envs[0].TMPDIR) < 96);
+  if (process.platform !== 'win32') assert.ok(Buffer.byteLength(envs[0].TMPDIR) < 96);
 });
 
 test('a missing manifest on a known managed binding fails explicitly, never falling back to legacy tmp', async t => {

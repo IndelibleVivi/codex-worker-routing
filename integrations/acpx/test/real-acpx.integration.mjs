@@ -330,7 +330,12 @@ test('REAL acpx on Windows: the adapter process sees relocated profile, temp and
  const f=await setup(t);const a=await command(f,'run',initial(f));assert.equal(a.code,0,a.stderr);
  const text=JSON.parse(a.receipt.output_excerpt),home=f.selection.route.workerHome;
  assert.equal(text.userprofile,home);
- for(const key of ['temp','tmp','appdata','localappdata'])assert.ok(text[key]&&contained(home,text[key]),`${key} must stay under the worker home, got ${text[key]}`);
+ for(const key of ['appdata','localappdata'])assert.ok(text[key]&&contained(home,text[key]),`${key} must stay under the worker home, got ${text[key]}`);
+ assert.equal(path.dirname(text.tmpdir),path.join(f.config.stateDir,'scratch'));
+ assert.ok(path.basename(text.tmpdir).length<=22);
+ for(const key of ['temp','tmp'])assert.equal(text[key],text.tmpdir,`${key} must use the same session scratch as TMPDIR`);
+ const manifest=JSON.parse(await fs.readFile(path.join(text.tmpdir,'.cwr-scratch.json'),'utf8'));
+ assert.equal(manifest.session_id,a.receipt.session_id);assert.equal(manifest.home,home);
  assert.ok(text.comspec&&text.pathext&&text.systemroot,'launcher variables must reach the adapter process');
  assert.equal(text.main_marker_present,false);
 });
