@@ -85,8 +85,12 @@ async function target(f, id, { extraHomes } = {}) {
 
 async function runPythonListener(dir) {
   return new Promise(resolve => {
+    // Recent CPython may relocate its default listener to /tmp for a long
+    // TMPDIR. Bind a normal nested socket explicitly inside this session so the
+    // regression tests CWR's path budget instead of that Python fallback policy.
+    // https://github.com/python/cpython/blob/3.13/Lib/multiprocessing/util.py
     const child = spawn('python3', ['-c',
-      'from multiprocessing.connection import Listener; listener=Listener(); listener.close()'],
+      'import os,tempfile; from multiprocessing.connection import Listener; parent=tempfile.mkdtemp(prefix="pymp-",dir=os.environ["TMPDIR"]); listener=Listener(address=os.path.join(parent,"listener-12345678"),family="AF_UNIX"); listener.close()'],
       { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: dir } });
     let stderr = '';
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
