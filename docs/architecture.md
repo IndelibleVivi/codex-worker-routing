@@ -59,7 +59,8 @@ ACP 是可选的，并与 native 委派并存。当 operator 的默认或当前�
 的 operator 私人配置；插件不分发 route、价格或模型 policy。
 
 两项协调辅助不进入日常路径。`prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与一份
-manifest，不启动任何 worker；`batch` 对这份有限清单做 admission，并以独立 CLI 子进程执行；
+manifest，不启动任何 worker；`batch` 对这份有限清单做 admission，并以单独的 CLI 子进程执行
+有限的依赖图；
 `batch --start-handle` 在初始索引落盘后、启动任何子进程前给出本批 identity，`batch
 --compact` 则把终态 stdout 收成有界分页响应，先给出 batch metadata 与第一页结果；`collect`
 读取已发布到持久索引的结果，`collect --compact --cursor` 续读其余分页、`collect --job`
@@ -69,7 +70,7 @@ manifest，不启动任何 worker；`batch` 对这份有限清单做 admission�
 ```mermaid
 flowchart LR
   Spec["一份撰写的 order spec"] -->|prepare| Man["逐条 order + manifest<br/>不启动 worker"]
-  Man -->|batch admission| Jobs["有限独立<br/>CLI 子进程"]
+  Man -->|batch admission| Jobs["有限依赖图<br/>单独的 CLI 子进程"]
   Jobs -->|结算即发布| Index["持久 batch 索引"]
   Index -->|collect<br/>compact/job| Read["只读结果<br/>当前已结算"]
   classDef coordinator fill:#edf2e5,stroke:#8fa77c,color:#51415f

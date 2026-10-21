@@ -25,23 +25,29 @@ node ENTRY cancel --config CONFIG --session UUID
 node ENTRY close --config CONFIG --session UUID
 ```
 
-For an approved independent batch, prepare mechanically turns one coordinator-authored
-order spec into per-item order files plus a batch manifest. Run the finite list with a
-batch start handle so the batch id is available before the first launch, read settled
-results through the bounded compact interface, and expand one result in full when needed:
+For an approved finite batch, prepare mechanically turns one coordinator-authored order spec
+into per-item order files plus a batch manifest. Declare dependency edges and exact input
+bindings together; a successor never receives an unbound or clipped predecessor excerpt. Run
+the finite list with a batch start handle, read settled results through the bounded compact
+interface, and expand one result or its decision impacts when needed:
 
 ```sh
 node ENTRY prepare --config CONFIG --spec SPEC [--out DIR]
 node ENTRY batch --config CONFIG --manifest MANIFEST --start-handle HANDLE --compact
 node ENTRY collect --config CONFIG --batch BATCH_ID --compact [--limit N] [--max-bytes N] [--cursor TOKEN]
 node ENTRY collect --config CONFIG --batch BATCH_ID --job JOB_ID
+node ENTRY collect --config CONFIG --batch BATCH_ID --impacts JOB_ID
 ```
 
 `--start-handle` publishes this batch's identity (batch_id and index location) after the
 initial index exists and before any child launches; a failed handle write aborts before
 launch, and the handle is not a wakeup. `batch --compact` returns a bounded paged terminal
 (the whole response, metadata included, stays within the byte budget); `collect --compact`
-pages and expands the same way, and `collect --job` returns one settled result in full.
+pages and expands the same way, `collect --job` returns one settled result in full and
+`collect --impacts` expands only its bounded decision impacts. A dependency-ready successor
+launches only from validated complete reports and selected present artifacts; failed,
+missing, wrong-identity or unconfirmed predecessors block it. Waiting and blocked are distinct
+from never-started/missing work.
 Plain `batch` and plain `collect` keep their full legacy returns. prepare launches nothing
 (batch admission re-validates every generated job) and every collect read is read-only;
 their guarantees live with the swarm skill's batch reference.
@@ -76,7 +82,8 @@ no submitted/accepted/record/pending ceremony.
 
 ## Read only at the relevant boundary
 
-- Multiple independent approved responsibilities: use the companion swarm skill.
+- Finite approved responsibilities, whether dependent or independent: use the companion
+  swarm skill.
 - Timeout, cancellation, uncertain submission, ROUTE_CHANGED or revoked authorization:
   read [ACP recovery](references/recovery.md) before a recovery action.
 - Explicit statistics, review annotation, pending view or aggregate export:

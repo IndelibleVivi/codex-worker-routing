@@ -82,8 +82,10 @@ Historical acceptance sections retain their respective dates and versions.
   file-type checks.
 - `src/delivery.mjs`: bounded delivery collection and identity validation; reports
   remain separate from runtime facts.
-- `src/batch.mjs`: finite independent CLI subprocesses, batch-local admission, a pre-launch
-  batch handle and a byte-bounded compact read; the complete legacy terminal stays the default.
+- `src/batch.mjs`: finite dependency-aware CLI subprocesses, batch-local admission, exact
+  predecessor report/artifact binding, blocking/waiting states, a pre-launch batch handle and
+  a byte-bounded compact read; the complete legacy terminal stays the default.
+- `src/dependencies.mjs`: pre-admission graph validation only; it launches nothing.
 - `src/verify.mjs`: coordinator-confirmed argv checks, task environments, budgets and
   evidence freshness; it never executes commands from a report.
 - `test/*.test.mjs`: integration-layer tests that run without dependencies; the runtime

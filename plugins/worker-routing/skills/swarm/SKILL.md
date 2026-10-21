@@ -1,23 +1,25 @@
 ---
 name: swarm
-description: Delegate an approved finite batch of independent engineering or research responsibilities using the operator's existing worker channel. Use for broad repository discovery, multiple search directions, repeated checks and substantial dirty work; keep coupled single tasks with one worker and explicit solo work in the main session.
+description: Delegate an approved finite batch of engineering or research responsibilities, independent or linked by explicit predecessor inputs, using the operator's existing worker channel. Use for repository discovery, multiple search directions, evidence merging, repeated checks and substantial dirty work; keep internally coupled single tasks with one worker and explicit solo work in the main session.
 ---
 
 # Bounded swarm
 
 Use worker-routing for the coordinator/worker contract and channel authority. This method
-expands already-authorized independent responsibilities; it grants no new provider, data,
+expands already-authorized finite responsibilities; it grants no new provider, data,
 workspace, account or cost authority. One configured route may serve multiple sessions,
 but its shared state must actually support that arrangement. Workers remain peers and
 cannot recursively route or create a reviewer hierarchy.
 
 ## Decide the batch before launch
 
-State the finite outcome, criteria, candidate/input coverage, independent responsibility
-list, exact read/write roots and shared resources. Small repeated operations can form one
+State the finite outcome, criteria, candidate/input coverage, responsibility list,
+any explicit predecessors and required inputs, exact read/write roots and shared resources. Small repeated operations can form one
 complete script-based responsibility. Do not first investigate every candidate yourself.
 Keep an internally coupled implementation with one worker; split only where execution and
-acceptance are meaningfully independent. Batch size is an execution choice, not a reason
+acceptance have clear boundaries. A comparison can consume exact predecessor reports;
+an unresolved product decision returns to the coordinator before dependent implementation.
+Batch size is an execution choice, not a reason
 to expand the goal or require the user to configure each worker manually.
 
 Use the operator's current authorized channel. ACP follows acp-worker with explicit current

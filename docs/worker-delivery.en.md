@@ -66,11 +66,12 @@ genuine old record from one later stripped of both IDs.
 
 ## Run a finite batch
 
-Already-defined independent responsibilities can use the packaged [swarm method](../plugins/worker-routing/skills/swarm/SKILL.md).
-Fix the outcome, finite list, write ownership and shared resources first. The runner starts
-independent CLI processes and collects real handles, terminal states and deliveries. A free
-slot can execute the next approved item without waiting for an unrelated slow job. Missing
-required items still mean partial.
+Finite approved responsibilities with declared dependencies or independent scheduling can use
+the packaged [swarm method](../plugins/worker-routing/skills/swarm/SKILL.md). Fix the outcome,
+finite list, write ownership and shared resources first. The runner starts isolated CLI
+processes and collects real handles, terminal states and deliveries. A free slot can execute
+the next approved ready item without waiting for an unrelated slow job. Missing required
+items still mean partial.
 
 ```sh
 node ENTRY batch --config CONFIG --manifest BATCH_FILE --concurrency 2
@@ -108,6 +109,53 @@ Each job collects delivery by default; use deliver:false only when runtime facts
 Shared-HOME concurrency requires both capabilities.sharedWorkerHome="validated" on the manifest and
 sharedHomeValidation="validated" on every relevant job, supported by actual adapter acceptance.
 Otherwise serialize conservatively. Complete means result coverage, not engineering acceptance.
+
+### Finite dependencies
+
+A dependency edge is explicit and finite. The predecessor must be another job in the same
+manifest, and every edge needs an input binding:
+
+```json
+{
+  "id": "c", "verb": "run", "route": "worker", "cwd": "/workspace/c",
+  "file": "/orders/c.md", "permissions": "read",
+  "depends_on": ["a", "b"],
+  "inputs": [
+    {"job": "a", "report": true},
+    {"job": "b", "report": true, "artifacts": ["out/result.json"]}
+  ]
+}
+```
+
+Prepare and manifest admission reject unknown, self, duplicate and cyclic edges, a bare
+`depends_on` without a binding, and a predecessor that opted out of delivery. A selected report
+is the complete validated `cwr-delivery` block, never the compact excerpt. Selected artifact
+references must already be observed as present inside the predecessor workspace. The bound
+input records the exact job, session and request; it is labelled `worker_reported` and
+untrusted, so it is neither executable instructions nor owner acceptance. Dependencies never
+merge locks, relax route authorization or permit concurrency that existing cwd, HOME, operation
+or resource rules reject.
+
+Bound content enters the successor order and is sent to that job's selected route. The
+coordinator must check the material and destination against existing authority when declaring
+inputs. Artifact binding retains references and observations; reading original files remains
+within the successor task's scope.
+
+Independent A/B and an unrelated D may start together at the configured concurrency. C becomes
+eligible only after every declared predecessor has settled with completed runtime, confirmed
+cleanup, matching receipt/handle identity and a validated `ready` delivery. Missing or malformed
+reports, failed/cancelled runtime, wrong identity and unconfirmed cleanup block it. An
+over-large combined input is rejected rather than clipped.
+
+`collect --compact` separates `waiting` (an unfinished predecessor), `blocked` (a rejected
+input or failed/blocked predecessor, including transitive blockage), recorded-handle jobs,
+`awaiting_handle`, and terminal `missing`. Blocked and waiting jobs have no fabricated result.
+When nothing running can unblock the finite graph, the batch settles partial. Cancellation or
+an index failure closes admission for every new launch, including a just-ready successor.
+
+Two `continue` jobs may use an explicit edge to continue the same existing session in
+order. Each turn keeps its own request and report, with the existing cwd/operation locks.
+A manifest cannot reference an unknown newly created session as a bound handle.
 
 A start handle records locks_held; adapter initialization and prompt acknowledgement may still be pending.
 The runner verifies actual child selection against its resource plan and rejects changed configuration
@@ -185,14 +233,30 @@ routine coordination uses `--compact` instead.
 and the trailing newline) is held under a UTF-8 byte budget, default 32 KiB, minimum 8 KiB,
 maximum 256 KiB, with an item limit default 8 and maximum 32. It reports the batch status,
 total, captured handles, settled count, outstanding count, a `page` summary (`has_more`,
-`limited_by`), an `unresolved` classification (recorded-handle unsettled items, `awaiting_handle`, and truly
-missing kept separate), a `next_cursor` and per-item records. When a rich item cannot fit,
+`limited_by`), an `unresolved` classification (recorded-handle unsettled items, `awaiting_handle`,
+dependency `waiting`, `blocked`, and truly missing kept separate), a `next_cursor` and
+per-item records. When a rich item cannot fit,
 only optional detail is reduced and named in `omitted_fields`; even minimal detail retains
 provenance and criterion/check counts. When results remain, a successful page includes at
 least one locatable item or returns an explicit insufficient-budget error. The full
 questions, artifacts and checks never enter the compact page: `collect --job JOB_ID` expands
 one settled result in full from the index, and `delivery --session UUID --request
 REQUEST_ID` expands the per-request sidecar.
+
+The optional `decision_impacts` list in a delivery block has a bounded `target`, `finding`,
+`consequence` and short `evidence_refs` list. Legacy reports remain valid; unknown fields,
+over-limit text/lists and malformed entries are rejected. Rich and reduced compact records
+retain the impact count and affected targets; minimal detail keeps the count and explicitly
+marks the target list omitted. Expand only one job's impacts with:
+
+```sh
+node ENTRY collect --config CONFIG --batch BATCH_ID --impacts JOB_ID
+```
+
+This targeted read keeps `worker_reported` provenance and exact job, session and request
+identity. It never adopts a finding, writes external state, changes permissions or executes a
+reported command. Valid `partial` and `needs_input` reports also retain this expansion;
+reading their findings does not satisfy the `ready` gate for successor admission.
 
 The cursor is an opaque token naming this batch, revision and offset; it is validated strictly
 for shape, canonical encoding, batch, range and revision, and it is not an authenticity tag.

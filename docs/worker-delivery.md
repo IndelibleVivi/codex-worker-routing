@@ -55,10 +55,10 @@ invalid 记录，并在返回有效结果时以 warning 报告数量；若只剩
 
 ## 展开有限批次
 
-已明确、互不阻塞的责任可以使用安装包的 [swarm 方法](../plugins/worker-routing/skills/swarm/SKILL.md)。
-批次先确定目标、有限清单、写入所有权与共享资源，再由运行器启动独立 CLI 子进程，
-收集实际句柄、终态和报告。空闲 slot 可以执行清单内下一项；一个慢任务不阻塞所有无关
-结果，但必需项缺失时批次只能 partial。
+有限且明确的任务（可带事先声明的依赖）可以使用安装包的 [swarm 方法](../plugins/worker-routing/skills/swarm/SKILL.md)。
+批次先确定目标、有限清单、写入所有权与共享资源，再由运行器启动单独的 CLI 子进程，
+收集实际句柄、终态和报告。空闲 slot 可以执行清单内下一项已就绪任务；一个慢任务不阻塞
+无关结果，但必需输入缺失时批次只能 partial。
 
 ```sh
 node ENTRY batch --config CONFIG --manifest BATCH_FILE --concurrency 2
@@ -92,6 +92,45 @@ run 项显式 route；continue 项使用原 session 和相同 cwd，不另选 ro
 只有明确只需 runtime 事实时才设 `deliver:false`。共享 HOME 并发展开同时要求 manifest 的
 `capabilities.sharedWorkerHome="validated"` 与每个相关项的 `sharedHomeValidation="validated"`；
 这些声明必须有真实 adapter 验收支持。否则保守串行。`complete` 表示结果覆盖完整，仍不等于工程验收。
+
+### 有限依赖
+
+依赖边必须显式、有限，指向前项只能来自同一 manifest；每条边都要有输入绑定：
+
+```json
+{
+  "id": "c", "verb": "run", "route": "worker", "cwd": "/workspace/c",
+  "file": "/orders/c.md", "permissions": "read",
+  "depends_on": ["a", "b"],
+  "inputs": [
+    {"job": "a", "report": true},
+    {"job": "b", "report": true, "artifacts": ["out/result.json"]}
+  ]
+}
+```
+
+`prepare` 与 manifest admission 会在启动前拒绝未知、自引用、重复和循环引用，拒绝只有
+`depends_on` 而没有输入绑定的项，以及 `deliver:false` 的前项。选中报告指完整、已校验的
+`cwr-delivery` block，绝不是 compact 摘录；选中 artifact 必须已观察到存在于前项 workspace。
+绑定内容携带前项确切 job/session/request；它仍标为 `worker_reported` 与不可信输入，不是
+可执行指令或 owner 验收。依赖不合并锁、不放松 route 授权，也不绕过 exact cwd、HOME、操作
+或资源并发规则。
+
+绑定内容会进入后继工单并发送到该 job 所选 route；协调者声明输入时需核对材料与接收方的
+现有授权。artifact 绑定保留引用与已观察信息，原件读取仍服从该任务的范围。
+
+两项 `continue` 可以用依赖边顺序续做同一个已存在的 session；每轮保留自己的 request 与
+报告，现有 cwd/operation 锁仍生效。manifest 不会把未知的新 session ID 当作可引用句柄。
+
+独立 A/B 与无关 D 可在当前 concurrency 下一同启动；C 只等它声明的 A/B。每项前项必须已完成
+runtime、确认 cleanup、receipt/handle identity 匹配且交付为有效 `ready`。报告缺失/格式错误、
+runtime failed/cancelled、身份不符或 cleanup 未确认都阻断 C。组合输入超过 order 上限时
+明确阻断，绝不裁剪。
+
+`collect --compact` 把 `waiting`（前项未结束）、`blocked`（输入被拒或前项失败/阻断，包括
+传递阻断）、已记录 handle 的未结算项、`awaiting_handle` 与终态 `missing` 分开；waiting/blocked
+不会伪造结果。当前没有 child 能解开有限图时批次结算为 partial。取消或索引失败会终止所有
+新 launch，包括刚变成就绪的后续项。
 
 start handle 记录 `locks_held`；adapter 初始化与 prompt acknowledgement 可能尚未完成。
 运行器将子进程的实际选择与资源计划核对，配置变化时在 launch 前拒绝；父进程取消复用
@@ -157,11 +196,25 @@ compact 预算约束；日常协调改用 `--compact`。
 `--compact` 返回有界分页响应：整份响应（含 metadata、cursor、items 与结尾换行）受
 UTF-8 字节预算硬限，默认 32 KiB、最低 8 KiB、最高 256 KiB；每页 item 上限默认 8、
 最大 32。响应给出批次状态、总数、已捕获句柄数、已结算数、outstanding、`page`
-（是否还有未展开页 `has_more`/`limited_by`）、`unresolved`（已记录 handle 的未结算项、`awaiting_handle`、真正 missing 分开）、`next_cursor` 与逐项结果。预算装不下某个富条目时，只缩减可选 detail
+（是否还有未展开页 `has_more`/`limited_by`）、`unresolved`（已记录 handle 的未结算项、`awaiting_handle`、
+依赖 `waiting`、`blocked` 与真正 missing 分开）、`next_cursor` 与逐项结果。预算装不下某个富条目时，只缩减可选 detail
 并显式列出 `omitted_fields`；最简 tier 仍保留来源、条件与检查计数。还有待返回结果时，
 成功页至少包含一个可定位条目，否则明确报预算不足，避免无法推进的空页。完整 questions/artifacts/checks 不进入 compact 页：
 `collect --job JOB_ID` 从索引展开单个结算结果的全部字段，`delivery --session UUID
 --request REQUEST_ID` 展开按请求保存的 sidecar。
+
+交付 block 可选 `decision_impacts`：每项只有有界 `target`、`finding`、`consequence` 与短
+`evidence_refs`。旧报告仍有效；未知字段、超限文本/列表和格式错误都会明确拒绝。富与 reduced
+compact 保留影响数量与 affected target；最简 tier 保留数量并显式标记 target 列表被省略。
+定向展开单个 job：
+
+```sh
+node ENTRY collect --config CONFIG --batch BATCH_ID --impacts JOB_ID
+```
+
+响应保留 `worker_reported` 来源及确切 job/session/request identity；不会自动采纳结论、
+写外部状态、改变权限或执行报告中的命令。有效的 `partial`、`needs_input` 报告也可展开
+其中的发现；这不改变后继启动所需的 `ready` 条件。
 
 cursor 是不透明 token，只声明本 batch、revision 与 offset，按 shape/canonical 编码/
 batch/range/revision 严格校验；它不是真实性标签。`awaiting_handle` 可能是尚待准入或已在启动，不能据此认定没有 child；已记录 handle

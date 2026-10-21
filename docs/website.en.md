@@ -7,6 +7,11 @@ Node.js 22+ standard libraries, with no extra dependencies or server. The Englis
 entry is `/codex-worker-routing/` and Chinese is `/codex-worker-routing/zh/`.
 The on-site guides live at `/guide/` and `/zh/guide/` under that same repository subpath.
 
+**Current source update (2026-10-22, not deployed to Pages):** the shared batch explanation
+on the home and guide pages now covers explicit predecessors, required report inputs and
+failure blocking. See the [delivery contract](worker-delivery.en.md). This is a local source
+and build update; the dated live-acceptance records below retain their own version boundaries.
+
 **0.4 cooperation architecture presentation live (2026-10-14):** Source `3bf59f4`
 was published through the existing [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564620990),
 with build/deploy success and [all five CI jobs](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564578149) passing for that commit.

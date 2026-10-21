@@ -10,7 +10,7 @@ import { loadConfig, loadControlConfig, selectRoute, resolveRouteSelection, buil
 import { executeTurn, closeBinding } from './engine.mjs';
 import { EVENT_SCHEMA, REASON_VALUES, recordEvent, createProjectionReader, normalizeSince, captureParentMetadata, writeRequestOrder, listPendingSessions } from './dispatch.mjs';
 import { readDelivery } from './delivery.mjs';
-import { runBatch, collectBatch, collectBatchCompact, collectBatchJob } from './batch.mjs';
+import { runBatch, collectBatch, collectBatchCompact, collectBatchJob, collectBatchImpacts } from './batch.mjs';
 import { runPrepare } from './prepare.mjs';
 import { inventoryStorage, planStorage, applyStoragePlan, createScratch, loadScratch,
   newScratchLocation, scratchRenderEnvironment } from './storage.mjs';
@@ -44,7 +44,7 @@ const VALUES = Object.freeze({
   batch: ['config', 'manifest', 'concurrency', 'start-handle', 'limit', 'max-bytes'],
   delivery: ['config', 'session', 'request'],
   prepare: ['config', 'spec', 'out'],
-  collect: ['config', 'batch', 'job', 'cursor', 'limit', 'max-bytes'],
+  collect: ['config', 'batch', 'job', 'impacts', 'cursor', 'limit', 'max-bytes'],
 });
 const REQUIRED = Object.freeze({
   // `route` is resolved separately: it is required only for configs without a
@@ -105,7 +105,7 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   prepare  --config FILE --spec SPEC_FILE [--out DIR]
   collect  --config FILE --batch BATCH_ID
            [--compact [--limit N] [--max-bytes N] [--cursor TOKEN]]
-           [--job JOB_ID]
+           [--job JOB_ID | --impacts JOB_ID]
 
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
@@ -151,7 +151,9 @@ with visible omission counts). No change since the cursor re-sends no results;
 cross-batch, malformed, out-of-range or future cursors are rejected. --job JOB_ID
 expands ONE settled result in full from the index and cannot be combined with
 --compact/--cursor/--limit/--max-bytes; the full delivery block stays
-readable with 'delivery --session/--request'. collect never loads an adapter,
+readable with 'delivery --session/--request'. --impacts JOB_ID expands only that
+job's bounded decision impacts, retaining worker_reported provenance and
+request/session identity. collect never loads an adapter,
 never waits, provides no per-item wakeup, and a corrupted index is an explicit
 error, never a fake pass.
 
@@ -237,6 +239,8 @@ export function parseArgs(args) {
   if (REQUIRED[command].some(k => !out[k])) throw new Fault('USAGE', 'Required option missing. Run --help.');
   if (command === 'storage-plan' && !out.targets?.length)
     throw new Fault('USAGE', 'Required option missing. Run --help.');
+  if (command === 'collect' && out.job !== undefined && out.impacts !== undefined)
+    throw new Fault('USAGE', '--job and --impacts select different expansions; choose one.');
   if ((command === 'run' || command === 'continue') && out.permissions === undefined)
     throw new Fault('PERMISSIONS_REQUIRED', 'Choose --permissions read or --permissions full explicitly for this turn; category and earlier turns do not grant permission.');
   return out;
@@ -438,12 +442,17 @@ export async function main(args, deps = {}) {
   }
   if (opt.command === 'collect') {
     // Read-only batch-index view; never loads an adapter, never waits.
-    if (opt.job !== undefined && (opt.compact || opt.cursor !== undefined || opt.limit !== undefined || opt['max-bytes'] !== undefined))
-      throw new Fault('USAGE', '--job expands a full result and cannot be combined with --compact/--cursor/--limit/--max-bytes.');
+    if (opt.job !== undefined && opt.impacts !== undefined)
+      throw new Fault('USAGE', '--job and --impacts select different expansions; choose one.');
+    const expansion = opt.job ?? opt.impacts;
+    if (expansion !== undefined && (opt.compact || opt.cursor !== undefined || opt.limit !== undefined || opt['max-bytes'] !== undefined))
+      throw new Fault('USAGE', '--job/--impacts expansions cannot be combined with --compact/--cursor/--limit/--max-bytes.');
     const config = await loadControlConfig(opt.config);
     if (opt.job !== undefined) {
       // Expand ONE settled result in full by manifest job id.
       output(await collectBatchJob({ config, batchId: opt.batch, jobId: opt.job }));
+    } else if (opt.impacts !== undefined) {
+      output(await collectBatchImpacts({ config, batchId: opt.batch, jobId: opt.impacts }));
     } else if (opt.compact) {
       const limit = opt.limit === undefined ? undefined : Number(opt.limit);
       const maxBytes = opt['max-bytes'] === undefined ? undefined : Number(opt['max-bytes']);

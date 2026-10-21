@@ -7,6 +7,10 @@
 `/codex-worker-routing/zh/`。站内指南分别在 `/guide/` 与 `/zh/guide/`，
 相对于同一 repository subpath。
 
+**当前源码更新（2026-10-22，尚未发布 Pages）**：首页与指南的共享 batch 说明已支持
+显式前驱、所需报告输入与失败阻断，参见[交付合同](worker-delivery.md)。这次是本地源码
+与构建更新；下面带日期的线上验收记录保留各自版本边界。
+
 **0.4 协作架构展示已上线（2026-10-14）**：源码 `3bf59f4` 经既有
 [Pages workflow](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564620990)
 发布，build/deploy 均成功；同一提交的[五项 CI](https://github.com/IndelibleVivi/codex-worker-routing/actions/runs/38564578149)通过。

@@ -28,6 +28,45 @@ test('spec validation is strict: schema, unknown fields, jobs bounds, explicit p
   assert.throws(() => parseSpec(spec({}, { permissions: 'write', category: 'implementation' })), { code: 'PERMISSIONS_REQUIRED' });
 });
 
+test('spec assembly carries explicit dependency inputs into the generated manifest', async t => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  const result = await runPrepare({
+    config: f.config,
+    spec: {
+      schema: SPEC,
+      jobs: [
+        { id: 'a', verb: 'run', route: 'worker', cwd: f.cwd, permissions: 'read', task: 'A.' },
+        { id: 'b', verb: 'run', route: 'worker', cwd: f.cwd, permissions: 'read', task: 'B.' },
+        {
+          id: 'c', verb: 'run', route: 'worker', cwd: f.cwd, permissions: 'read', task: 'C.',
+          depends_on: ['a', 'b'],
+          inputs: [{ job: 'a', report: true }, { job: 'b', report: true, artifacts: ['out/report.md'] }],
+        },
+      ],
+    },
+  });
+  const manifest = parseManifest(JSON.parse(await fs.readFile(result.manifest_path, 'utf8')));
+  assert.deepEqual(manifest.jobs.find(j => j.id === 'c').depends_on, ['a', 'b']);
+  assert.deepEqual(manifest.jobs.find(j => j.id === 'c').inputs, [
+    { job: 'a', report: true, artifacts: [] },
+    { job: 'b', report: true, artifacts: ['out/report.md'] },
+  ]);
+  // Invalid edges are rejected by prepare before creating any output.
+  const out = path.join(f.root, 'invalid-orders');
+  await assert.rejects(runPrepare({
+    config: f.config, out,
+    spec: {
+      schema: SPEC,
+      jobs: [
+        { id: 'a', verb: 'run', route: 'worker', cwd: f.cwd, permissions: 'read', task: 'A.' },
+        { id: 'b', verb: 'run', route: 'worker', cwd: f.cwd, permissions: 'read', task: 'B.', depends_on: ['a'], inputs: [] },
+      ],
+    },
+  }), { code: 'BAD_DEPENDENCIES' });
+  await assert.rejects(fs.stat(out), { code: 'ENOENT' });
+});
+
 test('spec validation: job identity, verbs, continue rules, sizes', () => {
   assert.throws(() => parseSpec(spec({}, { id: 'bad id!' })), { code: 'BAD_SPEC' });
   assert.throws(() => parseSpec(spec({ jobs: [

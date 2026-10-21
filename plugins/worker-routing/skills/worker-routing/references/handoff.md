@@ -107,4 +107,5 @@ sufficient. Batch acceptance starts with coverage, source identity, key support,
 conflicts and the combined final state. A merger is a peer bounded responsibility when
 cross-result reasoning warrants it; it does not reread all source by default or promote
 worker declarations into independently observed facts. Ordinary work has no required
-record/pending ceremony. See the companion swarm method when independent batches exist.
+record/pending ceremony. See the companion swarm method for finite batches, including
+explicitly bound predecessor inputs.

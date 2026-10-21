@@ -61,6 +61,32 @@ test('extractDelivery accepts one well-formed block and reports its status', () 
   assert.equal(r.status, 'partial');
   assert.equal(r.block.summary, 'done');
 });
+test('optional decision impacts are bounded, identity-preserving and reject malformed entries', () => {
+  const impacts = [{
+    target: 'webhook retry policy',
+    finding: 'The current timeout drops a delivery after the provider accepted it.',
+    consequence: 'Changing the timeout without an idempotency key can duplicate effects.',
+    evidence_refs: ['src/webhook.mjs:42', 'tests/webhook.test.mjs'],
+  }];
+  const valid = normalizeDelivery({ ...READY_A, decision_impacts: impacts });
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.block.decision_impacts, impacts);
+  assert.equal(valid.block.request_id, UUID_A);
+  assert.equal(valid.block.session_id, UUID_A);
+  assert.deepEqual(normalizeDelivery({ ...READY_A }).block.decision_impacts, []);
+  for (const impact of [
+    { ...impacts[0], extra: 'unknown' },
+    { ...impacts[0], target: 7 },
+    { ...impacts[0], evidence_refs: ['x'.repeat(501)] },
+    { ...impacts[0], evidence_refs: Array.from({ length: 9 }, (_, i) => `e${i}`) },
+  ]) {
+    const rejected = normalizeDelivery({ ...READY_A, decision_impacts: [impact] });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.code, 'BAD_DECISION_IMPACTS');
+  }
+  assert.equal(normalizeDelivery({ ...READY_A, decision_impacts: Array.from({ length: 9 }, () => impacts[0]) }).code, 'BAD_DECISION_IMPACTS');
+  assert.equal(extractDelivery(block({ ...READY, request_id: UUID_A, session_id: UUID_A, decision_impacts: [{ target: 'x' }] })).code, 'BAD_DECISION_IMPACTS');
+});
 test('extractDelivery rejects missing, multiple, malformed and oversized blocks', () => {
   assert.equal(extractDelivery('no block here').status, 'missing');
   assert.equal(extractDelivery(block(READY_A) + block(READY_A)).status, 'malformed');

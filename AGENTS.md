@@ -26,7 +26,11 @@ plugin and its optional main-session context integration.
   authored worker responsibility contract. ACP assembles it into every actual order;
   native handoffs deliver the same body. Keep optional report schemas out of ordinary
   prompts. `delivery.mjs` owns bounded per-request collection; `batch.mjs` owns finite
-  CLI subprocess admission and collection, local to one batch, publishing every settled
+  CLI subprocess admission and collection, local to one batch; `dependencies.mjs` owns
+  the shared finite-graph shape/cycle checks used by prepare and batch. Bind exact
+  predecessor request/session reports before successor admission, publish blocked states
+  while unrelated work runs, and retain decision-impact expansion for every valid report
+  status without treating it as permission to launch dependent work. Publish every settled
   result into the durable index as it lands. Publish an optional batch start handle
   after its initial index and before any child admission; a failed handle write must
   leave no child and settle the owned index as partial. Preserve full batch/collect

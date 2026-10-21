@@ -1,8 +1,9 @@
 # Finite batch execution and results
 
-Read when a task actually contains independent approved responsibilities. The integration's
-installed CLI/help and canonical operator guide own exact arguments and supported interfaces;
-this method describes the coordination guarantees they must preserve.
+Read when a task contains a finite set of approved responsibilities with declared
+dependencies or genuinely independent scheduling. The integration's installed CLI/help and
+canonical operator guide own exact arguments and supported interfaces; this method describes
+the coordination guarantees they must preserve.
 
 ## Order preparation
 
@@ -14,6 +15,29 @@ run route from the config's CURRENT default (recorded per item), and refuses to 
 existing outputs. It launches nothing and loads no adapter; batch admission re-validates
 every generated job, so preparation never widens authority. Write the spec from the actual
 goal; never let the mechanical step invent scope, permissions or acceptance criteria.
+
+A dependent item declares both edges and the exact input it needs:
+
+```json
+{
+  "id": "c",
+  "depends_on": ["a", "b"],
+  "inputs": [
+    {"job": "a", "report": true},
+    {"job": "b", "report": true, "artifacts": ["out/result.json"]}
+  ]
+}
+```
+
+`depends_on` without `inputs` is invalid, as are unknown, self, duplicate and cyclic
+references. An input may select exact report content, exact artifact references, or both.
+The binding is finite and coordinator-authored; it never creates a general scheduler,
+implicit edge or automatic workflow. Dependencies do not merge locks or grant a successor
+extra authority.
+
+Explicit edges may order continuations of the same already-bound session. Preserve each
+request's report and the existing cwd/operation locks; do not invent a session identifier
+for a run that has not started.
 
 ## Admission and resource ownership
 
@@ -33,6 +57,17 @@ databases or output files. Read permission policy does not prove filesystem isol
 shared resource whose concurrency capability is unverified must be serialized within the
 batch or use an already-authorized isolated environment. Do not copy credentials/private
 profiles, create aliases or broaden parent roots to bypass a conflict.
+
+Schedulable independent items may start immediately. A dependent item waits only for its
+declared predecessors and then competes normally for its own resource keys; an unrelated slow
+item must not delay it. A successor launches only after every selected predecessor has a
+terminal receipt, confirmed cleanup, matching handle/request/session identity and a validated
+`ready` delivery. Missing or malformed report content, failed/cancelled runtime and
+unconfirmed cleanup block rather than launch. The successor receives the complete normalized
+report plus explicitly selected artifact references, with source job/session/request recorded.
+That content remains attributed `worker_reported` data: it is not executable instructions and
+does not imply owner acceptance or permission. Never substitute a clipped compact excerpt,
+and reject a combined input that exceeds the successor order bound.
 
 Distinguish batch-local concurrency/admission from global behavior of separate CWR processes.
 Claim a global safety guarantee only when all relevant entrypoints enforce it. Validate a
@@ -76,7 +111,12 @@ still retains provenance and criterion/check counts. When results remain, a succ
 page includes a locatable item or explicitly rejects an insufficient budget. The
 full questions, artifacts and checks never enter the compact page. `collect --job JOB_ID`
 expands one settled result in full from the durable index, and
-`delivery --session UUID --request REQUEST_ID` expands the per-request sidecar.
+`delivery --session UUID --request REQUEST_ID` expands the per-request sidecar. Optional
+`decision_impacts` add only bounded target/finding/consequence/evidence entries. Compact
+reads retain their count and affected targets or an explicit omission; `collect --impacts
+JOB_ID` expands just those entries with `worker_reported` provenance and exact
+job/session/request identity. Neither form adopts a finding, writes Merist state, changes
+permission or executes a reported command.
 
 The cursor is an opaque token naming this batch, revision and offset. It is validated strictly
 for shape, canonical encoding, batch, range and revision — it is not an authenticity tag.
@@ -87,7 +127,11 @@ which may also repeat unchanged successors, so merge by job id and each item’s
 duplication. An un-expanded page, unsettled jobs with a recorded handle, `awaiting_handle` jobs
 and genuinely missing results are separate facts. Awaiting a handle can mean pending
 admission or startup; it does not prove no child exists, and a recorded handle proves
-locks held, not prompt acknowledgement.
+locks held, not prompt acknowledgement. Dependency-waiting and blocked items are separate
+too: waiting has unfinished predecessors; blocked has a rejected input or failed/blocked
+predecessor. Blockage propagates transitively without inventing receipts for unstarted jobs.
+When no active child can unblock the finite graph, the batch settles as partial. Cancellation
+or index failure stops all new launches, including an item that had just become ready.
 The legacy plain `batch` and `collect` full returns are unchanged and are not subject to the
 compact budget.
 

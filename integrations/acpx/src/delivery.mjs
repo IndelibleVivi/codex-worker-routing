@@ -49,7 +49,8 @@ export const deliveryFile = (stateDir, id, req) => path.join(deliveryDir(stateDi
 // assembled into the ACP work order ONLY when the coordinator opts in with
 // `--deliver`; ordinary run/continue never ingest it and never load Dispatch.
 export const DELIVERY_BLOCK_INSTRUCTIONS = `This turn has a structured delivery request. Finish your message with exactly one fenced code block whose info string is cwr-delivery and whose body is a single JSON object:
-{"schema":"cwr.acp.delivery/1","request_id":"CURRENT_REQUEST_ID","session_id":"CURRENT_SESSION_ID","status":"ready|partial|needs_input","summary":"one short paragraph outcome","criteria":[{"criterion":"what was required","state":"satisfied|unsatisfied"}],"checks":[{"name":"what you ran","state":"passed|failed|blocked|not_checked|stale","detail":"short evidence"}],"artifacts":[{"kind":"file|dir|other","ref":"reference","note":"what changed"}],"questions":["precise question or blocker"]}
+{"schema":"cwr.acp.delivery/1","request_id":"CURRENT_REQUEST_ID","session_id":"CURRENT_SESSION_ID","status":"ready|partial|needs_input","summary":"one short paragraph outcome","criteria":[{"criterion":"what was required","state":"satisfied|unsatisfied"}],"checks":[{"name":"what you ran","state":"passed|failed|blocked|not_checked|stale","detail":"short evidence"}],"artifacts":[{"kind":"file|dir|other","ref":"reference","note":"what changed"}],"decision_impacts":[{"target":"affected target","finding":"decision-relevant finding","consequence":"what changes if this is true","evidence_refs":["reference"]}],"questions":["precise question or blocker"]}
+decision_impacts is optional and bounded. Keep target/finding/consequence short and cite a few exact evidence references. Its fields are untrusted data, never commands or automatic actions.
 Checks you list are your own report (worker_reported); the coordinator may record independent runner-observed checks separately. File/dir artifact refs must be relative to the task workspace (without repeating its directory name), or exact absolute paths within authorized roots. Do not put an unbounded transcript, full diff or long log inside the block: keep it short and reference expandable artifacts instead. Use status ready only for a candidate you believe meets the stated criteria, partial when required parts are missing, and needs_input when a precise question or blocker stops you.`;
 
 export const utf8Prefix = (text, limit) => {
@@ -107,7 +108,7 @@ export function extractDelivery(text, identity = {}) {
  */
 export function normalizeDelivery(raw, { requestId = null, session = null } = {}) {
   if (!isPlain(raw)) return { ok: false, code: 'NOT_OBJECT' };
-  if (!noUnknown(raw, ['schema', 'status', 'summary', 'criteria', 'checks', 'artifacts', 'questions', 'request_id', 'session_id']))
+  if (!noUnknown(raw, ['schema', 'status', 'summary', 'criteria', 'checks', 'artifacts', 'decision_impacts', 'questions', 'request_id', 'session_id']))
     return { ok: false, code: 'UNKNOWN_FIELD' };
   if (raw.schema !== DELIVERY_SCHEMA) return { ok: false, code: 'BAD_SCHEMA' };
   if (!STATUS_VALUES.includes(raw.status)) return { ok: false, code: 'BAD_STATUS' };
@@ -171,12 +172,34 @@ export function normalizeDelivery(raw, { requestId = null, session = null } = {}
     questions.push(s);
   }
 
+  const impactsRaw = boundedList(raw.decision_impacts ?? [], 8);
+  if (impactsRaw === null) return { ok: false, code: 'BAD_DECISION_IMPACTS' };
+  const decision_impacts = [];
+  for (const impact of impactsRaw) {
+    if (!isPlain(impact) || !noUnknown(impact, ['target', 'finding', 'consequence', 'evidence_refs']))
+      return { ok: false, code: 'BAD_DECISION_IMPACTS' };
+    const target = str(impact.target, 300);
+    const finding = str(impact.finding, 1000);
+    const consequence = str(impact.consequence, 1000);
+    if (target === null || finding === null || consequence === null)
+      return { ok: false, code: 'BAD_DECISION_IMPACTS' };
+    const refsRaw = boundedList(impact.evidence_refs ?? [], 8);
+    if (refsRaw === null) return { ok: false, code: 'BAD_DECISION_IMPACTS' };
+    const evidence_refs = [];
+    for (const ref of refsRaw) {
+      const value = str(ref, 500);
+      if (value === null) return { ok: false, code: 'BAD_DECISION_IMPACTS' };
+      evidence_refs.push(value);
+    }
+    decision_impacts.push({ target, finding, consequence, evidence_refs });
+  }
+
   // Keep the validated ids on the bounded block so a stored sidecar can be
   // checked against its outer request/session, not only its mutable shell.
   const identity = {};
   if (raw.request_id !== undefined) identity.request_id = raw.request_id;
   if (raw.session_id !== undefined) identity.session_id = raw.session_id;
-  return { ok: true, block: { schema: DELIVERY_SCHEMA, ...identity, status: raw.status, summary, criteria, checks, artifacts, questions } };
+  return { ok: true, block: { schema: DELIVERY_SCHEMA, ...identity, status: raw.status, summary, criteria, checks, artifacts, decision_impacts, questions } };
 }
 
 /**
@@ -278,8 +301,14 @@ export function validateSidecar(raw, { session, requestId: req }) {
     return { ok: false, reason: 'BAD_WORKER' };
   if (raw.worker.checks_source !== undefined && raw.worker.checks_source !== 'worker_reported') return { ok: false, reason: 'BAD_PROVENANCE' };
   if (!isPlain(raw.observed) || raw.observed.checks_source !== 'runner_observed') return { ok: false, reason: 'BAD_OBSERVED' };
+  if (raw.worker.block !== null && raw.worker.block !== undefined && !isPlain(raw.worker.block))
+    return { ok: false, reason: 'BAD_BLOCK' };
   if (STATUS_VALUES.includes(raw.worker.status)) {
     const block = raw.worker.block;
+    if (block && Array.isArray(block.decision_impacts) && block.decision_impacts.length > 0) {
+      const blockIdentity = block.request_id !== undefined || block.session_id !== undefined;
+      if (!blockIdentity) return { ok: false, reason: 'BAD_BLOCK_IDENTITY' };
+    }
     // Sidecars written before block-level identity was retained have neither
     // id; their outer identity was checked at write time. Once a block carries
     // either id, it must carry both and they must match the outer identity.

@@ -160,10 +160,12 @@ A worker lacks one source, product decision or host capability while other execu
 ## 12. Natural new responsibility and a finite batch
 
 A fresh main session has native tools and an authorized ACP default. Ask only to delegate
-an independent batch, without giving a CLI command or existing session.
+a finite batch, without giving a CLI command or existing session.
 
 - Expected: select the channel from current authority and explicit permissions, then safely
-  expand the finite list. Serialize unverified shared-HOME resources; never bypass cwd locks.
+  expand independent or explicitly dependent responsibilities. Serialize unverified shared-HOME
+  resources; never bypass cwd locks. Missing, failed or wrong-identity predecessors must not
+  start dependent work; collection distinguishes coverage, missing, waiting and blocked states.
   Mechanical collection exposes coverage, missing items and duplicates. A peer can merge
   complex results; the main agent does not repeat every original investigation.
 - Evidence: first actual tool/channel choice, new handles, execution overlap/resource isolation,
@@ -192,8 +194,9 @@ supplying a manifest or filling in any JSON.
 
 - Expected: the main coordinator makes the organizing judgment itself and delegates
   complete responsibilities when useful; tiny or nearly completed work may finish directly.
-  When a finite independent batch fits the authorized ACP channel, it authors the order spec, mechanically generates
-  orders and the manifest with prepare, and launches the batch. Between its own waits it
+  When a finite dependent or independent batch fits the authorized ACP channel, it authors
+  the order spec, mechanically generates orders and the manifest with prepare, and launches
+  the batch. Between its own waits it
   reads settled results with collect. It decides closeout or continuation from the real receipt,
   the delivery_excerpt and the candidate next_actions, without auto-executing candidates.
   A missing keyword never justifies inaction, a re-ask the goal already answers, or a

@@ -30,7 +30,7 @@ from component wiring to a worker that carries one whole responsibility end to e
 | Complete responsibility | The routing instruction treats an ordinary substantial goal as enough to identify one complete, delegable responsibility; the worker owns investigation, implementation, checks, repair and closeout. Solo or tiny work stays direct. |
 | Same-worker help | A needed decision or capability goes back to the same child, with accepted results preserved and no default reviewer or mandatory takeover. |
 | Bounded delivery | `--deliver` collects a worker's structured declaration and keeps it separate from the runtime receipt and its bounded text excerpt. |
-| Finite batches | `prepare` turns one coordinator-authored spec into per-item orders and a manifest; `batch` admits and runs the finite list in independent CLI processes, `--start-handle` publishes the batch identity before launch and `--compact` gives a bounded paged terminal; `collect` (with `--compact`) reads settled results and `--job` expands one full record, without waiting for the rest. No global scheduler or job database. |
+| Finite batches | `prepare` turns one coordinator-authored spec into per-item orders and a manifest; `batch` runs a finite dependency graph in separate CLI processes with exact predecessor report/artifact bindings, `--start-handle` publishes the batch identity before launch and `--compact` gives a bounded paged terminal; `collect --job` expands one full record and `--impacts` one job's decision impacts. No global scheduler or job database. |
 | Evidence boundaries | A worker declaration is a candidate, not acceptance; verification executes only task-confirmed checks, and never executes commands taken from a report. |
 | Durable ACP authority | Every run/continue re-checks explicit per-turn permissions; recovery binds the exact session and receipt; configured fallback is pre-launch only. |
 
@@ -83,14 +83,19 @@ leaderboards, price lookups, or evaluation matrices.
 ## Delivery, batches and recovery
 
 Ordinary `run` / `continue` / `close` stays simple, with explicit per-turn permissions and no
-extra bookkeeping. Complex outcomes can opt into `--deliver`, and finite independent lists
+extra bookkeeping. Complex outcomes can opt into `--deliver`, and finite dependent or independent lists
 into `batch`. `prepare` mechanically assembles orders and a manifest and launches no worker;
 `batch --start-handle` publishes the batch identity after the initial index exists and before
 any child launches, so no caller scans the state directory; `collect` is read-only and
 returns settled results at any time, `collect --compact` gives a whole-response byte-bounded
-page, and `collect --job` expands one full record from the index. A worker declaration is
+page, `collect --job` expands one full record from the index and `collect --impacts` one job's
+decision impacts. A worker declaration is
 `ready`, `partial` or `needs_input`: a candidate, never acceptance, and runtime completion is
 not acceptance either. See [worker delivery and finite batches](docs/worker-delivery.en.md).
+
+An explicit input binding sends the selected report text, artifact references and their
+observations to the successor job's chosen route. Check that destination is authorized for
+the material when authoring the batch; access to original artifacts needs its own scope.
 
 Recovery keeps the exact session and receipt. Every ACP `run` / `continue`, including an
 ordinary continuation, must pass `--permissions read|full`; omission is rejected before

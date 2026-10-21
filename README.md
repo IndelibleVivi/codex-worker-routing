@@ -26,7 +26,7 @@
 | 完整责任 | 路由说明把实质工程目标视为足以识别一块完整、可委派责任；调查、实施、自检、自修与收尾都由 worker 负责。微小或 solo 工作仍直接完成。 |
 | 同一 worker 协助 | 需要一次判断或某项能力时，答复回到同一个 child，保留已接受的结果，不默认另派 reviewer，也不强制接管。 |
 | 有界交付 | `--deliver` 收集 worker 的结构化交付声明，与 runtime 回执及其有界文本摘录分开保存。 |
-| 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 对有限清单做 admission 并以独立 CLI 进程执行，`--start-handle` 在启动前给出本批 identity，`--compact` 给出有界分页终态；`collect`（含 `--compact`）读取已结算结果，`--job` 可展开单条完整记录，不必等其余项目。没有全局 scheduler 或 job database。 |
+| 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 以单独的 CLI 进程执行有限依赖图，将确切前项报告/artifact 绑定到后续输入，`--start-handle` 在启动前给出本批 identity，`--compact` 给出有界分页终态；`collect --job` 展开单条完整记录，`--impacts` 展开该 job 的决策影响。没有全局 scheduler 或 job database。 |
 | 证据边界 | worker 声明只是候选，不是验收；只有任务确认的检查会执行，绝不执行来自报告的指令。 |
 | ACP 持久授权 | 每次 run/continue 都重查显式每轮权限；恢复绑定确切的 session 与回执；已配置的备用只在启动前触发。 |
 
@@ -71,12 +71,15 @@ flowchart TD
 ## 交付、批次与恢复
 
 日常 `run` / `continue` / `close` 保持简单，每轮显式权限，不要求额外记录。复杂成果可选
-`--deliver`，有限独立清单可选 `batch`；`prepare` 机械生成 order 与 manifest 且不启动任何 worker，
+`--deliver`，有限依赖或独立清单可选 `batch`；`prepare` 机械生成 order 与 manifest 且不启动任何 worker，
 `batch --start-handle` 在初始索引落盘后、启动任何子进程前给出本批 identity，不靠扫描 state 目录；
 `collect` 只读并随时返回已结算结果，`collect --compact` 提供整份受字节预算约束的分页读取，
-`collect --job` 按 job 展开索引里的完整记录。worker 声明为 `ready`、`partial` 或 `needs_input`，只是候选，
+`collect --job` 按 job 展开索引里的完整记录，`collect --impacts` 定向展开决策影响。worker 声明为 `ready`、`partial` 或 `needs_input`，只是候选，
 不是验收；runtime 完成同样不是验收。完整接口见
 [Worker 交付与有限批次](docs/worker-delivery.md)。
+
+显式输入绑定会把所选报告正文、artifact 引用及其观察信息送入后继 job 的工单，并发送到
+该 job 选择的 route。编写批次时需要核对这些材料允许的接收方；访问原件的授权另行声明。
 
 恢复绑定确切的 session 与回执。每次 ACP `run` / `continue`（包括普通续做）都必须显式带
 `--permissions read|full`，省略会在派工前被拒绝。超时或取消一旦成立，迟到的结果不会改写终态，

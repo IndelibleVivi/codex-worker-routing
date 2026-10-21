@@ -78,6 +78,38 @@ test('REAL acpx: omitting --route uses routing.default end-to-end',async t=>{
  assert.deepEqual(receipt.selection,{schema:'cwr.acp.selection/1',requested_route:'worker',actual_route:'worker',fallback:null,skipped_routes:[]});
  assert.equal(JSON.parse(receipt.output_excerpt).turn,1);
 });
+
+test('REAL acpx: dependent continuations reuse one existing session and preserve each exact report', async t => {
+ const f = await setup(t);
+ const initialRun = await command(f, 'run', initial(f));
+ assert.equal(initialRun.code, 0, initialRun.stderr);
+ const session = initialRun.receipt.session_id;
+ const secondOrder = path.join(f.root, 'second-turn.md');
+ await fs.writeFile(secondOrder, 'Compare the exact predecessor report in this existing responsibility.');
+ const manifestFile = path.join(f.root, 'continued-graph.json');
+ await fs.writeFile(manifestFile, JSON.stringify({ schema:'cwr.acp.batch-manifest/1', maxConcurrency:2, jobs:[
+  { id:'first', verb:'continue', session, cwd:f.cwd, file:f.orderFile, permissions:'read' },
+  { id:'second', verb:'continue', session, cwd:f.cwd, file:secondOrder, permissions:'read',
+    depends_on:['first'], inputs:[{job:'first',report:true}] },
+ ] }));
+ const batch = await command(f, 'batch', ['--manifest', manifestFile]);
+ assert.equal(batch.code, 0, JSON.stringify(batch));
+ assert.equal(batch.receipt.status, 'complete');
+ const first = batch.receipt.jobs.find(j => j.id === 'first');
+ const second = batch.receipt.jobs.find(j => j.id === 'second');
+ assert.equal(first.session_id, session);
+ assert.equal(second.session_id, session);
+ assert.notEqual(first.request_id, second.request_id);
+ assert.equal(first.cleanup, 'confirmed');
+ assert.equal(second.cleanup, 'confirmed');
+ const bound = await fs.readFile(path.join(path.dirname(batch.receipt.index_path), 'second.order.md'), 'utf8');
+ assert.ok(bound.includes(first.request_id));
+ assert.ok(bound.includes('synthetic delivery'));
+ const audit = (await fs.readFile(path.join(f.selection.route.workerHome, 'fixture-audit.ndjson'), 'utf8')).trim().split('\n').map(JSON.parse);
+ assert.equal(audit.filter(e => e.method === 'session/new').length, 1);
+ assert.equal(audit.filter(e => e.method === 'session/load').length, 2);
+ assert.equal(audit.filter(e => e.method === 'session/prompt').length, 3);
+});
 test('REAL acpx: an unavailable default falls back before launch and issues exactly one prompt',async t=>{
  const f=await routingSetup(t,{fallbacks:['backup'],breakDefault:true});
  const {code,stderr,receipt}=await command(f,'run',['--cwd',f.cwd,'--file',f.orderFile]);
@@ -257,7 +289,7 @@ test('REAL acpx: cancelling one shared-home turn does not cancel the other',asyn
  assert.notEqual(otherDone.receipt.session_id,cancelledId);
  assert.notEqual(otherDone.receipt.runtime_status,'cancelled','a single cancel must not cancel the sibling session');
 });
-test('REAL acpx: batch runs two independent jobs as real subprocesses with handles, excerpts and collect readback',async t=>{
+test('REAL acpx: batch runs two jobs as real subprocesses and expands decision impacts',async t=>{
  await loadAcpx();
  const f=ownFixture(t,await fixture({argv:[process.execPath,agent],timeoutMs:5000}));
  const cwdB=path.join(f.root,'workspace-b');await fs.mkdir(cwdB,{mode:0o700});
@@ -284,6 +316,8 @@ test('REAL acpx: batch runs two independent jobs as real subprocesses with handl
   assert.equal(j.delivery_excerpt.source,'worker_reported');
   assert.equal(j.delivery_excerpt.summary,'synthetic delivery');
   assert.equal(j.delivery_excerpt.summary_truncated,false);
+  assert.equal(j.delivery_excerpt.decision_impacts.total,1);
+  assert.deepEqual(j.delivery_excerpt.decision_impacts.affected_targets,['synthetic target']);
   // The DEFAULT terminal keeps the full legacy receipt: no field is dropped.
   assert.ok(Array.isArray(j.delivery_questions),'legacy delivery_questions is preserved');
   assert.ok(Array.isArray(j.artifact_references),'legacy artifact_references is preserved');
@@ -304,6 +338,13 @@ test('REAL acpx: batch runs two independent jobs as real subprocesses with handl
  assert.equal(collected.receipt.settled,2);
  assert.equal(collected.receipt.outstanding,0);
  assert.equal(collected.receipt.results.find(r=>r.id==='a').delivery_excerpt.summary,'synthetic delivery');
+ const impacts=await command(f,'collect',['--batch',receipt.batch_id,'--impacts','a']);
+ assert.equal(impacts.code,0,impacts.stderr);
+ assert.equal(impacts.receipt.schema,'cwr.acp.batch-impacts/1');
+ assert.equal(impacts.receipt.source,'worker_reported');
+ assert.equal(impacts.receipt.session_id,receipt.jobs.find(j=>j.id==='a').session_id);
+ assert.equal(impacts.receipt.request_id,receipt.jobs.find(j=>j.id==='a').request_id);
+ assert.equal(impacts.receipt.impacts[0].target,'synthetic target');
  // The OPTIONAL compact terminal stays within its whole-response byte budget,
  // carries the batch metadata, and its cursor continues through the read verb.
  const budget=8192;

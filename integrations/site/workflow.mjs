@@ -18,12 +18,12 @@ export function renderWorkLoop(lang='en'){
 export function renderBatchFlow(lang='en'){
  const T=(cn,en)=>lang==='zh'?cn:en;
  return `<div class="batch-flow">
- <div class="batch-intro"><span class="eyebrow">OPTIONAL ACP / FINITE BATCH</span><h3>${T('分工由主脑决定，机械步骤交给 CLI。','The main agent chooses the work. The CLI handles the mechanics.')}</h3><p>${T('一份主 agent 编写的 order spec，连接工单准备、有限批量执行与增量读取。一个默认 worker 就能开始；只有已明确独立的责任才适合成批交出。','One order spec authored by the main agent connects preparation, finite execution and incremental collection. One default worker is enough to start; batch only responsibilities already known to be independent.')}</p></div>
+ <div class="batch-intro"><span class="eyebrow">OPTIONAL ACP / FINITE BATCH</span><h3>${T('分工由主脑决定，机械步骤交给 CLI。','The main agent chooses the work. The CLI handles the mechanics.')}</h3><p>${T('一份主 agent 编写的 order spec，连接工单准备、有限批量执行与增量读取。可以交出独立责任，也可以声明前驱和所需报告，让输入齐备的后继继续工作。','One order spec authored by the main agent connects preparation, finite execution and incremental collection. Hand over independent responsibilities, or declare predecessors and required reports so successors can continue when their inputs are ready.')}</p></div>
  <ol class="batch-spine">
   <li><code>prepare</code><strong>${T('整理工单','Assemble orders')}</strong><span>${T('机械生成 orders + manifest，不启动 worker。','Generate orders and a manifest mechanically; launch no worker.')}</span></li>
-  <li><code>batch</code><strong>${T('按资源准入执行','Admit and execute')}</strong><span>${T('检查授权与资源，在这一批内执行，逐项保存已结算结果。','Check authorizations and resources, execute this finite batch, and persist each settled result.')}</span></li>
+  <li><code>batch</code><strong>${T('按依赖与资源准入','Admit ready work')}</strong><span>${T('检查前驱交付、授权与资源，绑定确切输入，逐项保存已结算结果。','Check predecessor deliveries, authorizations and resources; bind exact inputs and persist each settled result.')}</span></li>
   <li><code>collect</code><strong>${T('先读回来的部分','Read what has landed')}</strong><span>${T('只读已结算索引，不等整批结束；剩余责任继续保留。','Read the settled index without waiting for the rest; retain outstanding responsibilities.')}</span></li>
  </ol>
- <p class="batch-boundary">${T('ACP 运行器保留 session、回执与有界交付线索；worker 自述、实际运行状态和主脑验收分别判断。共享 HOME 的并发安全未知时，按该资源串行。','The ACP runner retains sessions, receipts and bounded delivery clues. Worker reports, observed runtime state and main-agent acceptance remain distinct. Serialize a shared HOME when its concurrency safety is unknown.')}</p>
+ <p class="batch-boundary">${T('ACP 运行器保留 session、回执与有界交付线索；缺失或失败的前驱会阻止依赖任务启动。worker 自述、实际运行状态和主脑验收分别判断。共享 HOME 的并发安全未知时，按该资源串行。','The ACP runner retains sessions, receipts and bounded delivery clues; a missing or failed predecessor blocks dependent work. Worker reports, observed runtime state and main-agent acceptance remain distinct. Serialize a shared HOME when its concurrency safety is unknown.')}</p>
  </div>`;
 }

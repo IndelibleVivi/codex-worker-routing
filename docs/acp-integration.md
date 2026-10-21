@@ -57,8 +57,9 @@ cwr-acp 使用阻塞 CLI。它没有独立后台服务；没有完成后自动�
 - `src/engine.mjs`：公开 runtime 接入、同会话校验、结果与清理。
 - `src/state.mjs`：少量私有 binding/receipt、原子写、路径与文件类型检查。
 - `src/delivery.mjs`：有界交付收集和身份校验；报告声明与 runtime 事实分开。
-- `src/batch.mjs`：有限独立 CLI 子进程、批次本地资源准入、启动前 batch handle 与受预算约束的
-  compact 读取；完整旧终态默认保留。
+- `src/batch.mjs`：有限依赖图 CLI 子进程、批次本地资源准入、确切前项报告/artifact 绑定、
+  waiting/blocked 状态、启动前 batch handle 与受预算约束的 compact 读取；完整旧终态默认保留。
+- `src/dependencies.mjs`：仅做启动前图校验，不启动任何进程。
 - `src/verify.mjs`：协调者确认的 argv 检查、任务环境、预算和证据新鲜度；不执行报告命令。
 - `test/*.test.mjs`：可无依赖运行的接入层测试；runtime 使用明确标记的合约替身。
 - `test/real-acpx.integration.mjs`：实际加载 acpx 包并启动合成 ACP 子进程的联调测试。

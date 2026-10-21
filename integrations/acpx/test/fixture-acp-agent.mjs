@@ -98,7 +98,7 @@ input.on('line',line=>{
     // exercise collection end-to-end. No model, no provider, no host data.
     const rid=(text.match(/"request_id":"([0-9a-f-]{36})"/)||[])[1]??randomUUID();
     const sid=(text.match(/"session_id":"([0-9a-f-]{36})"/)||[])[1]??params.sessionId;
-    const block='```cwr-delivery\n'+JSON.stringify({schema:'cwr.acp.delivery/1',status:'ready',summary:'synthetic delivery',request_id:rid,session_id:sid,criteria:[],checks:[],artifacts:[],questions:[]})+'\n```';
+    const block='```cwr-delivery\n'+JSON.stringify({schema:'cwr.acp.delivery/1',status:'ready',summary:'synthetic delivery',request_id:rid,session_id:sid,criteria:[],checks:[],artifacts:[],decision_impacts:[{target:'synthetic target',finding:'synthetic finding',consequence:'synthetic consequence',evidence_refs:['test/fixture-acp-agent.mjs']}],questions:[]})+'\n```';
     return complete(id,params,block);
    }
    // Echo only the isolation-relevant environment names. Synthetic values only;

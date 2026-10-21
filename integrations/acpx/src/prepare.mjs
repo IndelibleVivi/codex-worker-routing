@@ -15,6 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Fault, readJSON, privateDir, loadBinding } from './state.mjs';
 import { selectRoute, assertLocalManagedPath } from './config.mjs';
+import { normalizeJobDependencies, validateDependencyGraph } from './dependencies.mjs';
 
 export const SPEC_SCHEMA = 'cwr.acp.order-spec/1';
 export const SPEC_RESULT_SCHEMA = 'cwr.acp.order-spec-result/1';
@@ -62,7 +63,7 @@ export function parseSpec(raw) {
   const jobs = raw.jobs.map((j, i) => {
     const where = `jobs[${i}]`;
     if (!isPlain(j)) throw new Fault('BAD_SPEC', `${where} must be an object.`);
-    if (!noUnknown(j, ['id', 'verb', 'cwd', 'route', 'session', 'permissions', 'task', 'title', 'category', 'resources', 'deliver', 'sharedHomeValidation']))
+    if (!noUnknown(j, ['id', 'verb', 'cwd', 'route', 'session', 'permissions', 'task', 'title', 'category', 'resources', 'deliver', 'sharedHomeValidation', 'depends_on', 'inputs']))
       throw new Fault('BAD_SPEC', `Unknown field in ${where}.`);
     if (typeof j.id !== 'string' || !ID_RE.test(j.id)) throw new Fault('BAD_SPEC', `${where}.id must be a short opaque id.`);
     if (seen.has(j.id)) throw new Fault('BAD_SPEC', `Duplicate job id ${j.id}.`);
@@ -93,14 +94,17 @@ export function parseSpec(raw) {
     if (j.deliver !== undefined && typeof j.deliver !== 'boolean') throw new Fault('BAD_SPEC', `${where}.deliver must be boolean.`);
     if (j.sharedHomeValidation !== undefined && j.sharedHomeValidation !== 'validated')
       throw new Fault('BAD_SPEC', `${where}.sharedHomeValidation may only be "validated".`);
+    const dependencies = normalizeJobDependencies(j, j.id, where, Fault);
     return {
       id: j.id, verb: j.verb, route: j.route ?? null, session: j.session ?? null,
       cwd: j.cwd ?? null, permissions: j.permissions, task: j.task,
       title: j.title ?? null, category: j.category ?? null,
       resources: [...(j.resources ?? [])], deliver: j.deliver ?? true,
       sharedHomeValidation: j.sharedHomeValidation,
+      ...dependencies,
     };
   });
+  validateDependencyGraph(jobs, Fault);
   return { shared, outDir: raw.outDir ?? null, maxConcurrency, capabilities: raw.capabilities, jobs };
 }
 
@@ -167,6 +171,10 @@ export async function runPrepare({ config, spec, out = null, platform = process.
       id: job.id, verb: job.verb, cwd, file, permissions: job.permissions,
       resources: job.resources, deliver: job.deliver,
     };
+    if (job.depends_on.length) {
+      entry.depends_on = job.depends_on;
+      entry.inputs = job.inputs;
+    }
     if (job.verb === 'continue') entry.session = job.session;
     else {
       entry.route = routeName;

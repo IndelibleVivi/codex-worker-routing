@@ -9,10 +9,10 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { parseManifest, runBatch, collectBatch, collectBatchCompact, collectBatchJob, deliveryExcerpt, projectResult, MANIFEST_SCHEMA, HANDLE_SCHEMA, COMPACT_MIN_BYTES } from '../src/batch.mjs';
+import { parseManifest, runBatch, collectBatch, collectBatchCompact, collectBatchJob, collectBatchImpacts, deliveryExcerpt, projectResult, MANIFEST_SCHEMA, HANDLE_SCHEMA, COMPACT_MIN_BYTES } from '../src/batch.mjs';
 import { writeDeliverySidecar, deliveryFile } from '../src/delivery.mjs';
 import { atomicJSON } from '../src/state.mjs';
-import { fixture } from './helpers.mjs';
+import { fixture, deferred, sleep } from './helpers.mjs';
 
 const CLI = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
 // Invoke the REAL public CLI entry (never an in-process copy) and capture the
@@ -64,6 +64,45 @@ test('manifest validation is strict: schema, ids, verbs, permissions, absolute p
   assert.equal(ok.jobs.length, 2);
   assert.equal(ok.jobs[0].deliver, true);
   assert.equal(ok.jobs[1].deliver, false);
+});
+
+test('dependency declarations reject unknown, self, duplicate, unbound, deliver:false and cyclic edges before launch', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), b = path.join(base, 'b'), c = path.join(base, 'c');
+  const parsed = over => ({ schema: MANIFEST_SCHEMA, jobs: [
+    { ...job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }), ...(over.a ?? {}) },
+    { ...job({ id: 'b', cwd: b, file: path.join(b, 'o.md') }), ...(over.b ?? {}) },
+    { ...job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }), ...(over.c ?? {}) },
+  ] });
+  for (const invalid of [
+    { c: { depends_on: ['ghost'], inputs: [{ job: 'ghost', report: true }] } },
+    { c: { depends_on: ['c'], inputs: [{ job: 'c', report: true }] } },
+    { c: { depends_on: ['a', 'a'], inputs: [{ job: 'a', report: true }] } },
+    { c: { depends_on: ['a'], inputs: [] } },
+    { c: { depends_on: ['a'], inputs: [{ job: 'a', artifacts: ['x'] }, { job: 'a', report: true }] } },
+    { c: { depends_on: ['a'], inputs: [{ job: 'b', report: true }] } },
+    { a: { deliver: false }, c: { depends_on: ['a'], inputs: [{ job: 'a', report: true }] } },
+    { a: { depends_on: ['c'], inputs: [{ job: 'c', report: true }] }, c: { depends_on: ['a'], inputs: [{ job: 'a', report: true }] } },
+  ]) assert.throws(() => parseManifest(parsed(invalid)), { code: 'BAD_DEPENDENCIES' });
+  const valid = parseManifest(parsed({
+    c: { depends_on: ['a', 'b'], inputs: [
+      { job: 'a', report: true },
+      { job: 'b', report: true, artifacts: ['out/report.md'] },
+    ] },
+  }));
+  assert.deepEqual(valid.jobs.find(j => j.id === 'c').depends_on, ['a', 'b']);
+
+  // runBatch validates the graph before config reads, workspace canonicalization
+  // or child admission, so malformed edges cannot launch an independent sibling.
+  const { f, manifestFile, out } = await batchFixture(t, [job({ id: 'a', cwd: a, file: path.join(a, 'o.md') })]);
+  const badManifest = path.join(f.root, 'bad-batch.json');
+  await fs.writeFile(badManifest, JSON.stringify(parsed({ c: { depends_on: ['c'], inputs: [{ job: 'c', report: true }] } })));
+  let reads = 0, launches = 0;
+  await assert.rejects(runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: badManifest },
+    deps: { loadConfig: async () => { reads++; return f.config; }, spawnJob: () => { launches++; throw new Error('must not launch'); } },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  }), { code: 'BAD_DEPENDENCIES' });
+  assert.deepEqual({ reads, launches }, { reads: 0, launches: 0 });
 });
 
 // A synthetic spawner: writes a real start handle + receipt-shaped stdout, and
@@ -130,7 +169,11 @@ test('batch runs each job as an independent process and returns complete with ma
     job({ id: 'b', cwd: cwdB, file: path.join(cwdB, 'o.md') }),
   ]);
   const code = await run(f, manifestFile, out, fakeSpawner(state, { stateDir: f.config.stateDir }));
-  assert.equal(code, 0);
+  assert.equal(code, 0, JSON.stringify({
+    status: out.at(-1)?.status, blocked: out.at(-1)?.blocked,
+    waiting: out.at(-1)?.waiting, missing: out.at(-1)?.missing,
+    jobs: out.at(-1)?.jobs?.map(j => ({ id: j.id, problem: j.delivery_problem, runtime: j.runtime_status })),
+  }));
   const batch = out.at(-1);
   assert.equal(batch.status, 'complete');
   assert.equal(batch.admission_scope, 'batch_local_only');
@@ -144,6 +187,157 @@ test('batch runs each job as an independent process and returns complete with ma
   }
 });
 
+test('A/B predecessors bind exact reports into C while slow unrelated D keeps running', async t => {
+  const base = await jobRoot(t);
+  const cwd = Object.fromEntries(['a', 'b', 'c', 'd'].map(id => [id, path.join(base, id)]));
+  const jobs = Object.entries(cwd).map(([id, dir]) => job({ id, cwd: dir, file: path.join(dir, 'o.md') }));
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 3 });
+  const spawned = [];
+  const byId = new Map();
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    delays: { a: 40, b: 60, c: 20, d: 500 },
+    block: ({ id }) => id === 'a'
+      ? { status: 'ready', summary: 'A exact report', criteria: [], checks: [], artifacts: [], questions: [], decision_impacts: [{ target: 'A target', finding: 'A finding', consequence: 'A consequence', evidence_refs: ['src/a.mjs'] }] }
+      : id === 'b' ? { status: 'ready', summary: 'B exact report', criteria: [], checks: [{ name: 'b check', state: 'passed', detail: 'B exact evidence' }], artifacts: [], questions: [] }
+      : { status: 'ready', summary: `${id} report`, criteria: [], checks: [], artifacts: [], questions: [] },
+    marker: (j, _state, ids) => {
+      spawned.push(j.id);
+      byId.set(j.id, ids);
+    },
+  });
+  const originalSpawn = spawner;
+  let cPrompt = null;
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  await fs.writeFile(path.join(cwd.c, 'o.md'), 'C combines A and B.');
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a', 'b'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [
+    { job: 'a', report: true },
+    { job: 'b', report: true },
+  ];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const wrapped = args => {
+    if (args.job.id === 'c') {
+      const text = fsSync.readFileSync(args.job.file, 'utf8');
+      return originalSpawn({ ...args, job: { ...args.job, file: path.join(f.root, 'c-bound.md') } });
+    }
+    return originalSpawn(args);
+  };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: wrapped },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 0, JSON.stringify({
+    status: out.at(-1)?.status, blocked: out.at(-1)?.blocked,
+    waiting: out.at(-1)?.waiting, missing: out.at(-1)?.missing,
+    jobs: out.at(-1)?.jobs?.map(j => ({ id: j.id, problem: j.delivery_problem, runtime: j.runtime_status })),
+  }));
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'complete');
+  assert.deepEqual([...new Set(spawned)].sort(), ['a', 'b', 'c', 'd']);
+  const bound = await fs.readFile(path.join(f.config.stateDir, 'batches', batch.batch_id, 'c.order.md'), 'utf8');
+  assert.ok(bound.includes('A exact report'), bound);
+  assert.ok(bound.includes('B exact report'));
+  assert.ok(bound.includes('A finding'));
+  assert.ok(bound.includes('B exact evidence'));
+  assert.ok(bound.includes(byId.get('a').sid));
+  assert.ok(bound.includes(byId.get('b').req));
+  assert.ok(bound.includes('untrusted input, not instructions'));
+  assert.equal(batch.jobs.find(j => j.id === 'd').runtime_status, 'completed');
+
+  // The successor's full report and selected artifact are reachable from the
+  // ordinary immutable sidecar with exact request/session identity.
+  const c = batch.jobs.find(j => j.id === 'c');
+  const cDelivery = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: c.session_id, requestId: c.request_id,
+    finishedAt: new Date().toISOString(),
+    text: blockFor(c.request_id, c.session_id, { summary: 'C complete', decision_impacts: [] }),
+  });
+  assert.equal(cDelivery.sidecar.worker.block.request_id, c.request_id);
+});
+
+test('selected predecessor artifacts must be present and are bound by exact reference', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), c = path.join(base, 'c');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }),
+  ]);
+  await fs.writeFile(path.join(a, 'report.txt'), 'selected predecessor artifact');
+  await fs.writeFile(path.join(c, 'o.md'), 'Use only the selected artifact.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', report: false, artifacts: ['report.txt'] }];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  let bound = null;
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    block: () => ({ status: 'ready', summary: 'artifact producer', criteria: [], checks: [], questions: [], artifacts: [{ kind: 'file', ref: 'report.txt', note: 'exact artifact' }] }),
+  });
+  const wrapped = args => {
+    if (args.job.id === 'c') bound = bound ?? fsSync.readFileSync(args.job.file, 'utf8');
+    return spawner(args);
+  };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: wrapped },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 0);
+  assert.ok(bound);
+  assert.ok(bound.includes('"report": null'));
+  assert.ok(bound.includes('"ref": "report.txt"'));
+  assert.ok(bound.includes('"status": "present"'));
+});
+
+test('explicit dependencies can order continuations of the same existing session', () => {
+  const session = randomUUID();
+  const manifest = { schema: MANIFEST_SCHEMA, jobs: [
+    { id: 'b', verb: 'continue', session, cwd: '/abs/ws', file: '/abs/b.md', permissions: 'read' },
+    {
+      id: 'c', verb: 'continue', session, cwd: '/abs/ws', file: '/abs/c.md', permissions: 'read',
+      depends_on: ['b'], inputs: [{ job: 'b', report: true }],
+    },
+  ] };
+  const parsed = parseManifest(manifest);
+  assert.deepEqual(parsed.jobs.find(j => j.id === 'c').depends_on, ['b']);
+  assert.equal(parsed.jobs.find(j => j.id === 'c').session, session);
+  const indirect = { schema: MANIFEST_SCHEMA, jobs: [
+    { id: 'b', verb: 'continue', session, cwd: '/abs/ws', file: '/abs/b.md', permissions: 'read' },
+    { id: 'c', verb: 'continue', session, cwd: '/abs/ws', file: '/abs/c.md', permissions: 'read',
+      depends_on: ['a'], inputs: [{ job: 'a', report: true }] },
+    { id: 'a', verb: 'run', route: 'worker', cwd: '/abs/a', file: '/abs/a.md', permissions: 'read',
+      depends_on: ['b'], inputs: [{ job: 'b', report: true }] },
+  ] };
+  assert.deepEqual(parseManifest(indirect).jobs.find(j => j.id === 'c').depends_on, ['a']);
+});
+
+test('an unavailable selected predecessor artifact blocks the successor instead of substituting it', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), c = path.join(base, 'c');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }),
+  ]);
+  await fs.writeFile(path.join(c, 'o.md'), 'Use the missing artifact.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', artifacts: ['never-created.txt'] }];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  let launchedC = false;
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    block: () => ({ status: 'ready', summary: 'artifact producer', criteria: [], checks: [], questions: [], artifacts: [{ kind: 'file', ref: 'never-created.txt', note: 'declared but absent' }] }),
+  });
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: args => { if (args.job.id === 'c') launchedC = true; return spawner(args); } },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.equal(launchedC, false);
+  assert.equal(out.at(-1).blocked.find(x => x.id === 'c')?.code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+});
+
 test('a required delivery that is missing/wrong-identity yields partial with a reason', async t => {
   const cwd = path.join((await jobRoot(t)), 'x');
   const { f, manifestFile, out, state } = await batchFixture(t, [job({ id: 'a', cwd, file: path.join(cwd, 'o.md'), deliver: true })]);
@@ -153,6 +347,32 @@ test('a required delivery that is missing/wrong-identity yields partial with a r
   assert.equal(batch.status, 'partial');
   assert.deepEqual(batch.missing, ['a']);
   assert.equal(batch.jobs[0].delivery_problem, 'DELIVERY_MISSING');
+});
+
+test('a malformed predecessor report cannot satisfy a successor', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), c = path.join(base, 'c');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }),
+  ]);
+  await fs.writeFile(path.join(c, 'o.md'), 'Must not receive a malformed predecessor.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', report: true }];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  let launchedC = false;
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    block: () => ({ status: 'ready', summary: 'bad', criteria: [], checks: [], artifacts: [], questions: [], extra: 'rejected' }),
+  });
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: args => { if (args.job.id === 'c') launchedC = true; return spawner(args); } },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  assert.equal(launchedC, false);
+  assert.equal(out.at(-1).blocked.find(x => x.id === 'c')?.code, 'PREDECESSOR_DELIVERY_MALFORMED');
 });
 
 test('a delivery:false job needs no sidecar and does not become partial', async t => {
@@ -1183,6 +1403,68 @@ test('a compact cursor re-delivers a SAME-ID result update instead of silently m
   assert.equal(stale.items[0].delivery_excerpt.summary, 'updated');
 });
 
+test('decision impacts survive compact collection and expand by exact job identity', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID(), sid = randomUUID(), req = randomUUID();
+  const zh = n => '判'.repeat(n);
+  const impacts = [{
+    target: `目标-${zh(80)}`,
+    finding: `发现-${zh(240)}`,
+    consequence: `影响-${zh(240)}`,
+    evidence_refs: ['src/决定.mjs:42', 'tests/decision.test.mjs'],
+  }];
+  const text = blockFor(req, sid, {
+    summary: 'decision impact retained',
+    decision_impacts: impacts,
+  });
+  const { sidecar } = await writeDeliverySidecar({
+    stateDir: f.config.stateDir, session: sid, requestId: req,
+    finishedAt: new Date().toISOString(), text,
+  });
+  assert.equal(sidecar.worker.status, 'ready');
+  assert.deepEqual(sidecar.worker.block.decision_impacts, impacts);
+  const result = {
+    ...compactResult('impact', 'decision impact retained', 1),
+    session_id: sid, request_id: req,
+    delivery_decision_impacts: sidecar.worker.block.decision_impacts,
+    delivery_excerpt: deliveryExcerpt(sidecar.worker.block),
+  };
+  // Force every projection tier; a budget that happens to retain full detail
+  // cannot by itself prove the reduced and minimal contracts.
+  for (const detail of ['full', 'reduced', 'minimal']) {
+    const projected = projectResult(result, { detail });
+    assert.equal(projected.delivery_decision_impacts_total, 1);
+    assert.equal(projected.delivery_excerpt.source, 'worker_reported');
+    assert.equal(projected.delivery_excerpt.decision_impacts.total, 1);
+    assert.deepEqual(projected.expand.impacts, { option: '--impacts', job: 'impact' });
+    if (detail === 'minimal') {
+      assert.deepEqual(projected.delivery_excerpt.decision_impacts.affected_targets, []);
+      assert.equal(projected.delivery_excerpt.decision_impacts.omitted, 1);
+    } else assert.ok(projected.delivery_excerpt.decision_impacts.affected_targets[0].startsWith('目标-'));
+  }
+  await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), {
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'complete', revision: 1,
+    started_at: new Date().toISOString(), total: 1, planned: ['impact'], jobs: [], results: [result], missing: [],
+  });
+  const page = await collectBatchCompact({ config: { stateDir: f.config.stateDir }, batchId, maxBytes: COMPACT_MIN_BYTES });
+  const item = page.items[0];
+  assert.equal(item.delivery_decision_impacts_total, 1);
+  assert.equal(item.delivery_excerpt.decision_impacts.total, 1);
+  assert.ok(['full', 'reduced', 'minimal'].includes(item.detail));
+  if (item.detail === 'minimal') {
+    assert.deepEqual(item.delivery_excerpt.decision_impacts.affected_targets, []);
+    assert.equal(item.delivery_excerpt.decision_impacts.omitted, 1);
+  }
+  assert.deepEqual(item.expand.impacts, { option: '--impacts', job: 'impact' });
+  const expanded = await collectBatchImpacts({ config: { stateDir: f.config.stateDir }, batchId, jobId: 'impact' });
+  assert.equal(expanded.schema, 'cwr.acp.batch-impacts/1');
+  assert.equal(expanded.source, 'worker_reported');
+  assert.equal(expanded.id, 'impact');
+  assert.equal(expanded.session_id, sid);
+  assert.equal(expanded.request_id, req);
+  assert.deepEqual(expanded.impacts, impacts);
+});
+
 test('invalid compact options are rejected before config reads or child admission', async t => {
   const base = await jobRoot(t);
   const jobs = [job({ id: 'one', cwd: path.join(base, 'one'), file: path.join(base, 'one', 'o.md') })];
@@ -1265,4 +1547,180 @@ test('full and compact terminals remain partial when the final index publication
       fs.rename = originalRename;
     }
   }
+});
+
+test('missing reports block successors transitively while independent jobs still settle', async t => {
+  const base = await jobRoot(t);
+  const dir = Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map(id => [id, path.join(base, id)]));
+  const jobs = Object.entries(dir).map(([id, cwd]) => job({ id, cwd, file: path.join(cwd, 'o.md') }));
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 3 });
+  for (const id of Object.keys(dir)) await fs.writeFile(path.join(dir[id], 'o.md'), `Order ${id}.`);
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', report: true }];
+  manifest.jobs.find(j => j.id === 'd').depends_on = ['c'];
+  manifest.jobs.find(j => j.id === 'd').inputs = [{ job: 'c', report: true }];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const started = [];
+  const spawner = fakeSpawner(state, { stateDir: f.config.stateDir, delays: { e: 300 }, writeDelivery: false });
+  const wrapped = args => { started.push(args.job.id); return spawner(args); };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: wrapped },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 1);
+  const batch = out.at(-1);
+  assert.equal(batch.status, 'partial');
+  assert.deepEqual([...new Set(started)].sort(), ['a', 'b', 'e']);
+  assert.deepEqual(batch.waiting, []);
+  assert.equal(batch.blocked.find(x => x.id === 'c')?.code, 'PREDECESSOR_DELIVERY_MISSING');
+  assert.equal(batch.blocked.find(x => x.id === 'd')?.code, 'PREDECESSOR_BLOCKED');
+  assert.ok(batch.missing.includes('a'));
+});
+
+test('partial and needs_input reports retain exact impact expansion without authorizing successors', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  for (const status of ['partial', 'needs_input']) {
+    const batchId = randomUUID(), sid = randomUUID(), req = randomUUID();
+    const impacts = [{ target: 'recovery', finding: 'old handle is stale', consequence: 'reidentify the page', evidence_refs: ['src/page.mjs:4'] }];
+    const { sidecar } = await writeDeliverySidecar({
+      stateDir: f.config.stateDir, session: sid, requestId: req,
+      finishedAt: new Date().toISOString(), text: blockFor(req, sid, { status, decision_impacts: impacts }),
+    });
+    assert.equal(sidecar.worker.status, status);
+    await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), {
+      schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'partial', revision: 1,
+      total: 1, planned: ['finding'], jobs: [], missing: [],
+      results: [{ id: 'finding', session_id: sid, request_id: req, delivery_decision_impacts: impacts }],
+    });
+    const expanded = await collectBatchImpacts({ config: f.config, batchId, jobId: 'finding' });
+    assert.equal(expanded.source, 'worker_reported');
+    assert.equal(expanded.session_id, sid);
+    assert.equal(expanded.request_id, req);
+    assert.deepEqual(expanded.impacts, impacts);
+  }
+});
+
+test('failed, cancelled, unconfirmed and partial predecessors block both direct and transitive successors', async t => {
+  for (const [behavior, expected] of [
+    [{ status: 'failed' }, 'PREDECESSOR_RUNTIME_FAILED'],
+    [{ status: 'cancelled' }, 'PREDECESSOR_RUNTIME_CANCELLED'],
+    [{ cleanup: 'unconfirmed' }, 'PREDECESSOR_CLEANUP_UNCONFIRMED'],
+    [{ deliverStatus: 'partial' }, 'PREDECESSOR_DELIVERY_PARTIAL'],
+    [{ deliverStatus: 'needs_input' }, 'PREDECESSOR_DELIVERY_NEEDS_INPUT'],
+  ]) {
+    const base = await jobRoot(t);
+    const jobs = ['a', 'c', 'd', 'independent'].map(id => job({ id, cwd: path.join(base, id), file: path.join(base, id, 'o.md') }));
+    const { f, manifestFile, out, state } = await batchFixture(t, jobs);
+    for (const j of jobs) await fs.writeFile(j.file, 'Synthetic order.');
+    const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+    Object.assign(manifest.jobs.find(j => j.id === 'c'), { depends_on: ['a'], inputs: [{ job: 'a', report: true }] });
+    Object.assign(manifest.jobs.find(j => j.id === 'd'), { depends_on: ['c'], inputs: [{ job: 'c', report: true }] });
+    await fs.writeFile(manifestFile, JSON.stringify(manifest));
+    const started = [];
+    const valid = fakeSpawner(state, { stateDir: f.config.stateDir });
+    const invalid = fakeSpawner(state, { stateDir: f.config.stateDir, ...behavior });
+    assert.equal(await run(f, manifestFile, out, args => {
+      started.push(args.job.id);
+      return (args.job.id === 'a' ? invalid : valid)(args);
+    }), 1);
+    assert.deepEqual(started.sort(), ['a', 'independent']);
+    assert.equal(out.at(-1).blocked.find(j => j.id === 'c').code, expected);
+    assert.equal(out.at(-1).blocked.find(j => j.id === 'd').code, 'PREDECESSOR_BLOCKED');
+    assert.equal(out.at(-1).jobs.find(j => j.id === 'independent').runtime_status, 'completed');
+  }
+});
+
+test('collect publishes transitive blocked states while an unrelated child remains unsettled', async t => {
+  const base = await jobRoot(t);
+  const jobs = ['a', 'c', 'd', 'e'].map(id => job({ id, route: id === 'd' ? 'backup' : 'worker', cwd: path.join(base, id), file: path.join(base, id, 'o.md') }));
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 2 });
+  // D has a disjoint synthetic HOME, so the existing resource admission allows
+  // it to run while A is held. No real adapter concurrency claim is made.
+  f.config.routes.backup = { ...f.config.routes.worker, workerHome: f.raw.routes.backup.workerHome };
+  for (const j of jobs) await fs.writeFile(j.file, 'Synthetic order.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  Object.assign(manifest.jobs.find(j => j.id === 'c'), { depends_on: ['a'], inputs: [{ job: 'a', report: true }] });
+  Object.assign(manifest.jobs.find(j => j.id === 'e'), { depends_on: ['c'], inputs: [{ job: 'c', report: true }] });
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const gate = deferred(), predecessorGate = deferred(), handleFile = path.join(f.root, 'start.json');
+  const valid = fakeSpawner(state, { stateDir: f.config.stateDir });
+  const missing = fakeSpawner(state, { stateDir: f.config.stateDir, writeDelivery: false });
+  const running = runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile, 'start-handle': handleFile },
+    deps: { loadConfig: async () => f.config, spawnJob: args => {
+      const handle = (args.job.id === 'a' ? missing : valid)(args);
+      if (args.job.id === 'a') handle.done = handle.done.then(async value => { await predecessorGate.promise; return value; });
+      if (args.job.id === 'd') handle.done = handle.done.then(async value => { await gate.promise; return value; });
+      return handle;
+    } }, output: value => out.push(value), text: () => {}, cliPath: 'cli.mjs',
+  });
+  try {
+    // Capture both handles first. Otherwise a late D-handle publication could
+    // accidentally publish the blocked map and let the pre-fix runner pass.
+    let handle;
+    const handleDeadline = Date.now() + 5000;
+    while (Date.now() < handleDeadline) {
+      try {
+        handle = JSON.parse(await fs.readFile(handleFile, 'utf8'));
+        const collected = await collectBatch({ config: f.config, batchId: handle.batch_id });
+        if (collected.handles === 2) break;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      await sleep(10);
+    }
+    assert.equal((await collectBatch({ config: f.config, batchId: handle.batch_id })).handles, 2);
+    predecessorGate.resolve();
+    let mid;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        const collected = await collectBatch({ config: f.config, batchId: handle.batch_id });
+        if (collected.blocked.some(j => j.id === 'e')) { mid = collected; break; }
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      await sleep(10);
+    }
+    assert.ok(mid, 'blocked states must be durable before D is released');
+    assert.equal(mid.status, 'running');
+    assert.ok(!mid.results.some(j => j.id === 'd'));
+    assert.deepEqual(mid.unresolved.blocked.sort(), ['c', 'e']);
+    assert.ok(!mid.unresolved.awaiting_handle.includes('c'));
+  } finally { predecessorGate.resolve(); gate.resolve(); await running; }
+});
+
+test('cancellation during dependency binding fences a just-ready successor', async t => {
+  const base = await jobRoot(t), a = path.join(base, 'a'), c = path.join(base, 'c');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }),
+  ]);
+  await fs.writeFile(path.join(c, 'o.md'), 'Must not launch after cancellation.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', report: true }];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const started = [];
+  const spawner = fakeSpawner(state, { stateDir: f.config.stateDir });
+  const originalWrite = fs.writeFile;
+  let boundWriteSeen = false, code;
+  fs.writeFile = async (file, ...args) => {
+    const result = await originalWrite(file, ...args);
+    if (path.basename(String(file)) === 'c.order.md') {
+      boundWriteSeen = true;
+      process.emit('SIGINT');
+    }
+    return result;
+  };
+  try {
+    code = await runBatch({
+      config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+      deps: { loadConfig: async () => f.config, spawnJob: args => { started.push(args.job.id); return spawner(args); } },
+      output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+    });
+  } finally { fs.writeFile = originalWrite; }
+  assert.equal(code, 1);
+  assert.equal(boundWriteSeen, true, 'cancel must arrive during the actual bound-order write');
+  assert.deepEqual(started, ['a'], 'cancellation before dependency admission must not spawn C');
+  assert.equal(out.at(-1).cancelled, true);
+  assert.ok(out.at(-1).waiting.includes('c'));
 });
