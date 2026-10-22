@@ -494,6 +494,7 @@ function selectedArtifactRecords(input, result) {
       selected.push({
         kind: artifact.kind, ref: artifact.ref, note: artifact.note ?? null,
         observed: artifact.observed ?? { status: 'unknown' },
+        source_locator: artifact.source_locator ?? null,
       });
     }
   }
@@ -607,6 +608,33 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   const handles = new Map();
   const heldKeys = new Set();
   const order = [...prepared];
+  // Reuse the planned graph for the one finite scheduler. A newly published
+  // block can originate during admission (for example an unavailable selected
+  // artifact), so descendants must be settled into the blocked map before the
+  // runner waits on an unrelated child or reaches terminal settlement.
+  const propagateBlocked = () => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const entry of order) {
+        if (blocked.has(entry.job.id)) continue;
+        const reason = [...(entry.job.depends_on ?? [])].find(id => blocked.has(id));
+        if (reason) {
+          blocked.set(entry.job.id, { state: 'blocked', code: 'PREDECESSOR_BLOCKED', blocked_by: [reason] });
+          changed = true;
+          continue;
+        }
+        for (const id of entry.job.depends_on ?? []) {
+          const problem = predecessorResultProblem(results.get(id), deliveries.get(id));
+          if (problem?.state === 'blocked') {
+            blocked.set(entry.job.id, { ...problem, blocked_by: [id] });
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+  };
   // The full planned id list is published with the initial index so a reader can
   // distinguish settled / recorded-handle / awaiting-handle / genuinely-missing
   // without scanning the state root. `indexRevision` counts result publications
@@ -713,7 +741,17 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
         error_code: receipt?.error_code ?? null,
         // Collection coverage is separate from engineering acceptance.
         delivery_path: delivery ? deliveryFile(full.stateDir, receipt.session_id, receipt.request_id) : null,
-        artifact_references: await Promise.all((delivery?.worker?.block?.artifacts ?? []).map(async a => ({ ...a, observed: !['file', 'dir'].includes(a.kind) ? { status: 'unsupported', reason: 'NON_FILE_REFERENCE' } : !a.ref.trim() ? { status: 'unknown', reason: 'EMPTY' } : await collectArtifactReference(/^[a-z][a-z0-9+.-]*:\/\//i.test(a.ref) ? a.ref : path.resolve(expectedCwd, a.ref), { roots: [expectedCwd] }) }))),
+        artifact_references: await Promise.all((delivery?.worker?.block?.artifacts ?? []).map(async a => {
+          const locator = /^[a-z][a-z0-9+.-]*:\/\//i.test(a.ref) ? a.ref : path.resolve(expectedCwd, a.ref);
+          return {
+            ...a,
+            // Keep the worker's exact ref, but make the location actually
+            // observed explicit so a successor in another cwd cannot resolve
+            // the same relative ref against its own workspace by mistake.
+            source_locator: locator,
+            observed: !['file', 'dir'].includes(a.kind) ? { status: 'unsupported', reason: 'NON_FILE_REFERENCE' } : !a.ref.trim() ? { status: 'unknown', reason: 'EMPTY' } : await collectArtifactReference(locator, { roots: [expectedCwd] }),
+          };
+        })),
         delivery_status: delivery && deliveryProblem !== 'DELIVERY_WRONG_IDENTITY' ? delivery.worker?.status ?? null : null,
         delivery_questions: delivery?.worker?.block?.questions ?? null,
         delivery_decision_impacts: delivery?.worker?.block?.decision_impacts ?? null,
@@ -741,28 +779,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
       // in collect without fabricated receipts.
       if (!cancelled && !admissionError) {
         const previousBlocked = blocked.size;
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const entry of order) {
-            if (blocked.has(entry.job.id)) continue;
-            let reason = [...(entry.job.depends_on ?? [])].find(id => blocked.has(id));
-            if (reason) {
-              blocked.set(entry.job.id, { state: 'blocked', code: 'PREDECESSOR_BLOCKED', blocked_by: [reason] });
-              changed = true;
-              continue;
-            }
-            for (const id of entry.job.depends_on ?? []) {
-              const result = results.get(id);
-              const problem = predecessorResultProblem(result, deliveries.get(id));
-              if (problem?.state === 'blocked') {
-                blocked.set(entry.job.id, { ...problem, blocked_by: [id] });
-                changed = true;
-                break;
-              }
-            }
-          }
-        }
+        propagateBlocked();
         // Publish dependency failures before waiting for unrelated children.
         // Their settlement may be much later; collect must already distinguish
         // these unstarted nodes from jobs still awaiting a predecessor.
@@ -815,6 +832,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           try { originalOrder = await readOrder(entry.job.file); }
           catch (e) {
             blocked.set(entry.job.id, { state: 'blocked', code: 'PREDECESSOR_ORDER_UNREADABLE', blocked_by: [] });
+            propagateBlocked();
             await writeIndex('running').catch(() => {});
             continue;
           }
@@ -825,6 +843,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
             blocked.set(entry.job.id, {
               state: binding.state ?? 'blocked', code: binding.code, blocked_by: binding.blocked_by ?? [],
             });
+            propagateBlocked();
             await writeIndex('running').catch(() => {});
             continue;
           }
@@ -832,6 +851,7 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
           try { await fs.writeFile(childOrderFile, binding.text, { mode: 0o600, flag: 'wx' }); }
           catch (e) {
             blocked.set(entry.job.id, { state: 'blocked', code: e.code === 'EEXIST' ? 'PREDECESSOR_INPUT_EXISTS' : 'PREDECESSOR_INPUT_WRITE_FAILED', blocked_by: [] });
+            propagateBlocked();
             await writeIndex('running').catch(() => {});
             continue;
           }
@@ -920,15 +940,19 @@ export async function runBatch({ config, opt, deps = {}, output, text, cliPath }
   // A missing REQUIRED result: no receipt, a handle mismatch, or a required
   // delivery problem. A failed/cancelled turn still produced an honest record.
   const missing = [];
+  const blockedIds = new Set(blocked.keys());
   for (const p of prepared) {
     const id = p.job.id;
+    // A blocked, unstarted node is represented by its blocked record. Calling
+    // it missing would collapse two different coordination states and make a
+    // finite graph look as if work may still arrive for it.
+    if (blockedIds.has(id)) continue;
     const r = results.get(id);
     if (!r || !r.output_received || !r.start_handle || r.handle_mismatch || (p.job.deliver && r.delivery_problem)) missing.push(id);
   }
   // Every still-pending dependency node is now either waiting on work that will
   // never settle or transitively blocked. Both remain unsettled/not launched;
   // they are never promoted to a synthetic completed result.
-  const blockedIds = new Set(blocked.keys());
   const waiting = prepared.filter(p => !results.has(p.job.id) && !blockedIds.has(p.job.id)).map(p => p.job.id);
   const graphIncomplete = blockedIds.size || waiting.length;
   const status = cancelled || missing.length || graphIncomplete || indexWarning || admissionError ? 'partial' : 'complete';
@@ -1083,7 +1107,8 @@ function unresolvedSummary(raw) {
     if (seen.has(id)) return null;
     seen.add(id);
     for (const dependency of dependencies[id]?.depends_on ?? []) {
-      if (loadBlocked(dependency, seen)) return blockedRecords.get(dependency);
+      const inherited = loadBlocked(dependency, seen);
+      if (inherited) return inherited;
     }
     return null;
   };
@@ -1100,11 +1125,18 @@ function unresolvedSummary(raw) {
   }
   const terminal = raw.status !== 'running';
   if (terminal) {
-    const missing = Array.isArray(raw.missing) ? raw.missing : [...running, ...awaitingHandle];
+    // Historical writers included blocked jobs in missing. Reconcile the read
+    // projection without rewriting their index or hiding unrelated lost work.
+    const blockedIds = new Set(blocked);
+    const missing = (Array.isArray(raw.missing) ? raw.missing : [...running, ...awaitingHandle])
+      .filter(id => !blockedIds.has(id));
     return {
       terminal, running: [], awaiting_handle: [], waiting: [],
       blocked, missing,
-      blocked_details: blocked.map(id => ({ id, ...(blockedRecords.get(id) ?? { state: 'blocked', code: 'PREDECESSOR_BLOCKED' }) })),
+      blocked_details: blocked.map(id => {
+        const inherited = loadBlocked(id) ?? { state: 'blocked', code: 'PREDECESSOR_BLOCKED' };
+        return { ...inherited, id };
+      }),
     };
   }
   return { terminal, running, awaiting_handle: awaitingHandle, waiting, blocked, missing: [], blocked_details: [] };

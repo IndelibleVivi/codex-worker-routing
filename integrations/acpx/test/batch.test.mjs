@@ -290,6 +290,61 @@ test('selected predecessor artifacts must be present and are bound by exact refe
   assert.ok(bound.includes('"status": "present"'));
 });
 
+test('selected predecessor artifacts identify their observed workspace across cwd values', async t => {
+  const base = await fs.realpath(await jobRoot(t)), a = path.join(base, 'a'), c = path.join(base, 'c');
+  const { f, manifestFile, out, state } = await batchFixture(t, [
+    job({ id: 'a', cwd: a, file: path.join(a, 'o.md') }),
+    job({ id: 'c', cwd: c, file: path.join(c, 'o.md') }),
+    job({ id: 'd', cwd: c, file: path.join(c, 'o.md') }),
+  ]);
+  await fs.writeFile(path.join(a, 'report.txt'), 'predecessor A contents');
+  await fs.writeFile(path.join(c, 'report.txt'), 'successor C contents');
+  await fs.writeFile(path.join(a, 'o.md'), 'Produce report.txt.');
+  await fs.writeFile(path.join(c, 'o.md'), 'Use only the selected predecessor artifact.');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', report: false, artifacts: ['report.txt'] }];
+  manifest.jobs.find(j => j.id === 'd').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'd').inputs = [
+    { job: 'a', report: true, artifacts: [path.join(a, 'report.txt')] },
+  ];
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const bound = new Map();
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    block: ({ id }) => ({ status: 'ready', summary: `${id} producer`, criteria: [], checks: [], questions: [],
+      artifacts: id === 'a' ? [
+        { kind: 'file', ref: 'report.txt', note: 'relative predecessor artifact' },
+        { kind: 'file', ref: path.join(a, 'report.txt'), note: 'absolute predecessor artifact' },
+      ] : [] }),
+  });
+  const wrapped = args => {
+    if (args.job.id === 'c' || args.job.id === 'd') bound.set(args.job.id, fsSync.readFileSync(args.job.file, 'utf8'));
+    return spawner(args);
+  };
+  const code = await runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile },
+    deps: { loadConfig: async () => f.config, spawnJob: wrapped },
+    output: r => out.push(r), text: () => {}, cliPath: 'cli.mjs',
+  });
+  assert.equal(code, 0, JSON.stringify(out.at(-1)));
+  const parseBound = text => {
+    const body = text.split('```json\n')[1]?.split('\n```')[0];
+    assert.ok(body, 'successor order must carry an exact predecessor payload');
+    return JSON.parse(body);
+  };
+  const cPayload = parseBound(bound.get('c'));
+  const dPayload = parseBound(bound.get('d'));
+  assert.equal(cPayload.inputs[0].report, null);
+  assert.deepEqual(cPayload.inputs[0].artifacts.map(a => a.ref), ['report.txt']);
+  assert.equal(cPayload.inputs[0].artifacts[0].source_locator, path.join(a, 'report.txt'));
+  assert.equal(fsSync.readFileSync(cPayload.inputs[0].artifacts[0].source_locator, 'utf8'), 'predecessor A contents');
+  assert.notEqual(cPayload.inputs[0].artifacts[0].source_locator, path.join(c, 'report.txt'));
+  assert.equal(dPayload.inputs[0].report.summary, 'a producer');
+  assert.deepEqual(dPayload.inputs[0].artifacts.map(a => a.ref), [path.join(a, 'report.txt')]);
+  assert.equal(dPayload.inputs[0].artifacts[0].source_locator, path.join(a, 'report.txt'));
+});
+
 test('explicit dependencies can order continuations of the same existing session', () => {
   const session = randomUUID();
   const manifest = { schema: MANIFEST_SCHEMA, jobs: [
@@ -336,6 +391,159 @@ test('an unavailable selected predecessor artifact blocks the successor instead 
   assert.equal(code, 1);
   assert.equal(launchedC, false);
   assert.equal(out.at(-1).blocked.find(x => x.id === 'c')?.code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+});
+
+test('binding-time artifact failure blocks the rest of the chain before an independent child settles', async t => {
+  const base = await jobRoot(t);
+  const ids = ['a', 'c', 'e', 'f', 'independent'];
+  const jobs = ids.map(id => job({ id, cwd: path.join(base, id), file: path.join(base, id, 'o.md') }));
+  const { f, manifestFile, out, state } = await batchFixture(t, jobs, { maxConcurrency: 2 });
+  f.config.routes.backup = { ...f.config.routes.worker, workerHome: f.raw.routes.backup.workerHome };
+  for (const j of jobs) await fs.writeFile(j.file, `Synthetic order ${j.id}.`);
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  manifest.jobs.find(j => j.id === 'c').depends_on = ['a'];
+  manifest.jobs.find(j => j.id === 'c').inputs = [{ job: 'a', artifacts: ['never-created.txt'] }];
+  manifest.jobs.find(j => j.id === 'e').depends_on = ['c'];
+  manifest.jobs.find(j => j.id === 'e').inputs = [{ job: 'c', report: true }];
+  manifest.jobs.find(j => j.id === 'f').depends_on = ['e'];
+  manifest.jobs.find(j => j.id === 'f').inputs = [{ job: 'e', report: true }];
+  manifest.jobs.find(j => j.id === 'independent').route = 'backup';
+  for (const item of manifest.jobs) item.cwd = await fs.realpath(item.cwd);
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  const started = [];
+  const aGate = deferred(), independentGate = deferred();
+  const spawner = fakeSpawner(state, {
+    stateDir: f.config.stateDir,
+    block: () => ({ status: 'ready', summary: 'A producer', criteria: [], checks: [], questions: [],
+      artifacts: [{ kind: 'file', ref: 'never-created.txt', note: 'declared but absent' }] }),
+  });
+  const startHandle = path.join(f.config.stateDir, 'batch.json');
+  const running = runBatch({
+    config: { configPath: f.configFile }, opt: { manifest: manifestFile, 'start-handle': startHandle },
+    deps: { loadConfig: async () => f.config, spawnJob: args => {
+      started.push(args.job.id);
+      const handle = spawner(args);
+      if (args.job.id === 'a') handle.done = handle.done.then(async value => { await aGate.promise; return value; });
+      if (args.job.id === 'independent') handle.done = handle.done.then(async value => { await independentGate.promise; return value; });
+      return handle;
+    } },
+    output: value => out.push(value), text: () => {}, cliPath: 'cli.mjs',
+  });
+  let mid;
+  try {
+    const handleDeadline = Date.now() + 5000;
+    let batchId = null;
+    while (Date.now() < handleDeadline) {
+      try {
+        batchId = JSON.parse(await fs.readFile(startHandle, 'utf8')).batch_id;
+        const collected = await collectBatch({ config: f.config, batchId });
+        if (collected.handles === 2) break;
+      } catch (error) { if (!['ENOENT', 'BAD_BATCH_ID', 'FILE_CHANGED', 'UNSAFE_FILE'].includes(error.code)) throw error; }
+      await sleep(10);
+    }
+    assert.ok(batchId, 'the batch must publish its start handle');
+    assert.equal((await collectBatch({ config: f.config, batchId })).handles, 2,
+      'A and the unrelated child must both be admitted before A settles');
+    aGate.resolve();
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      let collected;
+      try { collected = await collectBatch({ config: f.config, batchId }); }
+      catch (error) { if (!['FILE_CHANGED', 'UNSAFE_FILE'].includes(error.code)) throw error; await sleep(10); continue; }
+      if (collected.unresolved.blocked.includes('f')) {
+        mid = collected;
+        break;
+      }
+      await sleep(10);
+    }
+    assert.ok(mid, 'the whole blocked chain must be visible before the independent job settles');
+    assert.equal(mid.status, 'running');
+    assert.deepEqual(mid.unresolved.blocked.sort(), ['c', 'e', 'f']);
+    assert.deepEqual(mid.unresolved.waiting, []);
+    assert.deepEqual(mid.unresolved.missing, []);
+    assert.ok(!mid.results.some(r => r.id === 'independent'));
+    const compact = await collectBatchCompact({ config: f.config, batchId });
+    assert.deepEqual(compact.unresolved.blocked.sort(), ['c', 'e', 'f']);
+    assert.deepEqual(compact.unresolved.waiting, []);
+    assert.equal(compact.outstanding, 1);
+  } finally {
+    aGate.resolve();
+    independentGate.resolve();
+  }
+  assert.equal(await running, 1);
+  assert.deepEqual([...new Set(started)].sort(), ['a', 'independent']);
+  const terminal = out.at(-1);
+  assert.equal(terminal.status, 'partial');
+  assert.deepEqual(terminal.waiting, []);
+  assert.deepEqual(terminal.missing, []);
+  assert.deepEqual(terminal.blocked.map(x => x.id).sort(), ['c', 'e', 'f']);
+  assert.equal(terminal.blocked.find(x => x.id === 'c').code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+  assert.equal(terminal.blocked.find(x => x.id === 'e').code, 'PREDECESSOR_BLOCKED');
+  assert.equal(terminal.blocked.find(x => x.id === 'f').code, 'PREDECESSOR_BLOCKED');
+  const ordinary = await collectBatch({ config: f.config, batchId: terminal.batch_id });
+  assert.deepEqual(ordinary.unresolved.blocked.sort(), ['c', 'e', 'f']);
+  assert.deepEqual(ordinary.unresolved.waiting, []);
+  assert.deepEqual(ordinary.unresolved.missing, []);
+  const compact = await collectBatchCompact({ config: f.config, batchId: terminal.batch_id });
+  assert.deepEqual(compact.unresolved.blocked.sort(), ['c', 'e', 'f']);
+  assert.deepEqual(compact.unresolved.waiting, []);
+  assert.deepEqual(compact.unresolved.missing, []);
+});
+
+test('collect reconstructs sparse persisted descendant blocks from the exact direct ancestor record', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID();
+  const dependencies = {
+    a: { depends_on: [], inputs: [] },
+    c: { depends_on: ['a'], inputs: [{ job: 'a', artifacts: ['missing.txt'] }] },
+    e: { depends_on: ['c'], inputs: [{ job: 'c', report: true }] },
+    f: { depends_on: ['e'], inputs: [{ job: 'e', report: true }] },
+  };
+  await atomicJSON(path.join(f.config.stateDir, 'batches', batchId, 'index.json'), {
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'partial', revision: 1,
+    total: 4, index_total: 4, planned: ['a', 'c', 'e', 'f'], dependencies,
+    jobs: [], results: [{ id: 'a', rev: 1, output_received: true }],
+    blocked: [{ id: 'c', state: 'blocked', code: 'PREDECESSOR_ARTIFACT_UNAVAILABLE', blocked_by: ['a'] }],
+    missing: [],
+  });
+  const ordinary = await collectBatch({ config: f.config, batchId });
+  assert.deepEqual(ordinary.unresolved.blocked.sort(), ['c', 'e', 'f']);
+  assert.deepEqual(ordinary.unresolved.waiting, []);
+  assert.deepEqual(ordinary.unresolved.missing, []);
+  assert.equal(ordinary.unresolved.blocked_details.find(x => x.id === 'c').code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+  assert.equal(ordinary.unresolved.blocked_details.find(x => x.id === 'e').code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+  assert.equal(ordinary.unresolved.blocked_details.find(x => x.id === 'f').code, 'PREDECESSOR_ARTIFACT_UNAVAILABLE');
+  const compact = await collectBatchCompact({ config: f.config, batchId });
+  assert.deepEqual(compact.unresolved.blocked.sort(), ['c', 'e', 'f']);
+  assert.deepEqual(compact.unresolved.waiting, []);
+  assert.deepEqual(compact.unresolved.missing, []);
+});
+
+test('collect removes recovered blocks from historical missing lists without hiding unrelated missing work', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const batchId = randomUUID();
+  const indexPath = path.join(f.config.stateDir, 'batches', batchId, 'index.json');
+  await atomicJSON(indexPath, {
+    schema: 'cwr.acp.batch-index/1', batch_id: batchId, status: 'partial', revision: 1,
+    total: 5, planned: ['a', 'c', 'e', 'f', 'independent'],
+    dependencies: {
+      a: { depends_on: [] }, c: { depends_on: ['a'] },
+      e: { depends_on: ['c'] }, f: { depends_on: ['e'] },
+      independent: { depends_on: [] },
+    },
+    jobs: [], results: [{ id: 'a', rev: 1, output_received: true }],
+    blocked: [{ id: 'c', state: 'blocked', code: 'PREDECESSOR_ARTIFACT_UNAVAILABLE', blocked_by: ['a'] }],
+    // Earlier writers persisted every unstarted job here, including blocks.
+    missing: ['c', 'e', 'f', 'independent'],
+  });
+  const original = await fs.readFile(indexPath, 'utf8');
+  for (const collect of [collectBatch, collectBatchCompact]) {
+    const view = await collect({ config: f.config, batchId });
+    assert.deepEqual(view.unresolved.blocked.sort(), ['c', 'e', 'f']);
+    assert.deepEqual(view.unresolved.waiting, []);
+    assert.deepEqual(view.unresolved.missing, ['independent']);
+    assert.equal(await fs.readFile(indexPath, 'utf8'), original);
+  }
 });
 
 test('a required delivery that is missing/wrong-identity yields partial with a reason', async t => {
@@ -1666,7 +1874,7 @@ test('collect publishes transitive blocked states while an unrelated child remai
         handle = JSON.parse(await fs.readFile(handleFile, 'utf8'));
         const collected = await collectBatch({ config: f.config, batchId: handle.batch_id });
         if (collected.handles === 2) break;
-      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      } catch (error) { if (!['ENOENT', 'FILE_CHANGED', 'UNSAFE_FILE'].includes(error.code)) throw error; }
       await sleep(10);
     }
     assert.equal((await collectBatch({ config: f.config, batchId: handle.batch_id })).handles, 2);
@@ -1677,7 +1885,7 @@ test('collect publishes transitive blocked states while an unrelated child remai
       try {
         const collected = await collectBatch({ config: f.config, batchId: handle.batch_id });
         if (collected.blocked.some(j => j.id === 'e')) { mid = collected; break; }
-      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      } catch (error) { if (!['ENOENT', 'FILE_CHANGED', 'UNSAFE_FILE'].includes(error.code)) throw error; }
       await sleep(10);
     }
     assert.ok(mid, 'blocked states must be durable before D is released');

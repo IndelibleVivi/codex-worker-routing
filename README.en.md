@@ -93,8 +93,8 @@ decision impacts. A worker declaration is
 `ready`, `partial` or `needs_input`: a candidate, never acceptance, and runtime completion is
 not acceptance either. See [worker delivery and finite batches](docs/worker-delivery.en.md).
 
-An explicit input binding sends the selected report text, artifact references and their
-observations to the successor job's chosen route. Check that destination is authorized for
+An explicit input binding sends the selected report text, artifact references, source locations
+and observations to the successor job's chosen route. Check that destination is authorized for
 the material when authoring the batch; access to original artifacts needs its own scope.
 
 Recovery keeps the exact session and receipt. Every ACP `run` / `continue`, including an

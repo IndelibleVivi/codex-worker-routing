@@ -78,7 +78,7 @@ flowchart TD
 不是验收；runtime 完成同样不是验收。完整接口见
 [Worker 交付与有限批次](docs/worker-delivery.md)。
 
-显式输入绑定会把所选报告正文、artifact 引用及其观察信息送入后继 job 的工单，并发送到
+显式输入绑定会把所选报告正文、artifact 引用、来源定位及其观察信息送入后继 job 的工单，并发送到
 该 job 选择的 route。编写批次时需要核对这些材料允许的接收方；访问原件的授权另行声明。
 
 恢复绑定确切的 session 与回执。每次 ACP `run` / `continue`（包括普通续做）都必须显式带

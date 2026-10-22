@@ -131,10 +131,14 @@ Prepare and manifest admission reject unknown, self, duplicate and cyclic edges,
 `depends_on` without a binding, and a predecessor that opted out of delivery. A selected report
 is the complete validated `cwr-delivery` block, never the compact excerpt. Selected artifact
 references must already be observed as present inside the predecessor workspace. The bound
-input records the exact job, session and request; it is labelled `worker_reported` and
+input records the exact job, session and request and preserves the worker's original `ref`.
+Its `source_locator` is the location the runner actually observed, resolved from the
+predecessor cwd; a successor in a different cwd must use that locator to distinguish
+same-named files. This locator proves a candidate path was observed inside the allowed root,
+not content identity or freshness. The bound input is labelled `worker_reported` and
 untrusted, so it is neither executable instructions nor owner acceptance. Dependencies never
-merge locks, relax route authorization or permit concurrency that existing cwd, HOME, operation
-or resource rules reject.
+merge locks, relax route authorization or permit concurrency that existing cwd, HOME,
+operation or resource rules reject.
 
 Bound content enters the successor order and is sent to that job's selected route. The
 coordinator must check the material and destination against existing authority when declaring
@@ -149,9 +153,15 @@ over-large combined input is rejected rather than clipped.
 
 `collect --compact` separates `waiting` (an unfinished predecessor), `blocked` (a rejected
 input or failed/blocked predecessor, including transitive blockage), recorded-handle jobs,
-`awaiting_handle`, and terminal `missing`. Blocked and waiting jobs have no fabricated result.
-When nothing running can unblock the finite graph, the batch settles partial. Cancellation or
-an index failure closes admission for every new launch, including a just-ready successor.
+`awaiting_handle`, and terminal `missing`. A binding-time input failure publishes its entire
+dependent chain as blocked before the runner waits for unrelated work. The exact blocking
+ancestor's reason is recovered from a sparse persisted index without inventing receipts.
+Blocked and waiting jobs have no fabricated result, and terminal `missing` excludes jobs
+already classified as blocked. Read-only projections remove that overlap in historical
+indexes while retaining other missing work, without rewriting the index. When nothing
+running can unblock the finite graph, the batch
+settles partial. Cancellation or an index failure closes admission for every new launch,
+including a just-ready successor.
 
 Two `continue` jobs may use an explicit edge to continue the same existing session in
 order. Each turn keeps its own request and report, with the existing cwd/operation locks.

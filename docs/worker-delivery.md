@@ -112,9 +112,11 @@ run 项显式 route；continue 项使用原 session 和相同 cwd，不另选 ro
 `prepare` 与 manifest admission 会在启动前拒绝未知、自引用、重复和循环引用，拒绝只有
 `depends_on` 而没有输入绑定的项，以及 `deliver:false` 的前项。选中报告指完整、已校验的
 `cwr-delivery` block，绝不是 compact 摘录；选中 artifact 必须已观察到存在于前项 workspace。
-绑定内容携带前项确切 job/session/request；它仍标为 `worker_reported` 与不可信输入，不是
-可执行指令或 owner 验收。依赖不合并锁、不放松 route 授权，也不绕过 exact cwd、HOME、操作
-或资源并发规则。
+绑定内容携带前项确切 job/session/request，并保留 worker 原本的 `ref`。其中的
+`source_locator` 是运行器实际观察的位置，由前项 cwd 解析得出；后继位于不同 cwd 时必须
+使用该位置区分同名文件。它只表示候选路径曾在允许根内被观察到，不证明内容身份或新鲜度。
+绑定仍标为 `worker_reported` 与不可信输入，不是可执行指令或 owner 验收。依赖不合并锁、
+不放松 route 授权，也不绕过 exact cwd、HOME、操作或资源并发规则。
 
 绑定内容会进入后继工单并发送到该 job 所选 route；协调者声明输入时需核对材料与接收方的
 现有授权。artifact 绑定保留引用与已观察信息，原件读取仍服从该任务的范围。
@@ -128,9 +130,12 @@ runtime failed/cancelled、身份不符或 cleanup 未确认都阻断 C。组合
 明确阻断，绝不裁剪。
 
 `collect --compact` 把 `waiting`（前项未结束）、`blocked`（输入被拒或前项失败/阻断，包括
-传递阻断）、已记录 handle 的未结算项、`awaiting_handle` 与终态 `missing` 分开；waiting/blocked
-不会伪造结果。当前没有 child 能解开有限图时批次结算为 partial。取消或索引失败会终止所有
-新 launch，包括刚变成就绪的后续项。
+传递阻断）、已记录 handle 的未结算项、`awaiting_handle` 与终态 `missing` 分开。绑定阶段
+的输入失败会在运行器等待无关任务之前，将整条依赖链发布为 blocked；稀疏持久索引也能
+恢复实际造成阻断的祖先原因，且不伪造 receipt。waiting/blocked 不会伪造结果，终态
+`missing` 也不包含已归为 blocked 的项；只读投影会消除旧索引中这两类的重叠，保留其他
+真正缺失的工作，不改写历史索引。当前没有 child 能解开有限图时批次结算为
+partial。取消或索引失败会终止所有新 launch，包括刚变成就绪的后续项。
 
 start handle 记录 `locks_held`；adapter 初始化与 prompt acknowledgement 可能尚未完成。
 运行器将子进程的实际选择与资源计划核对，配置变化时在 launch 前拒绝；父进程取消复用
