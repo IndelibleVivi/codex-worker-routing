@@ -9,6 +9,7 @@ import { assertBindingIdentity } from './config.mjs';
 import { classifyTurn, planSessionMetadata, planContinuation } from './dispatch.mjs';
 import { createObservationCollector } from './observations.mjs';
 import { writeDeliverySidecar, MAX_MESSAGE_BYTES, utf8Prefix, DELIVERY_BLOCK_INSTRUCTIONS } from './delivery.mjs';
+import { createLifecycleHooks } from './lock-recovery.mjs';
 
 const now = () => new Date().toISOString();
 const EVENT_TYPES = new Set(['text_delta', 'status', 'tool_call', 'done', 'error']);
@@ -132,7 +133,8 @@ export function runtimeOptions(selection, store, processLifecycle) {
  * locks, environment isolation, and AbortController. Closing the CLI connection
  * keeps the provider conversation state; continue uses the saved handle directly.
  */
-export async function executeTurn({ config, selection, binding, text, isNew, acpx, signal, requestId = randomUUID(), cleanupMs = 8000, observer, deliver = false }) {
+export async function executeTurn({ config, selection, binding, text, isNew, acpx, signal, requestId = randomUUID(), cleanupMs = 8000, observer, deliver = false,
+  lifecycleJournal, processEvidence }) {
   const p = paths(config.stateDir, binding.id);
   // Dispatch collaboration metadata is captured for every ACP turn so a
   // responsibility stays classifiable even if later event recording fails. This
@@ -161,16 +163,13 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   await privateDir(recordDir);
   await privateDir(p.receipts);
   const store = acpx.createRuntimeStore({ stateDir: recordDir });
-  const live = new Set(), admitted = new Set();
-  let acceptingLaunches = true, initSettled = true, turnSettled = true;
+  let initSettled = true, turnSettled = true;
+  const hooks = createLifecycleHooks(lifecycleJournal, processEvidence);
   const lifecycle = {
-    onBeforeSpawn: async event => {
-      if (!acceptingLaunches) throw new Fault('LAUNCH_AFTER_STOP', 'Launch admission is closed.');
-      admitted.add(event.launchId);
-    },
-    onSpawned: async event => { admitted.delete(event.launchId); live.add(event.launchId); },
-    onSpawnFailed: event => { admitted.delete(event.launchId); },
-    onExit: event => { admitted.delete(event.launchId); live.delete(event.launchId); },
+    onBeforeSpawn: hooks.onBeforeSpawn,
+    onSpawned: hooks.onSpawned,
+    onSpawnFailed: hooks.onSpawnFailed,
+    onExit: hooks.onExit,
   };
   const runtime = acpx.createAcpRuntime(runtimeOptions(selection, store, lifecycle));
   let handle = binding.handle, turn, terminal, status, caught;
@@ -297,7 +296,6 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     await atomicJSON(p.binding, binding);
   } catch (e) {
     caught = e;
-    acceptingLaunches = false;
     // Decide BEFORE asynchronous cancellation/cleanup. A later abort or late
     // runtime success must never rewrite a deadline/error that already won.
     terminal = { status: ['CANCEL_REQUESTED', 'CANCELLED_BEFORE_START'].includes(e.code) ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
@@ -310,15 +308,16 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     }
   } finally {
     snapshotActivity();
-    acceptingLaunches = false;
     acceptingEvents = false;
     // The turn has settled (any terminal outcome). Clear the active-turn marker so
     // the projection never reads a stale "started" as an unfinished turn.
     if (binding.active_turn?.request_id === requestId) delete binding.active_turn;
     // These promises concern the ACP-owned connection/process, not escaped daemons.
     try {
+      await hooks.observe();
       if (handle && touchedRuntime) await deadline(runtime.close({ handle, reason: 'release CLI connection; retain conversation', discardPersistentState: false }), cleanupMs, 'CLEANUP_TIMEOUT');
-      cleanup = live.size === 0 && admitted.size === 0 && initSettled && turnSettled ? 'confirmed' : 'unconfirmed';
+      await deadline(hooks.closeAdmission(), cleanupMs, 'CLEANUP_TIMEOUT');
+      cleanup = hooks.liveSize() === 0 && hooks.admittedSize() === 0 && initSettled && turnSettled ? 'confirmed' : 'unconfirmed';
     } catch (e) { caught ??= e; cleanup = 'unconfirmed'; }
   }
   // A completion signal is runtime evidence, not engineering acceptance.

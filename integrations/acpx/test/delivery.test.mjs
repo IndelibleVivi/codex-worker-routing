@@ -10,10 +10,14 @@ import { executeTurn, loadWorkerContract, workOrder } from '../src/engine.mjs';
 import { extractDelivery, normalizeDelivery, readDelivery, writeDeliverySidecar, deliveryFile, deliveryDir, validateSidecar, collectArtifactReference, MAX_MESSAGE_BYTES, MAX_SERIALIZED_BYTES } from '../src/delivery.mjs';
 import { readJSON, Fault } from '../src/state.mjs';
 import { fixture, fakeAcpx } from './helpers.mjs';
+import { createAdmissionOwner, initializeLifecycleJournal, createLifecycleJournal } from '../src/lock-recovery.mjs';
+import { digest } from '../src/state.mjs';
 
 async function setup(t, behavior = {}) {
   const f = await fixture(); t.after(f.cleanup);
-  return { ...f, api: fakeAcpx(behavior) };
+  const pid = f.syntheticPid;
+  f.processEvidence = (await import('./helpers.mjs')).lifecycleEvidence(pid);
+  return { ...f, api: fakeAcpx({ ...behavior, pid }) };
 }
 const UUID_A = '11111111-1111-4111-8111-111111111111';
 const UUID_B = '22222222-2222-4222-8222-222222222222';
@@ -24,7 +28,17 @@ const READY_A = { ...READY, request_id: UUID_A, session_id: UUID_A };
 const readyFor = (sid, over = {}) => block({ ...READY, request_id: UUID_A, session_id: sid, ...over });
 // The runtime double echoes a well-formed block carrying the ACTUAL per-turn ids.
 const echoBlock = f => input => [{ type: 'text_delta', stream: 'output', text: '```cwr-delivery\n' + JSON.stringify({ ...READY, request_id: input.requestId, session_id: f.binding.id }) + '\n```' }];
-const run = (f, extra = {}) => executeTurn({ config: f.config, selection: f.selection, binding: f.binding, text: 'Report.', isNew: true, acpx: f.api, deliver: true, ...extra });
+let deliveryRequestSerial = 0;
+async function turn(f, extra = {}) {
+  const requestId = `30000000-0000-0000-0000-${String(++deliveryRequestSerial).padStart(12, '0')}`;
+  const owner = await createAdmissionOwner({ session: f.binding.id, requestId, cwd: f.cwd,
+    route: 'worker', permissions: 'read', workspaceKey: digest(f.cwd), processEvidence: f.processEvidence });
+  await initializeLifecycleJournal({ config: f.config, owner });
+  return executeTurn({ config: f.config, selection: f.selection, binding: f.binding, text: 'Report.',
+    isNew: true, acpx: f.api, deliver: true, requestId,
+    lifecycleJournal: createLifecycleJournal({ config: f.config, owner }), processEvidence: f.processEvidence, ...extra });
+}
+const run = (f, extra = {}) => turn(f, extra);
 
 // --- Contract delivery -----------------------------------------------------
 
@@ -161,7 +175,7 @@ test('a --deliver turn writes a sidecar collected independently of the excerpt',
 
 test('an ordinary (non --deliver) turn writes no sidecar', async t => {
   const f = await setup(t, { events: input => [{ type: 'text_delta', stream: 'output', text: '```cwr-delivery\n' + JSON.stringify({ ...READY, request_id: input.requestId, session_id: f.binding.id }) + '\n```' }] });
-  const r = await executeTurn({ config: f.config, selection: f.selection, binding: f.binding, text: 'x', isNew: true, acpx: f.api });
+  const r = await turn(f, { deliver: false, text: 'x' });
   await assert.rejects(fs.stat(deliveryFile(f.config.stateDir, f.binding.id, r.request_id)), { code: 'ENOENT' });
 });
 

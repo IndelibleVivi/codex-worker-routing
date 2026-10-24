@@ -18,7 +18,7 @@ is enough to start; tiny, nearly finished or solo work stays direct.
 
 ## 0.4 series: what changed
 
-Current source version: 0.4.2. Routing is provided by an instruction-only plugin; the
+Current source version: 0.4.3. Routing is provided by an instruction-only plugin; the
 optional ACP integration connects a registered external coding agent through `acpx/runtime`;
 and the optional main-session integration uses a native `SessionStart` hook to load local
 private instructions automatically. There is no additional MCP server, job database,
@@ -109,6 +109,13 @@ and [installation and recovery](docs/installation.en.md).
 The task budget is a hard deadline that activity events cannot reset; receipts retain
 minimal activity/timing evidence. Status can read a matching receipt persisted before an
 interrupted binding update; display recovery never confirms cleanup or releases locks.
+Recovery binds the exact cwd/session. The CLI mechanically recovers only with sufficient
+proof such as a prior boot on the same verified host or a verified failed launch. For
+same-boot postlaunch and legacy state, the agent inspects and formally reconciles within
+existing authority, then resumes the intended order without handing routine cleanup back
+to the human. `recover` inspection is read-only; recovery quarantines the exact pair and
+preserves history/artifacts, leaves the old outcome unknown and never replays its order.
+Live or currently unreadable evidence stays blocked; see [ACP recovery boundaries](docs/acp-integration.en.md#crashes-and-failures).
 
 After two explicit reworks leave the same acceptance gap with no material progress, make a
 recovery decision before a third equivalent order: repair a concrete environment problem,

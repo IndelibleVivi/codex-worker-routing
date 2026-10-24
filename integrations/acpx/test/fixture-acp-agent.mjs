@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 const home=process.env.HOME;
 const store=path.join(home,'fixture-sessions.json'),audit=path.join(home,'fixture-audit.ndjson');
 const lockDir=`${store}.lock`;
@@ -46,6 +47,25 @@ async function complete(id,params,text,stopReason='end_turn'){
 }
 const input=readline.createInterface({input:process.stdin});
 let inputClosed=false;
+// Simulate an ordinary Codex PTY tool: it deliberately starts its own session
+// and process group, leaves an identity marker, and stays parked until the
+// harness explicitly stops it. Recovery must never infer its stop from ACP's
+// owner/adapter/process group.
+const escapedPidFile=path.join(home,'fixture-escaped-tool.json');
+let escapedTool=null;
+function startEscapedTool(){
+ if(escapedTool)return;
+ const inspector=new URL('../src/process-evidence.mjs',import.meta.url).href;
+ const code=`(async()=>{
+  const fs=require('node:fs');
+  const {defaultProcessEvidence}=await import(${JSON.stringify(inspector)});
+  const identity=await defaultProcessEvidence.identity(process.pid);
+  fs.writeFileSync(${JSON.stringify(escapedPidFile)},JSON.stringify(identity),{mode:0o600});
+  setInterval(()=>{},1000);
+ })().catch(()=>process.exit(1));`;
+ escapedTool=spawn(process.execPath,['-e',code],{detached:true,stdio:'ignore'});
+ escapedTool.unref();
+}
 input.on('close',()=>{
  // A failed integration test can terminate its CLI before cancellation arrives.
  // EOF must end this synthetic adapter, including FIXTURE_WAIT's parked timer.
@@ -70,6 +90,7 @@ input.on('line',line=>{
   if(method==='session/new'){await reload();const sessionId=randomUUID();sessions[sessionId]={turn:0,cwd:params.cwd};dirty.add(sessionId);await save();return reply(id,{sessionId})}
   if(method==='session/load'){await reload();if(!sessions[params.sessionId])return fail(id,'Synthetic session no longer exists');return reply(id,{})}
   if(method==='session/prompt'){
+   if(preparingText.includes('FIXTURE_ESCAPED_TOOL'))startEscapedTool();
    await reload();
    if(inputClosed||(preparing&&pending.get(params.sessionId)!==preparing))return;
    const s=sessions[params.sessionId];

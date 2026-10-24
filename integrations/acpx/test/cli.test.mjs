@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs,main,localStatus,requestCancel,renderDeliveryText } from '../src/cli.mjs';
 import { loadBinding,paths,privateDir,lock,atomicJSON } from '../src/state.mjs';
-import { fixture,fakeAcpx,sleep,deferred } from './helpers.mjs';
-async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);const api=fakeAcpx(behavior),results=[];return {...f,api,results,deps:{loadAcpx:async()=>api,replaceEnvironment:()=>{},output:r=>results.push(r),progress:()=>{}}}}
+import { fixture,fakeAcpx,sleep,deferred,lifecycleEvidence } from './helpers.mjs';
+async function setup(t,behavior={}){const f=await fixture();f.processEvidence=lifecycleEvidence(f.syntheticPid);t.after(f.cleanup);const api=fakeAcpx(behavior),results=[];return {...f,api,results,deps:{loadAcpx:async()=>api,replaceEnvironment:()=>{},output:r=>results.push(r),progress:()=>{},processEvidence:f.processEvidence}}}
 const args=f=>['run','--permissions', 'read', '--config',f.configFile,'--route','worker','--cwd',f.cwd,'--file',f.orderFile];
 
 test('CLI parser refuses unknown/duplicate flags and unknown verbs',()=>{for(const a of [['forget'],['run','--route','x'],['status','--config','a','--session','b','--oops','x'],['status','--config','a','--config','b']])assert.throws(()=>parseArgs(a),{code:'USAGE'})});
@@ -57,7 +57,15 @@ test('two commands cannot write the same workspace concurrently',async t=>{
  const gate=deferred();const f=await setup(t,{firstTurnGate:gate.promise});const p=main(args(f),f.deps);
  while(!f.api.calls.some(c=>c[0]==='start'))await sleep(5);
  // The first worker is provably holding both locks until the gate opens.
- try { await assert.rejects(main(args(f),f.deps),{code:'BUSY_OR_UNRECONCILED'}); }
+ try {
+  await assert.rejects(main(args(f),f.deps),error=>{
+   assert.equal(error.code,'RECOVERY_REQUIRED');
+   assert.ok(error.message.includes(f.cwd));
+   assert.match(error.message,/live or unresolved owned process/);
+   assert.match(error.message,/recover --session [a-f0-9-]{36}/);
+   return true;
+  });
+ }
  finally { gate.resolve(); }
  assert.equal(await p,0);
 });
@@ -184,10 +192,15 @@ test('a prior completed receipt never becomes the outcome of a newer active requ
  assert.equal(view.cleanup,'unconfirmed');assert.equal(view.active,'owner_process_present');
  await assert.rejects(fs.stat(path.join(f.p.receipts,`${marker.request_id}.json`)),{code:'ENOENT'});
 });
-test('unconfirmed adapter cleanup preserves locks and returns failure',async t=>{
+test('unconfirmed adapter cleanup preserves locks and returns a precise recovery-required failure',async t=>{
  const f=await setup(t,{cleanupError:true});assert.equal(await main(args(f),f.deps),1);const r=f.results.at(-1);
  await fs.stat(paths(f.config.stateDir,r.session_id).lock);
- await assert.rejects(main(args(f),f.deps),{code:'BUSY_OR_UNRECONCILED'});
+ await assert.rejects(main(args(f),f.deps),error=>{
+  assert.equal(error.code,'RECOVERY_REQUIRED');
+  assert.ok(error.message.includes(f.cwd));
+  assert.match(error.message,/live or unresolved owned process/);
+  return true;
+ });
 });
 test('nonce-bound cancel control requests cancellation without claiming stopped',async t=>{
  const gate=deferred();const f=await setup(t,{firstTurnGate:gate.promise});let id;

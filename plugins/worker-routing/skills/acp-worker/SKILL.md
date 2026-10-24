@@ -77,6 +77,12 @@ stopped writer: await terminal cleanup before overlapping work. Preserve unknown
 Read the real receipt, actual artifacts and applicable check evidence. Runtime completed
 is not acceptance. The output excerpt is bounded; missing/truncated prose calls for
 existing evidence or same-session report consolidation before another investigation.
+On `RECOVERY_REQUIRED` / `BUSY_OR_UNRECONCILED`, read [ACP recovery](references/recovery.md)
+and carry the exact-session inspection, justified reconciliation and intended single
+submission within existing authority. Routine recoverable locks belong to the agent;
+do not stop at saying an old session will be preserved or send cleanup back to the human.
+Known-live or genuinely unresolved writers still block that overlapping branch.
+
 After acceptance, close normally; history remains. Ordinary run/continue/close needs
 no submitted/accepted/record/pending ceremony.
 
@@ -84,7 +90,7 @@ no submitted/accepted/record/pending ceremony.
 
 - Finite approved responsibilities, whether dependent or independent: use the companion
   swarm skill.
-- Timeout, cancellation, uncertain submission, ROUTE_CHANGED or revoked authorization:
+- Lock conflict, timeout, cancellation, uncertain submission, ROUTE_CHANGED or revoked authorization:
   read [ACP recovery](references/recovery.md) before a recovery action.
 - Explicit statistics, review annotation, pending view or aggregate export:
   read [Dispatch](references/dispatch.md). Ordinary delegation does not load its schema.

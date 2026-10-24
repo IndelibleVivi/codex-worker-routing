@@ -56,6 +56,8 @@ cwr-acp 使用阻塞 CLI。它没有独立后台服务；没有完成后自动�
 - `src/config.mjs`：显式命名路线、参数与授权校验、独立 worker home。
 - `src/engine.mjs`：公开 runtime 接入、同会话校验、结果与清理。
 - `src/state.mjs`：少量私有 binding/receipt、原子写、路径与文件类型检查。
+- `src/lock-recovery.mjs`：exact 锁对、lifecycle、只读检查、受确认约束的隔离和 partial 恢复。
+- `src/process-evidence.mjs`：host digest、boot 和 process metadata；不读取其他进程命令正文。
 - `src/delivery.mjs`：有界交付收集和身份校验；报告声明与 runtime 事实分开。
 - `src/batch.mjs`：有限依赖图 CLI 子进程、批次本地资源准入、确切前项报告/artifact 绑定、
   waiting/blocked 状态、启动前 batch handle 与受预算约束的 compact 读取；完整旧终态默认保留。
@@ -225,6 +227,9 @@ node "$ENTRY" continue --config "$CONFIG" --session UUID \
 node "$ENTRY" status --config "$CONFIG" --session UUID
 node "$ENTRY" cancel --config "$CONFIG" --session UUID
 
+# 对 exact session/workspace 锁对做只读检查
+node "$ENTRY" recover --config "$CONFIG" --session UUID
+
 # 按需查看仍可行动的复查记录（只读；不含 legacy 历史，也不加载 adapter）
 node "$ENTRY" pending --config "$CONFIG"
 
@@ -244,9 +249,12 @@ node "$ENTRY" record --config "$CONFIG" --session UUID --file /absolute/event.js
 additive `dispatch_warning` 暴露，不会重复调用模型。日常只需 run/continue/close，
 无需在每次派工后补记任何东西。
 
-退出码：0 为 runtime 本轮完成且清理已确认；1 为执行失败或清理未确认；130 为取消；
-2 为本地配置/前置条件/控制错误。即使退出 0，`task_acceptance` 也始终是 `unverified`，
-须主 Codex 检查 diff、关键不变量与测试证据。
+`run` / `continue` 退出码：0 表示 runtime turn 完成且 cleanup confirmed；1 表示执行失败或
+清理未确认；130 表示取消；2 表示本地 config/precondition/control 错误。退出码 0 仍然只返回
+`task_acceptance: unverified`，主 Codex 必须核对 diff、关键不变量和检查证据。`recover` 检查
+返回 0 表示 idle 或可机械恢复，3 表示 uncertain；检查本身不移锁。恢复 mutation 成功返回 0，
+不满足身份或证据前提返回 2。
+
 
 ## 状态、上下文与安全边界
 
@@ -365,14 +373,43 @@ error code、receipt；没有本轮回执时后三项为 null。较早的 comple
 binding；`active_turn` 仍存在时保持 `unconfirmed`，即使回执曾报告 confirmed。
 `receipt_evidence.reported_cleanup` 只是该回执当时记录的清理结果，不授予控制操作权限。
 `owner_process_present` 仅表示 PID 探针命中，不是该 PID 身份或模型健康证明。
-过期锁不自动回收，避免 PID 重用/遗留 writer 导致双写。
+status 从不修复或释放任何锁。
 
-异常恢复由本机操作者核对 owner.json、session receipt、当前 adapter 进程和实际 diff。
-确认旧 writer 已终止后，才移除对应 operation 锁和 workspace 锁；保留 binding 和 acpx store。
-cwr-acp 未实现自动恢复器，尤其不能将一个 dead PID 视为所有后代已退出的证明。
-清理只确认 acpx-owned 进程/连接；不保证恶意 daemon 化或脱离宿主的任意后代已被终止。
-完成停止对账并检查已有成果后，由协调者对剩余责任显式授权 `continue --permissions read|full`；
-hard deadline 不会自动续期、重放原工单或触发启动后的备用路线。
+每次准入记录 exact cwd/session/request、host/boot-scoped owner identity 和公开 ACP lifecycle
+证据。普通 `run` / `continue` 只在两类充分证明下机械恢复：同一已核验 host 的旧 boot；
+或所有 admission 均有明确的 spawn failure、没有 spawned root，且已核验的 owner 停止。
+单独 dead PID、空进程组、未命中的进程快照或经过的时间都不够。普通 Codex tool 可以另起
+session/process group，因此同 boot 的 postlaunch 任务仍需协调者核查。Windows 没有受支持的
+host process inspector，正常执行照常可用，当前版本的锁恢复保守阻断。
+
+遇到 `RECOVERY_REQUIRED` 或 `BUSY_OR_UNRECONCILED` 时，agent 在当前授权内负责接住恢复：
+用报错中的 exact session/cwd 只读检查，核对原 owner、adapter、实际 tool 生命周期和已有成果，
+独立确认原 writer 已停止后使用正式入口，再提交本次预定的新工单一次。可解决的旧锁无需把
+清理责任或重复批准交回用户；真正 live、当前取证不可用或所有权变化的分支继续阻断并报告具体缺口。
+锁只保护同一 stateDir 下的 exact cwd，不是整个默认 route 的全局锁。
+
+`recover --config FILE --session UUID` 只读，不写 challenge、claim 或恢复记录。返回的
+`confirmation` 绑定完整当前 binding、配对 owner nonce 与 lifecycle；它是状态确认值，不是
+权限或一次性凭据。独立核查后，协调者可调用：
+
+```sh
+node "$ENTRY" recover --config "$CONFIG" --session UUID --attest-stopped --confirm TOKEN
+```
+
+恢复在独占 claim 内重新读取身份；当前进程取证失败、known-live 进程、变化的 binding、
+owner、journal 或不匹配锁对都会拒绝。legacy 允许缺少旧版未记录的字段，但仍须取得当前
+owner/adapter PID 观察；存在的旧 PID 因缺 start identity 仍视为未解。attested 记录明确标为
+`execution_stop: operator_reconciled`，不冒充机械停止证明。旧任务结果保留 `unknown`，
+`order_replayed: false`；binding、acpx store、receipt、工单、artifact 和 worktree 均保留。
+
+两把锁移入私有 quarantine，session 先、workspace 后。第二步中断会保存 exact partial
+记录，后续 `recover` 可检查并用新 confirmation 完成剩余移动；新 owner 或变化证据不能
+被旧记录覆盖。正常 `cleanup: confirmed` 只确认本次 ACP 连接收拢，不保证任意独立 tool/daemon
+停止，也不代表工程验收。恢复不 kill 进程、不切换 route，不重放旧写工单。
+
+安全恢复只使后续准入成为可能，不等于旧任务已验收。`continue` 仍核对原对话与当前可变授权；
+新 `run` 仍是新责任。取消和 hard timeout 结果保持终态，原工单绝不静默重放。这不是存储 GC、
+scheduler 或启动后的备用路线。
 
 ## 验收门
 

@@ -80,6 +80,10 @@ Historical acceptance sections retain their respective dates and versions.
 - `src/engine.mjs`: public runtime integration, same-session checks, results and cleanup.
 - `src/state.mjs`: a small amount of private binding/receipt, atomic writes, path and
   file-type checks.
+- `src/lock-recovery.mjs`: exact pairs, lifecycle, read-only inspection, confirmed
+  quarantine and partial resume.
+- `src/process-evidence.mjs`: host digest, boot and process metadata, without reading
+  other processes' command bodies.
 - `src/delivery.mjs`: bounded delivery collection and identity validation; reports
   remain separate from runtime facts.
 - `src/batch.mjs`: finite dependency-aware CLI subprocesses, batch-local admission, exact
@@ -307,6 +311,9 @@ node "$ENTRY" continue --config "$CONFIG" --session UUID \
 node "$ENTRY" status --config "$CONFIG" --session UUID
 node "$ENTRY" cancel --config "$CONFIG" --session UUID
 
+# Read-only exact session/workspace lock inspection
+node "$ENTRY" recover --config "$CONFIG" --session UUID
+
 # View still-actionable review records on demand (read-only; excludes legacy history and loads no adapter)
 node "$ENTRY" pending --config "$CONFIG"
 
@@ -330,10 +337,13 @@ preflight, a write failure does not block an authorized task and is only surface
 the existing additive `dispatch_warning`, and no model is called again. Day to day you
 only need run/continue/close, with nothing to record after each dispatch.
 
-Exit codes: 0 means the runtime turn completed and cleanup is confirmed; 1 means execution
-failed or cleanup is unconfirmed; 130 means cancelled; 2 means a local
-config/precondition/control error. Even on exit 0, `task_acceptance` is always
-`unverified`; main Codex must check the diff, key invariants and test evidence.
+`run` / `continue` exit codes: 0 means the runtime turn completed and cleanup is confirmed;
+1 means execution failed or cleanup is unconfirmed; 130 means cancelled; 2 means a local
+config/precondition/control error. Even on exit 0, `task_acceptance` remains `unverified`;
+main Codex must check the diff, key invariants and check evidence. `recover` inspection
+returns 0 for idle or mechanically recoverable state, and 3 for uncertain state; inspection
+moves no locks. A successful recovery mutation returns 0; an identity/evidence refusal returns 2.
+
 
 ## State, context and security boundaries
 
@@ -495,19 +505,55 @@ writer stopped. Top-level `cleanup` comes independently from the binding and rem
 `unconfirmed` while `active_turn` exists, even if the receipt reported confirmed cleanup.
 `receipt_evidence.reported_cleanup` is only the cleanup outcome recorded at receipt time
 and grants no control authority. `owner_process_present` only means the PID probe hit; it
-is not proof of that PID's identity or model health. A stale lock is not automatically
-reclaimed, to avoid double-writes from PID reuse/leftover writers.
+is not proof of that PID's identity or model health. Status never repairs or releases
+anything.
 
-Exception recovery is done by the local operator checking owner.json, the session receipt,
-the current adapter process and the actual diff. Only after confirming the old writer has
-terminated remove the corresponding operation lock and workspace lock; keep the binding and
-acpx store. cwr-acp does not implement an automatic recoverer, and in particular a dead PID must
-not be treated as proof that all descendants have exited. Cleanup only confirms acpx-owned
-processes/connections; it does not guarantee that a malicious daemonized or otherwise
-host-detached descendant has been terminated.
-After reconciling stopped writers and inspecting existing work, the coordinator explicitly
-authorizes the remaining responsibility through `continue --permissions read|full`. A hard
-deadline never renews itself, replays the original order or triggers post-launch fallback.
+Each admission records its exact cwd/session/request, host/boot-scoped owner identity
+and public ACP lifecycle evidence. Ordinary `run` / `continue` mechanically recover only
+with sufficient proof: a prior recorded boot on the same verified host; or complete
+failed-spawn admissions with no spawned root and a verified stopped owner. A dead PID,
+empty process group, absent census row or elapsed time alone is insufficient. Ordinary
+Codex tools can start their own sessions/process groups, so same-boot postlaunch work
+still requires coordinator reconciliation. Windows has no supported host process
+inspector here: normal execution remains available, while lock recovery fails closed.
+
+On `RECOVERY_REQUIRED` or `BUSY_OR_UNRECONCILED`, the agent owns routine recovery within
+current authority: inspect the exact session/cwd in the error, check the original owner,
+adapter, actual tool lifecycle and existing artifacts, independently establish writer stop,
+use the formal recovery entry, then submit the intended new order once. A recoverable old
+lock does not require handing cleanup or repeat approval back to the human. A genuinely
+live, unreadable or changed-ownership branch stays blocked with its concrete missing fact.
+Locks cover the exact cwd within one stateDir, not the entire default route.
+
+`recover --config FILE --session UUID` is read-only: no challenge, claim or recovery record
+is written. Its `confirmation` binds the full current binding, pair owner nonce and lifecycle.
+It is a state confirmation, not authority or a one-use credential. After independent
+reconciliation, the coordinator can call:
+
+```sh
+node "$ENTRY" recover --config "$CONFIG" --session UUID --attest-stopped --confirm TOKEN
+```
+
+Recovery re-reads identity under an exclusive claim. Unavailable current process inspection,
+known-live processes, changed bindings/owners/journals and mismatched pairs are refused.
+Legacy evidence may omit fields never recorded by the old schema, but still requires current
+owner/adapter PID observation; a present historical PID without start identity remains
+unresolved. Attested recovery records `execution_stop: operator_reconciled`, never mechanical
+stop proof. The old outcome stays `unknown`, with `order_replayed: false`; bindings, acpx
+stores, receipts, orders, artifacts and worktrees remain intact.
+
+The pair moves into private quarantine, session first and workspace last. An interrupted
+second move leaves an exact partial record; a later `recover` can inspect it and use a fresh
+confirmation to finish the remaining move. A new owner or changed evidence cannot be
+overwritten by an old record. Normal `cleanup: confirmed` confirms this turn's ACP connection
+cleanup, not arbitrary independent tools/daemons or engineering acceptance. Recovery never
+kills a process, switches routes or replays an abandoned write order.
+
+A safe recovery makes a later admission possible, not the old task accepted. `continue`
+still checks the original conversation and current mutable authorization; a new `run` is
+a new responsibility. Cancellation and hard-timeout outcomes stay terminal, and the
+abandoned order is never silently replayed. This is not storage GC, scheduling or
+post-launch fallback.
 
 ## Acceptance gate
 

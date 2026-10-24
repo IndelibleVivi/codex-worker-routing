@@ -151,7 +151,9 @@ export async function lock(dir, owner) {
   await privateDir(path.dirname(dir));
   try { await fs.mkdir(dir, { mode: 0o700 }); }
   catch (e) {
-    if (e.code === 'EEXIST') throw new Fault('BUSY_OR_UNRECONCILED', 'Another operation owns this lock, or an earlier exit needs reconciliation. Never auto-delete it.');
+    if (e.code === 'EEXIST') {
+      throw new Fault('BUSY_OR_UNRECONCILED', 'The exact workspace/session lock belongs to a live or uncertain operation. Never auto-delete it; inspect the session and recover only the matched stopped operation.');
+    }
     throw e;
   }
   try { await atomicJSON(path.join(dir, 'owner.json'), owner); }
@@ -166,7 +168,10 @@ export async function lock(dir, owner) {
 export function paths(stateDir, id) {
   sessionId(id);
   const dir = path.join(stateDir, 'bindings', id);
-  return { dir, binding: path.join(dir, 'binding.json'), lock: path.join(dir, 'active.lock'), receipts: path.join(dir, 'receipts') };
+  return {
+    dir, binding: path.join(dir, 'binding.json'), lock: path.join(dir, 'active.lock'),
+    receipts: path.join(dir, 'receipts'), lifecycle: path.join(dir, 'lifecycle'),
+  };
 }
 export async function loadBinding(stateDir, id) {
   const p = paths(stateDir, id);

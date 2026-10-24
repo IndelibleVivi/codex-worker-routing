@@ -11,7 +11,7 @@ personal marketplace。保留一个 canonical source 和一个 discovery 入口�
 同名目录归属，不能覆盖其他插件。
 
 更新源码后，先用当前宿主的 `codex plugin marketplace list --json` 核对 marketplace
-和源目录；为插件 manifest 更新版本（本次为 `0.4.2`），再通过正式
+和源目录；为插件 manifest 更新版本（本次为 `0.4.3`），再通过正式
 `codex plugin add worker-routing@MARKETPLACE --json` 重装。宿主若提供 bundled authoring
 helpers，也可用它们验证 marketplace / 更新 cachebuster；不要假设旧 helper 路径仍存在。
 不要热改 installed cache。安装后核对版本与源文件，并用新的主 session 验收 discovery。
@@ -61,6 +61,13 @@ adapter、提交工单或写 state。已有调查转实施的续做需按当前�
 status/cancel/close 恢复能力；不要盲改 hash 或恢复已撤回的权限。确认原 writer 停止、保留
 成果后，再为剩余责任建立获准会话。历史 receipts 不重算；以前的 completed 记录不能据此
 被宣称已经重新验证。新超时/取消规则只影响升级后的执行。
+
+0.4.3 增加 exact session/workspace 锁检查与恢复，需同时更新 canonical source 和 plugin
+instructions。机械恢复只限同 host 的旧 boot 或完整失败启动且 owner 已停止；同 boot 的
+postlaunch/legacy 由 agent 在已有授权内承担独立核查和正式 reconciliation。`recover` 检查
+只读，`--attest-stopped --confirm TOKEN` 记录 operator_reconciled，历史结果仍 unknown，
+原工单不重放。已存在的锁不会因安装自动迁移或删除；半途隔离通过 exact partial 记录恢复。
+完整边界与操作见[ACP 接入](acp-integration.md#崩溃与失败)。
 
 安装后的文件一致、下一主 session 的 skill discovery、真实 route 的执行是独立验收层。
 已有聊天已加载的旧说明不会被安装动作替换；operator 应在续做前送入当前调用要求。

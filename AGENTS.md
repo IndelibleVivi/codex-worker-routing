@@ -19,6 +19,17 @@ plugin and its optional main-session context integration.
   this read never repairs bindings or confirms cleanup. Keep payload-free activity snapshots
   separate from writer liveness and freeze them before cancellation/cleanup; events never
   reset the hard task deadline.
+  `lock-recovery.mjs` owns exact admission lock recovery. Persist host/boot-scoped
+  identities and lifecycle evidence under the session/workspace pair. Mechanical
+  recovery requires sufficient prior-boot or failed-spawn/stopped-owner proof;
+  absent PIDs/groups/census alone never prove ordinary detached tools stopped.
+  Inspection stays literally read-only. The coordinator owns routine same-boot
+  or legacy reconciliation under existing authority, using evidence-bound
+  confirmation and an explicit operator_reconciled record. Unavailable current
+  observation, known-live processes or changed binding/pair/evidence blocks it.
+  Preserve unknown task outcomes and all history, never replay orders or kill
+  unrelated processes. Quarantine session first/workspace last; resume only an
+  exact recorded partial operation, never roll an old lock over a new owner.
   Keep setup, prompt-start task budget, and cleanup boundaries independently testable
   against the pinned public acpx runtime, including progress without a final response.
   Keep one selected launch and truthful selection evidence without extra dispatch tasks.

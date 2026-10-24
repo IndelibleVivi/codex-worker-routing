@@ -14,6 +14,9 @@ import { runBatch, collectBatch, collectBatchCompact, collectBatchJob, collectBa
 import { runPrepare } from './prepare.mjs';
 import { inventoryStorage, planStorage, applyStoragePlan, createScratch, loadScratch,
   newScratchLocation, scratchRenderEnvironment } from './storage.mjs';
+import { createAdmissionOwner, initializeLifecycleJournal, createLifecycleJournal,
+  acquireOperationLocks, inspectLockRecovery, recoverExactLockPair, discoverWorkspaceLockOwner } from './lock-recovery.mjs';
+import { defaultProcessEvidence } from './process-evidence.mjs';
 
 
 // Property tables for the argument parser. `flags` take no value; `values` take
@@ -23,6 +26,7 @@ const FLAG = Object.freeze({
   stats: ['json'],
   storage: ['json'],
   delivery: ['json'],
+  recover: ['attest-stopped'],
   run: ['deliver'],
   continue: ['deliver'],
   collect: ['compact'],
@@ -34,6 +38,7 @@ const VALUES = Object.freeze({
   status: ['config', 'session'],
   cancel: ['config', 'session'],
   close: ['config', 'session'],
+  recover: ['config', 'session', 'confirm'],
   stats: ['config', 'since', 'time-zone'],
   record: ['config', 'session', 'file'],
   pending: ['config'],
@@ -54,6 +59,7 @@ const REQUIRED = Object.freeze({
   status: ['config', 'session'],
   cancel: ['config', 'session'],
   close: ['config', 'session'],
+  recover: ['config', 'session'],
   stats: ['config'],
   record: ['config', 'session', 'file'],
   pending: ['config'],
@@ -89,6 +95,8 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
   status   --config FILE --session UUID
   cancel   --config FILE --session UUID
   close    --config FILE --session UUID
+  recover  --config FILE --session UUID
+           [--attest-stopped --confirm TOKEN]
   record   --config FILE --session UUID --file EVENT_JSON
   pending  --config FILE
   stats    --config FILE [--since 7d|30d|all|ISO_DATE] [--time-zone IANA_ZONE] [--json]
@@ -110,6 +118,14 @@ const HELP = `cwr-acp (optional channel; does not replace native subagents)
 run/continue block until a terminal result and connection cleanup. Ctrl+C/SIGTERM
 request cancellation. cancel writes a nonce-bound local request; it does not
 claim the worker has stopped. No background wakeup and no post-launch retry.
+
+recover inspects the exact workspace/session lock pair read-only. Ordinary admission
+recovers mechanically only with verified same-host prior-boot proof or complete
+failed-spawn evidence and a stopped owner. For same-boot/legacy state, the coordinator
+independently reconciles within existing authority, then uses --attest-stopped and
+the current --confirm token. Live processes or unavailable current inspection block it.
+Recovery quarantines locks recoverably, never deletes history/orders/artifacts,
+never kills processes, and never replays the abandoned order.
 
 run/continue accept an OPTIONAL bare --deliver flag: it collects a bounded
 cwr-delivery result block into a private per-request sidecar, separate from the
@@ -243,6 +259,10 @@ export function parseArgs(args) {
     throw new Fault('USAGE', '--job and --impacts select different expansions; choose one.');
   if ((command === 'run' || command === 'continue') && out.permissions === undefined)
     throw new Fault('PERMISSIONS_REQUIRED', 'Choose --permissions read or --permissions full explicitly for this turn; category and earlier turns do not grant permission.');
+  if (command === 'recover' && out['attest-stopped'] === true && out.confirm === undefined)
+    throw new Fault('USAGE', '--attest-stopped requires the exact --confirm TOKEN from inspection.');
+  if (command === 'recover' && out.confirm !== undefined && out['attest-stopped'] !== true)
+    throw new Fault('USAGE', '--confirm is accepted only with --attest-stopped.');
   return out;
 }
 // Restrictive batch ticket: bind actual child selection to the resource plan.
@@ -464,7 +484,7 @@ export async function main(args, deps = {}) {
     }
     return 0;
   }
-  const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close';
+  const controlOnly = opt.command === 'status' || opt.command === 'cancel' || opt.command === 'close' || opt.command === 'recover';
   const config = controlOnly ? await loadControlConfig(opt.config) : await loadConfig(opt.config);
   if (opt.command === 'run' || opt.command === 'continue') {
     if (opt.title !== undefined) {
@@ -493,15 +513,33 @@ export async function main(args, deps = {}) {
   if (opt.command !== 'run') binding = await loadBinding(config.stateDir, opt.session);
   if (opt.command === 'status') { output(await localStatus(config,binding)); return 0; }
   if (opt.command === 'cancel') { output(await requestCancel(config,binding)); return 0; }
+  if (opt.command === 'recover') {
+    const processEvidence = deps.processEvidence ?? defaultProcessEvidence;
+    if (opt['attest-stopped'] === true)
+      output(await recoverExactLockPair({ config, binding, processEvidence, attestStopped: true,
+        confirm: opt.confirm }));
+    else {
+      const inspection = await inspectLockRecovery({ config, binding, processEvidence });
+      output(inspection);
+      return inspection.state === 'recoverable' || inspection.state === 'idle' ? 0 : 3;
+    }
+    return 0;
+  }
   if (opt.command === 'close') {
     const p = paths(config.stateDir,binding.id);
-    const unlock = await lock(p.lock,{nonce:randomUUID(),pid:process.pid});
+    const owner = { nonce: randomUUID(), pid: process.pid, session: binding.id,
+      cwd: binding.cwd, startedAt: new Date().toISOString() };
+    const workspaceLock = path.join(config.stateDir, 'workspace-locks', digest(binding.cwd));
+    const unlockWorkspace = await lock(workspaceLock, owner);
+    let unlock;
+    try { unlock = await lock(p.lock, owner); }
+    catch (error) { await unlockWorkspace(); throw error; }
     try {
       // Reload under the held session lock so a concurrent change between the
       // initial read and lock acquisition cannot close stale state.
       const current = await loadBinding(config.stateDir, binding.id);
       output(await closeBinding({config,binding:current})); return 0;
-    } finally { await unlock(); }
+    } finally { try { await unlock(); } finally { await unlockWorkspace(); } }
   }
   if (binding?.closed) throw new Fault('SESSION_CLOSED','The work order is closed.');
   // Route resolution, freshly per call: explicit --route and continue stay pinned
@@ -531,6 +569,27 @@ export async function main(args, deps = {}) {
   // Scrub this standalone CLI process BEFORE importing/executing that package.
   // This never changes the shell, Codex, or the native subagent environment.
   assertAdmission(config, selection, opt);
+  // Recovery is a mutation: route, workspace, permissions, order and any batch
+  // admission ticket must authorize this call before discovering an old owner.
+  if (opt.command === 'run') {
+    const existingOwner = await discoverWorkspaceLockOwner(config, selection.cwd);
+    if (existingOwner && !existingOwner.malformed) {
+      const id = sessionId(existingOwner.session);
+      const existing = await loadBinding(config.stateDir, id);
+      if (existing.cwd !== selection.cwd)
+        throw new Fault('LOCK_PAIR_MISMATCH', 'The workspace lock and its binding identify different workspaces.');
+      const evidence = deps.processEvidence ?? defaultProcessEvidence;
+      const inspection = await inspectLockRecovery({ config, binding: existing, processEvidence: evidence });
+      if (inspection.state === 'recoverable') {
+        await recoverExactLockPair({ config, binding: existing, processEvidence: evidence });
+        (deps.progress ?? (s => process.stderr.write(s)))(
+          `[acp] recovered verified-stopped lock pair for session ${id}; prior task outcome remains unknown and the order was not replayed.\n`);
+      } else if (inspection.state !== 'idle') {
+        throw new Fault('RECOVERY_REQUIRED', `${inspection.message} Inspect with: recover --session ${id}.`);
+      }
+    }
+  }
+
   // A FUTURE binding receives a compact state-root scratch directory. Existing
   // bindings resolve from their saved descriptor/marker; legacy no-manifest
   // bindings keep the route tmp path and can never be silently migrated.
@@ -572,7 +631,6 @@ export async function main(args, deps = {}) {
   await prepareHome(selection.route);
   await privateDir(config.stateDir);
   const p = paths(config.stateDir,binding.id);
-  const owner = {nonce:randomUUID(),pid:process.pid,session:binding.id,startedAt:new Date().toISOString()};
   // One request id for this turn, and the exact submitted work-order text
   // retained in a separate private per-request file for EVERY new run/continue
   // invocation, so a continuation increment is preserved too. The receipt can
@@ -582,10 +640,18 @@ export async function main(args, deps = {}) {
   config.dispatch = { ...(config.dispatch ?? {}), requestId, orderPointer: null, orderWarning: null };
   // Conservatively serialize all ACP operations for the exact workspace.
   // This lock does not govern native Codex writers. Coordinate them/worktrees upstream.
-  const unlockWorkspace = await lock(path.join(config.stateDir,'workspace-locks',digest(selection.cwd)),owner);
-  let unlockSession;
-  try { unlockSession = await lock(p.lock,owner); }
-  catch (e) { await unlockWorkspace(); throw e; }
+  const processEvidence = deps.processEvidence ?? defaultProcessEvidence;
+  const workspaceKey = digest(selection.cwd);
+  const owner = await createAdmissionOwner({
+    session: binding.id, requestId, cwd: selection.cwd, route: selection.name,
+    permissions: selection.permissions, workspaceKey, processEvidence,
+  });
+  const locks = await acquireOperationLocks({
+    config, binding, owner, processEvidence,
+    progress: deps.progress ?? (s => process.stderr.write(s)),
+  });
+  const { unlockWorkspace, unlockSession } = locks;
+  await initializeLifecycleJournal({ config, owner });
   // Both operation locks are held before the ownership marker and new binding
   // become visible. A failed/crashed marker creation therefore stays
   // unreconciled and protected rather than becoming an orphan prune candidate.
@@ -613,6 +679,7 @@ export async function main(args, deps = {}) {
   }
   let safeRelease = false, timer, receipt;
   let runtimeStarted = false;
+  const lifecycleJournal = createLifecycleJournal({ config, owner });
   const controller = new AbortController();
   const interrupt = () => controller.abort(new Fault('CANCEL_REQUESTED','Cancellation requested.'));
   process.on('SIGINT',interrupt); process.on('SIGTERM',interrupt);
@@ -698,12 +765,14 @@ export async function main(args, deps = {}) {
     }
     runtimeStarted = true;
     (deps.progress ?? (s => process.stderr.write(s)))(`[acp] session ${binding.id}; route ${routeNote}; ${selection.permissions} permissions\n`);
-    receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId,deliver:Boolean(opt.deliver)});
+    receipt = await executeTurn({config,selection,binding,text:order,isNew:opt.command==='run',acpx,signal:controller.signal,requestId,deliver:Boolean(opt.deliver),
+      lifecycleJournal,processEvidence});
     safeRelease = receipt.cleanup === 'confirmed';
 
   } finally {
     clearInterval(timer);
     process.off('SIGINT',interrupt); process.off('SIGTERM',interrupt);
+    await lifecycleJournal.close().catch(() => { safeRelease = false; });
     // A failure before the runtime was touched (for example a stale binding)
     // leaves no adapter process behind, so the owned locks
     // are safely releasable and are not retained for reconciliation.

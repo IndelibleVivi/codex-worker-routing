@@ -14,7 +14,7 @@ do not overwrite another plugin.
 
 After updating source, inspect the marketplace and source directory through the current
 host's `codex plugin marketplace list --json`. Update the plugin manifest version
-(`0.4.2` for this update), then reinstall through
+(`0.4.3` for this update), then reinstall through
 `codex plugin add worker-routing@MARKETPLACE --json`. If the host provides bundled
 authoring helpers, they can verify the marketplace or update the cachebuster; do not
 assume an old helper path still exists. Never edit an installed cache in place. Check
@@ -73,6 +73,14 @@ authority; category is not permission. This requires no changes to providers, de
 workspace authorization or private context isolation rules.
 
 New bindings use versioned execution identity with current cwd and permission checks.
+Version 0.4.3 adds exact session/workspace lock inspection and recovery; update both
+canonical source and plugin instructions. Mechanical recovery requires a prior boot on the
+same verified host or complete failed-spawn evidence and a stopped owner. The agent owns
+independent reconciliation of same-boot postlaunch/legacy state within existing authority.
+`recover` inspection is read-only; `--attest-stopped --confirm TOKEN` records
+operator_reconciled, leaves the old outcome unknown and never replays its order.
+Installation does not migrate/delete existing locks. Exact partial records support
+interrupted quarantine; see [ACP recovery boundaries](acp-integration.en.md#crashes-and-failures).
 Legacy bindings migrate under the continuation lock only while the complete original
 `routeFingerprint` still matches. If configuration changes have already invalidated it,
 stop and retain status/cancel/close recovery; never blindly rewrite a hash or restore

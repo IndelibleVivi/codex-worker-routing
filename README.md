@@ -16,7 +16,7 @@
 
 ## 0.4 系列：这次改变什么
 
-当前源码版本为 0.4.2。调度由一个 instruction-only plugin 提供；可选 ACP integration 通过
+当前源码版本为 0.4.3。调度由一个 instruction-only plugin 提供；可选 ACP integration 通过
 `acpx/runtime` 连接已登记的外部 coding agent；可选的主会话集成使用原生 `SessionStart` hook
 自动加载本机私人说明。没有额外 MCP、job database、provider proxy 或固定 planner/tester/reviewer
 流水线。0.4 系列把重点从组件接线移到「一个能端到端背起整块责任」的 worker。
@@ -89,6 +89,11 @@ status/cancel/close；更换默认只影响新责任。配置与恢复细节见
 [ACP 默认与备用](docs/acp-integration.md#默认与备用)与[安装与恢复](docs/installation.md)。
 任务预算是不会被活动事件刷新的 hard deadline；receipt 保存最小 activity/timing 证据。
 status 可只读找回 binding 更新中断前已落盘的匹配回执，显示恢复不确认清理或解除锁。
+旧锁按 exact cwd/session 恢复。CLI 只在同 host 的旧 boot 或已核验的失败启动等充分证据下
+机械恢复；同 boot 的 postlaunch 与 legacy 状态由 agent 在已有授权内检查、正式 reconcile，
+再继续本次预定工单，无需把日常清理交回用户。`recover` 检查只读，恢复隔离 exact 锁对并保留
+历史与成果；旧结果仍为 unknown，不重放旧工单。真正 live 或当前取证不可用仍阻断，详见
+[ACP 恢复边界](docs/acp-integration.md#崩溃与失败)。
 
 同一验收缺口经过两次明确返修仍无实质进展时，第三次同样派工前必须重新决定恢复方式：修复具体
 环境问题、缩小剩余责任或部分接管。新需求、阶段推进和未送达权限不计为质量失败。

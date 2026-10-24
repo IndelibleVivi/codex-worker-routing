@@ -6,6 +6,33 @@ import { atomicJSON, paths } from '../src/state.mjs';
 import { loadConfig, selectRoute, executionIdentity } from '../src/config.mjs';
 export const sleep = ms => new Promise(r => setTimeout(r,ms));
 export function deferred() { let resolve,reject; const promise = new Promise((a,b)=>{resolve=a;reject=b;}); return {promise,resolve,reject}; }
+/**
+ * Deterministic host-process double for unit contracts. It models live,
+ * exit/reuse and explicit unavailable states; process-system integration tests
+ * use real synthetic children and the production inspector instead.
+ */
+export function syntheticEvidence({ boot='synthetic-boot/1', host='f'.repeat(64), alive=[], unavailable=false, groupOwner=process.pid }={}) {
+ const rows=new Map(), state={boot,host,rows,unavailable};
+ const groupState={live:new Set(),uncertain:false};
+ const identity=(pid,parent=null,start=`synthetic-${pid}`,group=typeof groupOwner==='function'?groupOwner(pid):groupOwner)=>({schema:'cwr.acp.process-identity/1',pid,parent_pid:parent,process_group:Number.isSafeInteger(group)?group:null,start,executable_hint:null});
+ for(const value of alive)rows.set(value.pid,identity(value.pid,value.parent_pid??null,value.start));
+ return {
+  state,
+  async boot(){if(state.unavailable)throw Object.assign(new Error('synthetic unavailable'),{code:'PROCESS_IDENTITY_UNAVAILABLE'});return state.boot},
+  async snapshot(){if(state.unavailable)throw Object.assign(new Error('synthetic unavailable'),{code:'PROCESS_IDENTITY_UNAVAILABLE'});return [...rows.values()]},
+  async host(){return state.host},
+  async identity(pid){if(state.unavailable)throw Object.assign(new Error('synthetic unavailable'),{code:'PROCESS_IDENTITY_UNAVAILABLE'});const row=rows.get(pid);return row?structuredClone(row):null},
+  groupState,
+  groupExists(group){if(groupState.uncertain)return {state:'uncertain',code:'GROUP_PROBE_DENIED'};return {state:groupState.live.has(group)?'live':'absent'}},
+  add(pid,parent=null,start=`synthetic-${pid}`,group){rows.set(pid,identity(pid,parent,start,group))},
+  remove(pid){rows.delete(pid)},
+ };
+}
+export function lifecycleEvidence(pid=12345) {
+ const evidence=syntheticEvidence({groupOwner:process.pid,alive:[{pid:process.pid},{pid,parent_pid:process.pid}]});
+ evidence.groupState.live.add(process.pid);
+ return evidence;
+}
 // A synthetic worker home under the fixture root, disjoint from every other
 // route home and from the granted workspace.
 export const homeFor = (root, name) => path.join(root, `${name}-home`);
@@ -36,12 +63,18 @@ export async function fixture(overrides={}) {
   const binding={schema:'cwr.acp.binding/1',id:randomUUID(),route:'worker',executionIdentity:executionIdentity(selection),cwd:selection.cwd,closed:false,handle:null};
   await atomicJSON(paths(config.stateDir,binding.id).binding,binding);
   const orderFile=path.join(root,'order.md');await fs.writeFile(orderFile,'Investigate the synthetic importer.');
-  return {root,cwd,raw,configFile,config,selection,binding,orderFile,cleanup:()=>fs.rm(root,{recursive:true,force:true})};
+  const syntheticPid=20000+Math.floor(Math.random()*10000);
+  return {root,cwd,raw,configFile,config,selection,binding,orderFile,
+    processEvidence:syntheticEvidence({alive:[{pid:process.pid},{pid:syntheticPid,parent_pid:process.pid}]}),
+    syntheticPid,
+    cleanup:()=>fs.rm(root,{recursive:true,force:true})};
 }
 
 /** Contract double only. Does NOT implement ACP or substitute for test:acpx. */
 export function fakeAcpx(behavior={}) {
   const records=new Map(), calls=[];
+  // The lifecycle hook must observe a real-shaped root identity even in unit
+  // doubles; these tests never use this synthetic PID as a host target.
   const api={records,calls,
     decodeAcpxRuntimeHandleState: s=>{try{return JSON.parse(s)}catch{return undefined}},
     createRuntimeStore:()=>({load:async id=>records.get(id),save:async r=>records.set(r.acpxRecordId,r)}),
@@ -50,7 +83,7 @@ export function fakeAcpx(behavior={}) {
       const ensureLaunch=async()=>{
         if(launched)return;
         await options.processLifecycle.onBeforeSpawn({launchId:launch});
-        await options.processLifecycle.onSpawned({launchId:launch,pid:12345});launched=true;
+        await options.processLifecycle.onSpawned({launchId:launch,pid:behavior.pid??12345});launched=true;
       };
       return {
         ensureSession:async input=>{
@@ -105,7 +138,7 @@ export function fakeAcpx(behavior={}) {
           calls.push(['close',input]);
           if(behavior.cleanupError)throw new Error('synthetic cleanup failure');
           if(activeResult)activeResult.resolve({status:'cancelled',stopReason:'cancelled'});
-          if(launched&&!behavior.leakedProcess)options.processLifecycle.onExit({launchId:launch,pid:12345});
+          if(launched&&!behavior.leakedProcess)await options.processLifecycle.onExit({launchId:launch,pid:behavior.pid??12345});
         },
       };
     },

@@ -2,9 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeTurn, closeBinding, validateResume, workOrder, runtimeOptions } from '../src/engine.mjs';
 import { readJSON, paths } from '../src/state.mjs';
-import { fixture, fakeAcpx } from './helpers.mjs';
-async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);return {...f,api:fakeAcpx(behavior)}}
-const run=(f,extra={})=>executeTurn({config:f.config,selection:f.selection,binding:f.binding,text:'Fix the fixture.',isNew:true,acpx:f.api,...extra});
+import { fixture, fakeAcpx, lifecycleEvidence } from './helpers.mjs';
+import { createAdmissionOwner, initializeLifecycleJournal, createLifecycleJournal } from '../src/lock-recovery.mjs';
+import { digest } from '../src/state.mjs';
+async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);f.processEvidence=lifecycleEvidence(f.syntheticPid);return {...f,api:fakeAcpx(behavior)}}
+let requestSerial=0;
+const run=async(f,extra={})=>{
+ const requestId=`00000000-0000-0000-0000-${String(++requestSerial).padStart(12,'0')}`;
+ const owner=await createAdmissionOwner({session:f.binding.id,requestId,cwd:f.cwd,route:'worker',permissions:'read',workspaceKey:digest(f.cwd),processEvidence:f.processEvidence});
+ await initializeLifecycleJournal({config:f.config,owner});
+ return executeTurn({config:f.config,selection:f.selection,binding:f.binding,text:'Fix the fixture.',isNew:true,acpx:f.api,requestId,
+  lifecycleJournal:createLifecycleJournal({config:f.config,owner}),processEvidence:f.processEvidence,...extra});
+};
 
 test('new work creates one persistent session; canonical result and cleanup are separate',async t=>{
  const f=await setup(t);const r=await run(f);

@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { defaultProcessEvidence, identityKey } from '../src/process-evidence.mjs';
 import { loadAcpx } from '../src/cli.mjs';
 import { fixture, sleep } from './helpers.mjs';
 const cli=path.resolve('src/cli.mjs'),agent=path.resolve('test/fixture-acp-agent.mjs');
@@ -20,14 +21,16 @@ async function setup(t,overrides={}){await loadAcpx();return ownFixture(t,await 
 // Containment, not a raw string prefix: "<home>-other" must not count as being
 // under "<home>".
 const contained=(root,candidate)=>{const rel=path.relative(root,candidate);return rel!==''&&rel!=='..'&&!rel.startsWith(`..${path.sep}`)&&!path.isAbsolute(rel)};
-async function command(f,verb,extra=[],entry=cli){return start(f,verb,extra,entry).done}
+async function command(f,verb,extra=[],entry=cli){return (await start(f,verb,extra,entry)).done}
 // A blocking `run` must be started without awaiting it so a second control
 // command can race it. Progress is detected by a real condition, never a fixed
 // sleep.
-function start(f,verb,extra=[],entry=cli,env={}){
+async function start(f,verb,extra=[],entry=cli,env={}){
+ const escapedToolFile=path.join(f.selection.route.workerHome,'fixture-escaped-tool.json');
  const mode=['run','continue'].includes(verb)&&!extra.includes('--permissions')?['--permissions','read']:[];
- const args=[entry,verb,'--config',f.configFile,...mode,...extra];
- const child=execFile(process.execPath,args,{timeout:25000,killSignal:'SIGKILL',maxBuffer:512*1024,env:{...process.env,...env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
+  const args=[entry,verb,'--config',f.configFile,...mode,...extra];
+  const child=execFile(process.execPath,args,{timeout:25000,killSignal:'SIGKILL',maxBuffer:512*1024,
+   env:{...process.env,...env,CWR_PRIVATE_TEST_MARKER:'MUST_NOT_ARRIVE'}});
  let closed=false;
  const done=new Promise(resolve=>{
   let stdout='',stderr='',spawnError;
@@ -39,15 +42,25 @@ function start(f,verb,extra=[],entry=cli,env={}){
    resolve({code:code??spawnError??signal,stdout,stderr,receipt});
   });
  });
+ const escaped=async()=> {
+  try{return JSON.parse(await fs.readFile(escapedToolFile,'utf8'))}catch{return null}
+ };
+ const stopEscaped=async()=> {
+  const value=await escaped();if(!value?.pid)return;
+  const current=await defaultProcessEvidence.identity(value.pid);
+  if(current&&identityKey(current)===identityKey(value)){
+   try{process.kill(value.pid,'SIGKILL')}catch(error){if(error.code!=='ESRCH')throw error}
+  }
+ };
  const stop=async()=>{
   if(!closed){
    child.kill('SIGTERM');
    const force=setTimeout(()=>{if(!closed)child.kill('SIGKILL')},2000);
    try{await done}finally{clearTimeout(force)}
   }
+  await stopEscaped();
  };
- const run={child,done,stop};f.runs.add(run);
- done.then(()=>f.runs.delete(run));
+ const run={child,done,stop,escaped,stopEscaped};f.runs.add(run);
  return run;
 }
 async function until(check,message,timeout=15000){
@@ -159,7 +172,7 @@ test('REAL ACP permission handshake: read policy denies edit; explicit full cont
 test('REAL acpx: cancelling a waiting turn yields a cancelled receipt and an idle lock',async t=>{
  const f=await setup(t,{timeoutMs:15000});
  await fs.writeFile(f.orderFile,'FIXTURE_WAIT');
- const run=start(f,'run',initial(f));
+ const run=await start(f,'run',initial(f));
  const bindings=path.join(f.config.stateDir,'bindings');
  const id=await until(async()=>{
   const entries=await fs.readdir(bindings).catch(()=>[]);
@@ -222,7 +235,7 @@ test('REAL recovery: public zero turn timeout overrides a shorter inherited runt
 });
 test('REAL recovery: operator cancel remains cancelled when adapter answers end_turn',async t=>{
  const f=await setup(t,{timeoutMs:15000});await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
- const run=start(f,'run',initial(f));
+ const run=await start(f,'run',initial(f));
  const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
  await until(async()=>{const log=await fs.readFile(audit,'utf8').catch(()=>'');return log.includes('session/prompt')},'the adapter never received the prompt');
  const entries=await fs.readdir(path.join(f.config.stateDir,'bindings'));let id;
@@ -250,8 +263,8 @@ async function sharedHomeSetup(t){
 test('REAL acpx: two overlapping processes sharing one worker HOME both resume after restart',async t=>{
  const f=await sharedHomeSetup(t);
  // Start both runs so their lifetimes overlap; each writes its own session.
- const a=start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
- const b=start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
+ const a=await start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
+ const b=await start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
  const [ra,rb]=[await a.done,await b.done];
  assert.equal(ra.code,0,ra.stderr);assert.equal(rb.code,0,rb.stderr);
  assert.notEqual(ra.receipt.session_id,rb.receipt.session_id);
@@ -266,8 +279,8 @@ test('REAL acpx: cancelling one shared-home turn does not cancel the other',asyn
  const f=await sharedHomeSetup(t);
  await fs.writeFile(f.orderFile,'FIXTURE_WAIT');
  await fs.writeFile(f.orderB,'FIXTURE_WAIT');
- const a=start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
- const b=start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
+ const a=await start(f,'run',['--route','worker','--cwd',f.cwd,'--file',f.orderFile]);
+ const b=await start(f,'run',['--route','worker','--cwd',f.cwdB,'--file',f.orderB]);
  // Wait until BOTH prompts reached the adapter before cancelling one.
  const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
  await until(async()=>{const log=await fs.readFile(audit,'utf8').catch(()=>'');return (log.match(/session\/prompt/g)??[]).length>=2},'both prompts never reached the adapter');
@@ -452,10 +465,10 @@ test('REAL acpx: two coexisting batches publish start handles and collect withou
  // Start BOTH real CLI batches without awaiting. Each must publish its handle
  // BEFORE it launches anything.
  const stopFile=path.join(f.root,'cancel-parent.marker');
- const runA=start(f,'batch',['--manifest',manifestA,'--start-handle',handleA],
+ const runA=await start(f,'batch',['--manifest',manifestA,'--start-handle',handleA],
   process.platform==='win32'?path.resolve('test/fixture-batch-cancel.mjs'):cli,
   process.platform==='win32'?{CWR_TEST_PARENT_CANCEL_FILE:stopFile}:{});
- const runB=start(f,'batch',['--manifest',manifestB,'--start-handle',handleB]);
+ const runB=await start(f,'batch',['--manifest',manifestB,'--start-handle',handleB]);
  const readHandle=async file=>{try{return JSON.parse(await fs.readFile(file,'utf8'))}catch{return null}};
  const hA=await until(async()=>{const h=await readHandle(handleA);return h&&h.schema==='cwr.acp.batch-handle/1'?h:null},'batch A must publish its start handle');
  const hB=await until(async()=>{const h=await readHandle(handleB);return h&&h.schema==='cwr.acp.batch-handle/1'?h:null},'batch B must publish its start handle');
@@ -496,4 +509,54 @@ test('REAL acpx: two coexisting batches publish start handles and collect withou
  assert.equal(aDone.receipt.jobs.find(j=>j.id==='slow').runtime_status,'cancelled');
  assert.equal(aDone.receipt.jobs.find(j=>j.id==='slow').cleanup,'confirmed');
  assert.ok(aDone.receipt.jobs.every(j=>['fast','slow'].includes(j.id)),'batch A only ever owns its own jobs');
+});
+
+
+test('REAL acpx: abrupt exit and a detached tool require reconciliation before one new order',
+ {skip: !['darwin','linux'].includes(process.platform)}, async t=>{
+ const f=await setup(t,{timeoutMs:60000});
+ await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY FIXTURE_ESCAPED_TOOL');
+ const hfile=path.join(f.root,'start.json');
+ const run=await start(f,'run',[...initial(f),'--start-handle',hfile]);
+ const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
+ const h=await until(async()=>read(hfile).catch(()=>null),'missing start handle');
+ const tool=await until(()=>run.escaped(),'detached tool did not publish its identity');
+ assert.equal(tool.process_group,tool.pid,'ordinary detached tool leaves its parent group');
+ const bdir=path.join(f.config.stateDir,'bindings',h.session_id);
+ const owner=await read(path.join(bdir,'active.lock','owner.json'));
+ assert.notEqual(tool.process_group,owner.process.process_group);
+ const blocked=await command(f,'run',initial(f));
+ assert.equal(blocked.code,2);assert.match(blocked.stderr,new RegExp(h.session_id));
+ const recordFile=path.join(f.config.stateDir,'acpx',h.session_id,'sessions',encodeURIComponent('cwr:'+h.session_id)+'.json');
+ const record=await read(recordFile);
+ run.child.kill('SIGKILL');await run.done;
+ await until(async()=>!(await defaultProcessEvidence.identity(record.pid)),'adapter did not exit after pipe EOF');
+ const oldStore=await fs.readFile(recordFile), oldBinding=await fs.readFile(path.join(bdir,'binding.json'));
+ const stillLive=await defaultProcessEvidence.identity(tool.pid);
+ assert.equal(identityKey(stillLive),identityKey(tool),'CLI recovery must never kill the detached tool');
+ const inspection=await command(f,'recover',['--session',h.session_id]);
+ assert.equal(inspection.code,3,inspection.stderr);
+ assert.equal(inspection.receipt.state,'uncertain');assert.equal(inspection.receipt.automatic_recovery,false);
+ const denied=await command(f,'run',initial(f));assert.equal(denied.code,2);
+ assert.equal(identityKey(await defaultProcessEvidence.identity(tool.pid)),identityKey(tool));
+ // The harness owns this exact synthetic tool and stops it independently. This
+ // is operator reconciliation, never an absence-of-census automatic proof.
+ await run.stopEscaped();
+ await until(async()=>!(await defaultProcessEvidence.identity(tool.pid)),'owned tool did not stop');
+ const fresh=await command(f,'recover',['--session',h.session_id]);
+ const recovered=await command(f,'recover',['--session',h.session_id,'--attest-stopped','--confirm',fresh.receipt.confirmation]);
+ assert.equal(recovered.code,0,recovered.stderr);
+ assert.equal(recovered.receipt.execution_stop,'operator_reconciled');
+ assert.equal(recovered.receipt.prior_task_outcome,'unknown');assert.equal(recovered.receipt.order_replayed,false);
+ assert.deepEqual(await fs.readFile(recordFile),oldStore);assert.deepEqual(await fs.readFile(path.join(bdir,'binding.json')),oldBinding);
+ await assert.rejects(fs.stat(path.join(bdir,'receipts',h.request_id+'.json')),{code:'ENOENT'});
+ await fs.writeFile(f.orderFile,'New synthetic responsibility after independent reconciliation.');
+ const admitted=await command(f,'run',initial(f));assert.equal(admitted.code,0,admitted.stderr);
+ assert.notEqual(admitted.receipt.session_id,h.session_id);
+ assert.equal(JSON.parse(admitted.receipt.output_excerpt).turn,1);
+ const continued=await command(f,'continue',['--session',admitted.receipt.session_id,'--file',f.orderFile]);
+ assert.equal(continued.code,0,continued.stderr);assert.equal(JSON.parse(continued.receipt.output_excerpt).turn,2);
+ const closed=await command(f,'close',['--session',admitted.receipt.session_id]);assert.equal(closed.code,0,closed.stderr);
+ const audit=(await fs.readFile(path.join(f.selection.route.workerHome,'fixture-audit.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
+ assert.equal(audit.filter(x=>x.method==='session/prompt').length,3,'abandoned prompt, new prompt and continuation only');
 });
