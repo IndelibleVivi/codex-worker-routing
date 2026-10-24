@@ -178,4 +178,3 @@ export function identityKey(identity) {
     return null;
   return `${identity.pid}:${identity.start}`;
 }
-
