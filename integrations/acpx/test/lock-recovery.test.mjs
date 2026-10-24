@@ -76,12 +76,25 @@ test('legacy missing schema is distinct from a live owner or adapter PID', async
   f.binding.handle = { backend: 'acpx', acpxRecordId: 'synthetic', backendSessionId: 'conversation' };
   await atomicJSON(f.p.binding, f.binding);
   await atomicJSON(path.join(f.config.stateDir, 'acpx', f.binding.id, 'sessions', 'synthetic.json'), {
-    acpxRecordId: 'synthetic', acpSessionId: 'conversation', cwd: f.cwd, pid: f.adapterPid,
+    schema: 'acpx.session.v1', acpx_record_id: 'synthetic', acp_session_id: 'conversation', cwd: f.cwd, pid: f.adapterPid,
   });
+  // The pinned public FileSessionStore uses its umask under CWR's private root.
+  if (process.platform !== 'win32') {
+    await fs.chmod(path.join(f.config.stateDir, 'acpx', f.binding.id, 'sessions'), 0o755);
+    await fs.chmod(path.join(f.config.stateDir, 'acpx', f.binding.id, 'sessions', 'synthetic.json'), 0o644);
+  }
   f.evidence.add(f.adapterPid);
   v = await inspect(f);
   assert.ok(v.evidence.observed_live_processes.some(p => p.kind === 'legacy_adapter_pid_present'));
   await assert.rejects(attest(f, v), { code: 'RECOVERY_BLOCKED' }); await noRecovery(f);
+  f.evidence.remove(f.adapterPid);
+  assert.equal((await inspect(f)).attestation_allowed,true);
+  if (process.platform !== 'win32') {
+    const recordRoot = path.join(f.config.stateDir, 'acpx', f.binding.id);
+    await fs.chmod(recordRoot, 0o755);
+    try { await assert.rejects(inspect(f), { code: 'PUBLIC_STATE' }); }
+    finally { await fs.chmod(recordRoot, 0o700); }
+  }
 });
 test('changed durable conversation or execution identity rejects the old inspection', async t => {
   const f = await stopped(t); const v = await inspect(f);

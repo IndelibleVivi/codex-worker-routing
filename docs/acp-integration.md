@@ -258,7 +258,7 @@ additive `dispatch_warning` 暴露，不会重复调用模型。日常只需 run
 
 ## 状态、上下文与安全边界
 
-stateDir 保存 binding/回执、Dispatch 的本地协作事件与工单，三个展示偏好（`dashboard-preferences.json`），以及 acpx 的私有 store。目录 0700、文件 0600；写入使用
+stateDir 保存 binding/回执、Dispatch 的本地协作事件与工单，三个展示偏好（`dashboard-preferences.json`），以及 acpx 的私有 store。CWR 自管目录 0700、文件 0600；写入使用
 同目录临时文件、fsync 和 atomic rename。输入拒绝 symlink、hardlink、FIFO 等特殊文件。
 workerHome/stateDir 根可使用系统祖先目录的规范路径，但根自身和受管后代不接受 symlink。
 目录 0700/文件 0600 的断言只在暴露 POSIX mode 的平台成立；Windows 上 mode 不是隐私证据，
@@ -398,7 +398,8 @@ node "$ENTRY" recover --config "$CONFIG" --session UUID --attest-stopped --confi
 
 恢复在独占 claim 内重新读取身份；当前进程取证失败、known-live 进程、变化的 binding、
 owner、journal 或不匹配锁对都会拒绝。legacy 允许缺少旧版未记录的字段，但仍须取得当前
-owner/adapter PID 观察；存在的旧 PID 因缺 start identity 仍视为未解。attested 记录明确标为
+owner/adapter PID 观察。只读检查按固定 acpx 的 disk schema 读取其 store；adapter 自管的
+0644 文件必须位于 CWR 已核验的 0700 session 根目录内，不重写历史文件权限；存在的旧 PID 因缺 start identity 仍视为未解。attested 记录明确标为
 `execution_stop: operator_reconciled`，不冒充机械停止证明。旧任务结果保留 `unknown`，
 `order_replayed: false`；binding、acpx store、receipt、工单、artifact 和 worktree 均保留。
 

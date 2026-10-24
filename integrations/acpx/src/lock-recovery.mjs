@@ -462,9 +462,22 @@ async function legacyLive(config, binding, owner, snapshot) {
   if (handle?.acpxRecordId) {
     if (handle.backend !== 'acpx' || typeof handle.acpxRecordId !== 'string' || handle.acpxRecordId.length > 256)
       fail('LOCK_EVIDENCE_INCOMPLETE', 'The legacy binding has an invalid adapter record identity.');
-    const file = path.join(config.stateDir, 'acpx', binding.id, 'sessions', `${encodeURIComponent(handle.acpxRecordId)}.json`);
-    const record = await readJSON(file, { privateFile: true, maxBytes: 32 * 1024 * 1024 });
-    if (record.acpxRecordId !== handle.acpxRecordId || record.acpSessionId !== handle.backendSessionId || record.cwd !== binding.cwd)
+    const recordRoot = path.join(config.stateDir, 'acpx', binding.id);
+    await privateDir(recordRoot, { create: false });
+    const sessionDir = path.join(recordRoot, 'sessions');
+    const directory = await fs.lstat(sessionDir);
+    if (!directory.isDirectory() || (process.getuid && directory.uid !== process.getuid()))
+      fail('LOCK_EVIDENCE_INCOMPLETE', 'The legacy adapter store directory is unsafe.');
+    const file = path.join(sessionDir, `${encodeURIComponent(handle.acpxRecordId)}.json`);
+    const st = await fs.lstat(file);
+    if (process.getuid && st.uid !== process.getuid())
+      fail('FOREIGN_OWNER', 'The legacy adapter record belongs to another user.');
+    // Pinned acpx writes 0644 records below our private 0700 record root. Its
+    // store is adapter-owned; require that enclosing privacy boundary and the
+    // regular-file identity checks, without rewriting historical file modes.
+    const record = await readJSON(file, { maxBytes: 32 * 1024 * 1024 });
+    if (record.schema !== 'acpx.session.v1' || record.acpx_record_id !== handle.acpxRecordId ||
+        record.acp_session_id !== handle.backendSessionId || record.cwd !== binding.cwd)
       fail('LOCK_EVIDENCE_INCOMPLETE', 'The legacy adapter record does not match its binding.');
     if (Number.isSafeInteger(record.pid) && record.pid > 0) check(record.pid, 'legacy_adapter_pid_present');
   }

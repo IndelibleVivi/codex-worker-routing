@@ -349,7 +349,7 @@ moves no locks. A successful recovery mutation returns 0; an identity/evidence r
 
 stateDir holds the binding/receipt, Dispatch's local collaboration events and work orders,
 the three display preferences (`dashboard-preferences.json`), and acpx's private store.
-Directory 0700, files 0600; writes use a same-directory temp file, fsync and atomic
+CWR-owned directories use 0700 and files 0600; writes use a same-directory temp file, fsync and atomic
 rename. Input rejects symlinks, hardlinks, FIFOs and other special files. The
 workerHome/stateDir root may use the canonical path of a system ancestor directory, but
 the root itself and managed descendants do not accept symlinks. The 0700 directory / 0600
@@ -537,7 +537,9 @@ node "$ENTRY" recover --config "$CONFIG" --session UUID --attest-stopped --confi
 Recovery re-reads identity under an exclusive claim. Unavailable current process inspection,
 known-live processes, changed bindings/owners/journals and mismatched pairs are refused.
 Legacy evidence may omit fields never recorded by the old schema, but still requires current
-owner/adapter PID observation; a present historical PID without start identity remains
+owner/adapter PID observation. Inspection reads the pinned acpx disk schema: its
+adapter-owned 0644 records must remain inside the verified private 0700 session root,
+without rewriting historical modes. A present historical PID without start identity remains
 unresolved. Attested recovery records `execution_stop: operator_reconciled`, never mechanical
 stop proof. The old outcome stays `unknown`, with `order_replayed: false`; bindings, acpx
 stores, receipts, orders, artifacts and worktrees remain intact.
