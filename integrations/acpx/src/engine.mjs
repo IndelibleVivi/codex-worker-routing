@@ -296,6 +296,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     await atomicJSON(p.binding, binding);
   } catch (e) {
     caught = e;
+    hooks.stopAdmission();
     // Decide BEFORE asynchronous cancellation/cleanup. A later abort or late
     // runtime success must never rewrite a deadline/error that already won.
     terminal = { status: ['CANCEL_REQUESTED', 'CANCELLED_BEFORE_START'].includes(e.code) ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
@@ -308,6 +309,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     }
   } finally {
     snapshotActivity();
+    hooks.stopAdmission();
     acceptingEvents = false;
     // The turn has settled (any terminal outcome). Clear the active-turn marker so
     // the projection never reads a stale "started" as an unfinished turn.

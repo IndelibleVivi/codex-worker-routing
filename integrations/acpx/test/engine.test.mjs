@@ -222,3 +222,26 @@ test('a cancelled turn leaves no active-turn marker behind',async t=>{
  assert.equal(receipt.runtime_status,'cancelled');
  assert.equal((await readJSON(paths(f.config.stateDir,f.binding.id).binding,{privateFile:true})).active_turn,undefined);
 });
+
+test('failure closes launch admission before cancellation or connection cleanup can reconnect',async t=>{
+ const f=await setup(t,{streamError:true});
+ const create=f.api.createAcpRuntime.bind(f.api);const denied=[];
+ f.api.createAcpRuntime=options=>{
+  const runtime=create(options),start=runtime.startTurn.bind(runtime),close=runtime.close.bind(runtime);
+  const late=async id=>{
+   try{await options.processLifecycle.onBeforeSpawn({launchId:id});denied.push('admitted')}
+   catch(error){denied.push(error.code)}
+  };
+  runtime.startTurn=input=>{
+   const turn=start(input),cancel=turn.cancel.bind(turn);
+   turn.cancel=async input=>{await late('after-failure');return cancel(input)};
+   return turn;
+  };
+  runtime.close=async input=>{await late('during-cleanup');return close(input)};
+  return runtime;
+ };
+ const receipt=await run(f);
+ assert.equal(receipt.error_code,'STREAM_ERROR');
+ assert.deepEqual(denied,['LAUNCH_AFTER_STOP','LAUNCH_AFTER_STOP']);
+ assert.equal(receipt.cleanup,'confirmed');
+});

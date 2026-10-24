@@ -297,6 +297,7 @@ export function createLifecycleHooks(journal, processEvidence = defaultProcessEv
   };
   return Object.freeze({
     accepting: () => accepting,
+    stopAdmission() { accepting = false; },
     liveSize: () => live.size,
     admittedSize: () => admitted.size,
     async onBeforeSpawn(event) {
