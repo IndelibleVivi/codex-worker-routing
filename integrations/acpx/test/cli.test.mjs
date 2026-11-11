@@ -98,6 +98,61 @@ test('an ownerless lock is reported as unreconciled, never idle',async t=>{
  await privateDir(p.lock);await fs.writeFile(path.join(p.lock,'cancel.json'),'{}',{mode:0o600});
  assert.equal((await localStatus(f.config,f.binding)).active,'unreconciled');
 });
+async function controlReadFixture(t){
+ const f=await setup(t),p=paths(f.config.stateDir,f.binding.id),stamp=new Date().toISOString();
+ f.binding.active_turn={request_id:'00000000-0000-0000-0000-000000000123',started_at:stamp};
+ await atomicJSON(p.binding,f.binding);
+ const owner={nonce:'synthetic-control-owner',pid:process.pid,session:f.binding.id,request_id:f.binding.active_turn.request_id};
+ await lock(p.lock,owner);
+ return {...f,p,owner,stamp};
+}
+async function withBindingReplacement(f,replace,action){
+ const open=fs.open,attempts={binding:0,cancel:0};
+ fs.open=async(file,...args)=>{
+  // regular() already took its lstat here. A normal atomic replacement now
+  // produces a different file identity at open, without weakening that check.
+  if(file===f.p.binding)await replace(++attempts.binding);
+  if(file===path.join(f.p.lock,'cancel.json')&&args[0]==='wx')attempts.cancel++;
+  return open(file,...args);
+ };
+ try{return await action(attempts);}finally{fs.open=open;}
+}
+for(const verb of ['status','cancel'])test(`${verb} reads a fresh validated binding after one concurrent acknowledgement replacement`,async t=>{
+ const f=await controlReadFixture(t);
+ const acknowledged={...f.binding,active_turn:{...f.binding.active_turn,prompt_started_at:f.stamp}};
+ await withBindingReplacement(f,async attempt=>{if(attempt===1)await atomicJSON(f.p.binding,acknowledged);},async attempts=>{
+  assert.equal(await main([verb,'--config',f.configFile,'--session',f.binding.id],f.deps),0);
+  assert.equal(attempts.binding,2);assert.equal(attempts.cancel,verb==='cancel'?1:0);
+ });
+ assert.equal(f.results.length,1);assert.equal(f.api.calls.length,0,'control reads must not execute an adapter');
+ if(verb==='status'){
+  assert.equal(f.results[0].active_request.prompt_started_at,f.stamp);assert.equal(f.results[0].last_runtime_status,null);
+  await assert.rejects(fs.stat(path.join(f.p.lock,'cancel.json')),{code:'ENOENT'});
+ }else{
+  assert.equal(f.results[0].cancel_requested,true);assert.equal(f.results[0].stopped,false);
+  assert.equal(JSON.parse(await fs.readFile(path.join(f.p.lock,'cancel.json'),'utf8')).nonce,f.owner.nonce);
+ }
+});
+test('repeated binding replacement exhausts three validated reads without writing cancellation',async t=>{
+ const f=await controlReadFixture(t);
+ await withBindingReplacement(f,()=>atomicJSON(f.p.binding,f.binding),async attempts=>{
+  await assert.rejects(main(['cancel','--config',f.configFile,'--session',f.binding.id],f.deps),{code:'FILE_CHANGED'});
+  assert.equal(attempts.binding,3);assert.equal(attempts.cancel,0);
+ });
+ assert.equal(f.results.length,0);
+ await assert.rejects(fs.stat(path.join(f.p.lock,'cancel.json')),{code:'ENOENT'});
+});
+test('a substituted binding identity fails validation after a read retry and never requests cancellation',async t=>{
+ const f=await controlReadFixture(t);
+ await withBindingReplacement(f,async attempt=>{
+  if(attempt===1)await atomicJSON(f.p.binding,{...f.binding,id:'00000000-0000-0000-0000-000000000999'});
+ },async attempts=>{
+  await assert.rejects(main(['cancel','--config',f.configFile,'--session',f.binding.id],f.deps),{code:'BAD_BINDING'});
+  assert.equal(attempts.binding,2);assert.equal(attempts.cancel,0);
+ });
+ assert.equal(f.results.length,0);
+ await assert.rejects(fs.stat(path.join(f.p.lock,'cancel.json')),{code:'ENOENT'});
+});
 async function interruptedReceipt(t) {
  const f=await setup(t,{terminal:{status:'failed',error:{code:'TURN_TIMEOUT'}}});
  assert.equal(await main(args(f),f.deps),1);

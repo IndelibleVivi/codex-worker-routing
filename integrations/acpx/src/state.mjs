@@ -175,11 +175,20 @@ export function paths(stateDir, id) {
 }
 export async function loadBinding(stateDir, id) {
   const p = paths(stateDir, id);
-  await privateDir(p.dir, { create: false });
-  const b = await readJSON(p.binding, { privateFile: true });
-  if (b.schema !== 'cwr.acp.binding/1' || b.id !== id || typeof b.cwd !== 'string')
-    throw new Fault('BAD_BINDING', 'Invalid integration binding.');
-  return b;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // An owned turn can atomically replace its binding between lstat/open
+      // (notably at prompt acknowledgement). Retry only that read collision,
+      // with fresh ancestry, file safety and binding validation every time.
+      await privateDir(p.dir, { create: false });
+      const b = await readJSON(p.binding, { privateFile: true });
+      if (b.schema !== 'cwr.acp.binding/1' || b.id !== id || typeof b.cwd !== 'string')
+        throw new Fault('BAD_BINDING', 'Invalid integration binding.');
+      return b;
+    } catch (error) {
+      if (error.code !== 'FILE_CHANGED' || attempt === 2) throw error;
+    }
+  }
 }
 
 // Shared nonce-bound cancellation writer; CLI and batch use the same primitive.
