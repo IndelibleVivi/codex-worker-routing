@@ -323,14 +323,21 @@ Route schema, commands, and security boundaries are in the
 | Symptom | Check first |
 | --- | --- |
 | Plan lacks Provider API access (Go especially) | Upstream entitlement: whether `GET /provider/v1/models` returns 200 and whether the plan includes Provider API (see the official page) |
-| `401` or missing key | First check the Command Code provider key stored in the Router, and whether the worker copied the **current** router-written endpoint/capability block (this example does not use `env_key`) |
+| `401` or missing key | Identify whether inference or tool approval failed. For inference, check the Router's Command Code provider key and the **current** router-written endpoint/capability block copied to the worker (this example does not use `env_key`) |
 | Model listed but inference fails | The protocol bridge: Codex speaks Responses, Command Code speaks Chat Completions; confirm Codex Router is in between and the model-id mapping is right |
 | Worker cannot see the model | The worker's own `<workerHome>/.codex/config.toml` (`model`/`model_provider`/`model_catalog_json`); main-session config is not inherited |
 | Router is not running | `codex-router status` and `codex-router doctor`; whether the port is taken; do not start a second router just to configure the worker |
 | Stale Codex picker | `model_catalog_json` is read at startup; fully quit and reopen Codex instead of only editing the file |
 | Wrong protocol endpoint | `base_url` must be a Responses-compatible endpoint; `/provider/v1/chat/completions` cannot serve as the Codex endpoint directly |
 | Capability URL exposure | If the capability segment inside `base_url` reached Git, a screenshot, or chat, treat it as a credential leak and rotate with `codex-router caller-key rotate` (or `./bin/model-router codex caller-key rotate` from a source checkout); do not delete state files by hand |
-| Chat works but edits are unreliable | Translator function/tool and streaming translation, plus whether catalog capability claims match reality |
+| Chat works but edits are unreliable | Effective adapter mode, approval reviewer and OS sandbox, then translator function/tool and streaming translation plus catalog capability claims |
+
+Successful text does not verify the tool approval path. [Issue #5](https://github.com/IndelibleVivi/codex-worker-routing/issues/5)
+reports `codex-acp 1.13.1` returning text while automatic approval review failed with
+`401`; the original error's source remains unknown. Its successful mode-change control
+is evidence for that reported setup, not a default mode recommendation. Compare worker
+TOML defaults, adapter mode/reviewer, CWR ACP permission responses and the effective OS
+sandbox separately; see [Text succeeds but tool approval fails](acp-provider-protocols.en.md#text-succeeds-but-tool-approval-fails).
 
 ## Rollback
 

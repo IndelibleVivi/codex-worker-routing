@@ -286,14 +286,20 @@ route schema、命令与安全边界见[可选 ACP 执行通道](acp-integration
 | 现象 | 先查 |
 | --- | --- |
 | 计划不含 Provider API（Go 计划尤其） | 上游 entitlement：`GET /provider/v1/models` 是否 200，以及计划是否含 Provider API（见官方页面） |
-| `401` / missing key | 先查 Router 里保存的 Command Code provider key 是否就位，以及 worker 是否复制了**当前** router 写好的 endpoint/capability 块（本示例不使用 `env_key`） |
+| `401` / missing key | 先区分推理失败还是工具审批失败。推理失败时查 Router 的 Command Code provider key，以及 worker 复制的**当前** router endpoint/capability 块（本示例不使用 `env_key`） |
 | model 列出来了但推理失败 | 协议桥：Codex 说 Responses、Command Code 说 Chat Completions；确认 Codex Router 在中间，且 model id 映射正确 |
 | worker 看不到 model | worker 自己的 `<workerHome>/.codex/config.toml`（`model`/`model_provider`/`model_catalog_json`）；主会话配置不会继承 |
 | router 没在跑 | `codex-router status` 与 `codex-router doctor`；端口是否被占用；不要为配 worker 再起第二个 router |
 | Codex picker 陈旧 | `model_catalog_json` 在启动时读取；完全退出并重开 Codex，而不是只改文件 |
 | 用错协议 endpoint | `base_url` 必须是 Responses-compatible endpoint；`/provider/v1/chat/completions` 不能直接当 Codex endpoint |
 | capability URL 暴露 | 若 `base_url` 里的 capability 段进了 Git、截图或聊天，视为凭据泄露并用 `codex-router caller-key rotate`（或源码 checkout 的 `./bin/model-router codex caller-key rotate`）轮换；不要手工删除 state 文件 |
-| 能对话但不能可靠编辑 | 翻译层的工具/函数与流式事件翻译，以及 catalog 能力声明是否与实际一致 |
+| 能对话但不能可靠编辑 | 实际 adapter mode、审批 reviewer 与 OS sandbox，再查翻译层的工具/函数与流式事件翻译，以及 catalog 能力声明 |
+
+正文返回不证明工具审批链可用。[Issue #5](https://github.com/IndelibleVivi/codex-worker-routing/issues/5)
+报告了 `codex-acp 1.13.1` 能返回正文、automatic approval review 却以 `401` 失败的情况；
+原错误来源仍未知。其 mode 调整后的成功对照只属于报告中的环境，不构成默认 mode 建议。
+应分别核对 worker TOML 默认值、adapter mode/reviewer、CWR 的 ACP 权限应答与实际 OS
+sandbox，详见[正文成功但工具审批失败](acp-provider-protocols.md#正文成功但工具审批失败)。
 
 ## 撤销
 

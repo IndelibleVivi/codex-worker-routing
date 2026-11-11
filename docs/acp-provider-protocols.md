@@ -129,10 +129,33 @@ Worker Routing 或 cwr-acp 的职责范围内。
 | 错误信息提到 `/responses` 不被识别 | 上游只有 Chat Completions；加 translator 或换 endpoint |
 | picker 里有 model，worker 里却没有 | worker 自己的 `CODEX_HOME`/`config.toml` 与 catalog 是否配置 |
 | adapter 列出的 model 与预期不符 | adapter 的 model 列表来源；它不证明上游身份 |
-| `401` / missing key | 先分清哪一段在认证：worker 是否继承了 `env_key` 指向的 client 变量，以及 router 自己的 provider secret 是否就位 |
+| `401` / missing key | 先定位失败环节。推理请求查 worker 的 `env_key` 与 router 的 provider secret；工具审批失败则查下文的 reviewer 路径 |
 | `404` / unknown model | model id 映射；translator 是否把 slug 透传给上游 |
-| 能对话但编辑/工具不可靠 | translator 的函数/工具与流式事件翻译，以及 catalog 能力声明 |
+| 能对话但编辑/工具不可靠 | 实际 adapter mode、审批 reviewer 与 sandbox，再查 translator 的函数/工具与流式事件翻译，以及 catalog 能力声明 |
 | 一切看起来对但输出不像真实模型 | 上游 entitlement/配额、是否命中缓存或占位响应 |
+
+## 正文成功但工具审批失败
+
+[Issue #5](https://github.com/IndelibleVivi/codex-worker-routing/issues/5) 报告了
+Windows 上 `codex-acp 1.13.1` 的一次运行：模型正文能返回，但 automatic approval review
+以 HTTP `401` 失败，要求创建的文件没有产生。受控改变 adapter mode 后，独立检查确认
+写入与同会话续做成功。这是报告者对该环境提供的实机证据；原 `401` 的来源仍未知，
+不能据此宣称通用认证问题已修复。
+
+排查这种现象时，分别核对以下四层：
+
+| 控制层 | 核对内容 |
+| --- | --- |
+| worker `config.toml` | 独立 worker 的默认配置；adapter 传入的 turn 设置可能覆盖它 |
+| adapter/session mode | 确切 adapter 版本，以及该 turn 实际的 `approval_policy`、`approvals_reviewer`、`sandbox_policy` |
+| CWR `--permissions read\|full` 与 route `maxPermissions` | CWR 怎样回答实际到达它的 ACP 权限请求；它们不选择 adapter mode 或 reviewer |
+| OS sandbox | 实际文件系统和网络限制；mode 名称或 CWR `full` 都不能证明访问不受限制 |
+
+[1.13.1 的 mode 源码](https://github.com/agentclientprotocol/codex-acp/blob/v1.13.1/src/AgentMode.ts)
+解释了其 `read-only` 名称为何会误导：该 mode 实际选择 user reviewer 与 workspace-write
+sandbox。不要把这个名称在当时的行为或报告中的 mode 调整当成其它 adapter/版本的默认
+做法。先定位失败的审批请求，再决定是否需要调整凭据或策略；保留任务已获授权的访问
+范围，并将真实工具结果、同会话续做与正文返回分开验证。
 
 ## 相关文档
 
