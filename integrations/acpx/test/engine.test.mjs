@@ -69,8 +69,21 @@ test('stream failure cannot be masked by an eventual successful result',async t=
  const f=await setup(t,{streamError:true});const r=await run(f);assert.equal(r.runtime_status,'failed');assert.equal(r.error_code,'STREAM_ERROR');assert.ok(f.api.calls.some(c=>c[0]==='cancel'));
 });
 test('cancellation returns a cancelled terminal, not successful acceptance',async t=>{
- const f=await setup(t,{delay:200});const c=new AbortController();setTimeout(()=>c.abort(),25);
- const r=await run(f,{signal:c.signal});assert.equal(r.runtime_status,'cancelled');assert.equal(r.task_acceptance,'unverified');assert.equal(r.cleanup,'confirmed');
+ const gate=deferred(),f=await setup(t,{firstTurnGate:gate.promise}),c=new AbortController();
+ const pending=run(f,{signal:c.signal});let settled=false,r;
+ pending.then(()=>{settled=true;},()=>{settled=true;});
+ try {
+  // Hold the result and cancel an acknowledged prompt. A fixed 25ms delay can
+  // instead interrupt initialization on slower filesystems, whose cleanup is
+  // correctly unconfirmed while the initialization promise remains unsettled.
+  const end=Date.now()+5000;
+  while(!f.binding.active_turn?.prompt_started_at){
+   assert.equal(settled,false,'the turn ended before prompt acknowledgement');
+   assert.ok(Date.now()<end,'prompt acknowledgement was not observed');await sleep(5);
+  }
+ } finally {c.abort();gate.resolve();r=await pending;}
+ assert.ok(r.budget.prompt_started_at);
+ assert.equal(r.runtime_status,'cancelled');assert.equal(r.task_acceptance,'unverified');assert.equal(r.cleanup,'confirmed');
 });
 test('pre-aborted request does not initialize or prompt',async t=>{
  const f=await setup(t);const c=new AbortController();c.abort();const r=await run(f,{signal:c.signal});
