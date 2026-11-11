@@ -81,7 +81,7 @@ input.on('line',line=>{
   // The turn file can become observable while save() is still finalizing;
   // cancel in that window must settle this request, not disappear.
   const preparingText=q.method==='session/prompt'?(q.params?.prompt??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n'):'';
-  const preparing=preparingText.includes('FIXTURE_WAIT')||preparingText.includes('FIXTURE_PROGRESS_ONLY')
+  const preparing=preparingText.includes('FIXTURE_WAIT')||preparingText.includes('FIXTURE_PROGRESS_ONLY')||preparingText.includes('FIXTURE_LIVE_ACTIVITY')
    ?{id:q.id,params:q.params,timer:null,cancelStopReason:preparingText.includes('CANCEL_END_TURN')?'end_turn':'cancelled'}:null;
   if(preparing)pending.set(q.params.sessionId,preparing);
   await fs.appendFile(audit,JSON.stringify({method:q.method,sessionId:q.params?.sessionId??null})+'\n',{mode:0o600});
@@ -98,6 +98,27 @@ input.on('line',line=>{
    const text=params.prompt.filter(p=>p.type==='text').map(p=>p.text).join('\n');
    s.turn++;dirty.add(params.sessionId);await save();
    if(inputClosed||(preparing&&pending.get(params.sessionId)!==preparing))return;
+   if(text.includes('FIXTURE_LIVE_ACTIVITY')){
+    let sequence=0;
+    const updates=()=>{
+     const toolCallId=`synthetic-tool-${++sequence}`;
+     send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'agent_thought_chunk',content:{type:'text',text:'PRIVATE_SYNTHETIC_REASONING'}}}});
+     send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'tool_call',toolCallId,title:'PRIVATE_SYNTHETIC_TOOL_TITLE',kind:'read',status:'in_progress',rawInput:{secret:'PRIVATE_SYNTHETIC_INPUT'}}}});
+     send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'tool_call_update',toolCallId,status:'completed',rawOutput:'PRIVATE_SYNTHETIC_OUTPUT'}}});
+    };
+    updates();
+    await fs.appendFile(audit,JSON.stringify({method:'fixture/activity_sent',sessionId:params.sessionId})+'\n',{mode:0o600});
+    // The final assistant message is gated by the test. Only reasoning and tool
+    // updates flow while status must expose durable, payload-free activity.
+    const tick=async()=>{
+     if(inputClosed||pending.get(params.sessionId)!==preparing)return;
+     if(await fs.stat(path.join(home,'fixture-release-activity')).then(()=>true,()=>false)){
+      await complete(id,params,'Synthetic activity turn completed.');return;
+     }
+     updates();preparing.timer=setTimeout(tick,75);
+    };
+    preparing.timer=setTimeout(tick,75);return;
+   }
    if(text.includes('FIXTURE_PROGRESS_ONLY')){
     send({method:'session/update',params:{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Synthetic progress, no final response.'}}}});
     // Deliberately no prompt response. Tests cancel through the real public

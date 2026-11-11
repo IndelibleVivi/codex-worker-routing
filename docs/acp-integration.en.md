@@ -439,6 +439,84 @@ cleanup-confirmed binding, no active turn/locks, elapsed retention and fresh saf
 can be planned. Legacy tmp/cache, logs, databases, orders and receipts remain inspection only.
 CLI/JSON and dashboard share one backend; see [storage management](storage-management.en.md).
 
+## Live activity and host status
+
+`status --session UUID` reads payload-free progress while a prompt is still outstanding.
+CWR consumes the public `startTurn(...).events` iterator, including normalized reasoning,
+tool and status updates, and retains one bounded snapshot per request at
+`stateDir/bindings/SESSION/activity/REQUEST.json`. It contains the exact session/request,
+execution and saved-handle identity, prompt acknowledgement, a fixed transport-state enum,
+and the same minimal counters/timestamps/categories as receipt `activity`. It retains no
+prompt, thought text, tool input/output, tool name, path or producer-controlled text.
+The existing private acpx conversation store has its separate retention contract.
+
+Event updates are coalesced at a 250ms cadence; prompt acknowledgement and the frozen final
+snapshot also request publication. The writer keeps at most one write in flight and one
+pending snapshot. An idle event stream produces no heartbeat or invented event. The binding
+records `active_turn.prompt_started_at` independently of optional telemetry, so a missing
+activity file cannot erase observed prompt submission. Activity I/O failures stop further
+telemetry attempts for that turn and add `activity_warning: "ACTIVITY_PERSISTENCE_FAILED"`
+to the terminal receipt; they do not cancel useful work. Required binding/receipt persistence
+and actual event-stream errors retain their existing failure rules. Activity freezes before
+cancellation/cleanup; its bounded final flush runs alongside cleanup and never gates the
+cancellation request or resets the task deadline.
+Required prompt-acknowledgement persistence runs concurrently with that deadline. A failed
+write fails the turn; a held write cannot defer deadline cancellation. If it still has not
+settled within the cleanup allowance, CWR retains the active marker and locks, reports
+unconfirmed cleanup and saves the exact terminal receipt. It does not race a final binding
+update against an older pending write. Status can recover that receipt through the marker.
+
+Host integrations should use the top-level `phase` for request lifecycle, then
+`active_request.activity_status` and `transport_state` for visibility:
+
+| `phase` | Meaning for a host |
+| --- | --- |
+| `starting` | An owner process is present under the operation lock, before the prompt marker. |
+| `submitting` | The current request is recorded; prompt acknowledgement has not been observed. |
+| `running` | Prompt acknowledgement is durable, the owner matches the request and its host/boot/process-start identity, and no terminal decision is recorded. |
+| `running_unverified` | Prompt acknowledgement and the matching lock/PID hint exist, but current owner identity is unavailable. Show “prompt started · owner identity unverified.” |
+| `finalizing` | Activity has frozen at a terminal decision; the canonical receipt is not available yet. |
+| `unreconciled` | The owner is absent, a lock/host/boot/process-start identity mismatches, or owner evidence is missing; old activity cannot establish a live writer. |
+| `completed` / `failed` / `cancelled` | A valid receipt matches the still-recorded active request, including after an interrupted final binding update. |
+| `idle` / `closed` | No operation lock or active request remains; any `last_*` outcome is historical receipt evidence. |
+
+For `phase: "running"` with `activity_status: "unavailable"`, display **running · activity
+unavailable**. Preserve the explicit owner qualification for `running_unverified`; neither
+phase should be downgraded to queued. Top-level `owner_identity` is `verified`, `mismatch`
+or `unavailable`, independent of the legacy `active: "owner_process_present"` PID hint.
+The existing Windows inspector cannot verify host/boot/process-start identity, so normal
+Windows prompts use `running_unverified` and can still expose advancing activity. This
+adds no process inspector or recovery authority. `transport_state` distinguishes `pending`
+or `awaiting_events` (no event observed), `observed` (events received), `ended` (the iterator
+ended), `failed` (it raised an error), `absent` (the runtime provided no event interface),
+and `missing` / `invalid` (no usable sidecar). An ended stream can retain earlier event
+metadata while current visibility is unavailable; it cannot complete the prompt.
+`active_request.activity` stays null when its exact snapshot is unavailable. The separate
+`snapshot_age_ms` is the wall-clock age of that persisted snapshot at this status query
+(null if unknown or the clock moved behind it). The snapshot's own `last_event_age_ms`
+remains frozen at observation time. Check both freshness and event timestamps; a previously
+successful write is not a continuing heartbeat.
+
+`last_runtime_status` and `active_request.runtime_status` remain **terminal-only**. A null
+value does not mean queued, and an earlier completed receipt cannot complete a new request.
+The phase and stored activity do not prove model health or useful progress; transport state
+describes the saved observation, not a new connection probe. The independent `active`,
+`owner_identity`, `cleanup`, cancellation and recovery rules
+remain authoritative for their own evidence; activity never releases locks or confirms a
+stopped writer. Status reads only the exact request snapshot and validates session, route,
+execution fingerprint, saved handle and start time. It does not scan for a newer file or
+repair missing/corrupt state.
+
+In pinned **acpx 0.15.1**, the public runtime event iterator is separate from the acpx CLI's
+`SessionEventWriter`. Its saved record can retain `last_seq: 0` and an `event_log.active_path`
+whose stream file does not exist while runtime events are arriving normally. Neither field
+is CWR queue/liveness evidence. The real-package regression holds the assistant's final
+response, emits reasoning and tool updates from a synthetic ACP process, and checks increasing
+durable activity through a second CLI process. This verifies that boundary without a model
+or account; it does not establish acceptance of an external host UI, Windows/OpenCode
+installation, or live provider route. Those surfaces must consume the new status fields
+and be checked separately on their actual installed revision.
+
 ## Crashes and failures
 
 Initialization and prompt submission each have a setup deadline of
@@ -495,10 +573,11 @@ become execution evidence. Without a valid pointer these values remain null; sta
 scans for a guessed latest receipt. `receipt_evidence.source` identifies `active_turn` or
 `binding`, with the request id, `reported_cleanup` and allowlisted `budget` / `activity`.
 Fields absent from old receipts remain null; historical receipts are never rewritten.
-`active_request` separately shows the binding's current request id, start time and matching
-runtime status, error code and receipt; the last three are null without a receipt for that
-turn. An earlier completed receipt may remain historical `last_*` evidence and can never
-become the completion outcome of a newer active request.
+`active_request` separately shows the binding's current request id, start time, prompt
+acknowledgement, phase and live-activity metadata described above, plus the matching runtime
+status, error code and receipt. Those last three remain null without a receipt for that turn.
+An earlier completed receipt may remain historical `last_*` evidence and can never become
+the completion outcome of a newer active request.
 
 This display recovery does not repair the binding, reclaim a lock or confirm that the
 writer stopped. Top-level `cleanup` comes independently from the binding and remains

@@ -161,6 +161,9 @@ test('deadline is monotonic across cooperative end_turn, late stream, and cleanu
  assert.equal(r.observations.coverage,'none');
  assert.equal(r.activity.last_event_type,'text_delta','cleanup events cannot replace the activity snapshot at failure');
  assert.equal(r.activity.event_count,1);
+ const live=await readJSON(path.join(paths(f.config.stateDir,f.binding.id).activity,`${r.request_id}.json`),{privateFile:true});
+ assert.equal(live.frozen,true);assert.deepEqual(live.activity,r.activity);
+ assert.ok(!JSON.stringify(live).includes('late cleanup event'));
 });
 test('hard task deadline retains recent runtime activity without extending the budget or exposing tool payloads',async t=>{
  const f=await controlled(t,'recent-activity');const r=await engineRun(f);

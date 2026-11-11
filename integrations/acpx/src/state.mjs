@@ -170,7 +170,7 @@ export function paths(stateDir, id) {
   const dir = path.join(stateDir, 'bindings', id);
   return {
     dir, binding: path.join(dir, 'binding.json'), lock: path.join(dir, 'active.lock'),
-    receipts: path.join(dir, 'receipts'), lifecycle: path.join(dir, 'lifecycle'),
+    receipts: path.join(dir, 'receipts'), activity: path.join(dir, 'activity'), lifecycle: path.join(dir, 'lifecycle'),
   };
 }
 export async function loadBinding(stateDir, id) {

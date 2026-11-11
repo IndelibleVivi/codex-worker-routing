@@ -199,6 +199,51 @@ test('REAL recovery: normal final remains completed with CWR-owned task budget',
  assert.equal(a.receipt.budget.task_ms,5000);assert.ok(a.receipt.budget.prompt_started_at);
  assert.equal(JSON.parse(a.receipt.output_excerpt).turn,1);
 });
+test('REAL activity: reasoning and tools are durable before a held final through public runtime',async t=>{
+ const f=await setup(t,{timeoutMs:15000});
+ await fs.writeFile(f.orderFile,'FIXTURE_LIVE_ACTIVITY');
+ const handleFile=path.join(f.root,'activity-start.json');
+ const run=await start(f,'run',[...initial(f),'--start-handle',handleFile]);
+ const handle=await until(async()=>JSON.parse(await fs.readFile(handleFile,'utf8').catch(()=>'null')),'start handle was not published');
+ const audit=path.join(f.selection.route.workerHome,'fixture-audit.ndjson');
+ await until(async()=> (await fs.readFile(audit,'utf8').catch(()=>'')).includes('fixture/activity_sent'),'reasoning and tool updates were not sent');
+ let first,second,done;
+ try {
+  first=await until(async()=>{
+   const view=(await command(f,'status',['--session',handle.session_id])).receipt;
+   return view?.active_request?.activity?.event_count>=3?view:null;
+  },'status has no durable live activity while reasoning and tools arrive before final',3000);
+  assert.equal(first.active_request.phase,process.platform==='win32'?'running_unverified':'running');
+  assert.equal(first.owner_identity,process.platform==='win32'?'unavailable':'verified');assert.equal(first.active_request.transport_state,'observed');
+  assert.equal(first.last_runtime_status,null);assert.equal(first.active_request.runtime_status,null);
+  assert.equal(first.cleanup,'unconfirmed');assert.ok(first.active_request.prompt_started_at);
+  second=await until(async()=>{
+   const view=(await command(f,'status',['--session',handle.session_id])).receipt;
+   return view?.active_request?.activity?.event_count>first.active_request.activity.event_count?view:null;
+  },'live activity did not advance before final',3000);
+  assert.ok(Date.parse(second.active_request.activity.last_event_at)>=Date.parse(first.active_request.activity.last_event_at));
+  const activityFile=path.join(f.config.stateDir,'bindings',handle.session_id,'activity',`${handle.request_id}.json`);
+  const durable=JSON.parse(await fs.readFile(activityFile,'utf8'));
+  assert.equal(durable.request_id,handle.request_id);assert.equal(durable.session_id,handle.session_id);
+  assert.ok(durable.activity.event_count>=first.active_request.activity.event_count);
+  assert.equal(durable.frozen,false);assert.ok(!JSON.stringify({first,second,durable}).includes('PRIVATE_SYNTHETIC_'));
+  // acpx/runtime has live events but does not own the acpx CLI's stream writer.
+  // Its default log pointer and last_seq must never be used as CWR liveness.
+  const recordFile=path.join(f.config.stateDir,'acpx',handle.session_id,'sessions',encodeURIComponent('cwr:'+handle.session_id)+'.json');
+  const record=JSON.parse(await fs.readFile(recordFile,'utf8'));
+  assert.equal(record.last_seq,0);assert.ok(record.event_log.active_path);
+  await assert.rejects(fs.stat(record.event_log.active_path),{code:'ENOENT'});
+ } finally {
+  await fs.writeFile(path.join(f.selection.route.workerHome,'fixture-release-activity'),'release');
+  done=await run.done;
+ }
+ assert.equal(done.code,0,done.stderr);assert.equal(done.receipt.runtime_status,'completed');
+ assert.equal(done.receipt.cleanup,'confirmed');assert.equal(done.receipt.output_excerpt,'Synthetic activity turn completed.');
+ assert.ok(done.receipt.activity.event_count>=second.active_request.activity.event_count);
+ assert.ok(!JSON.stringify(done.receipt).includes('PRIVATE_SYNTHETIC_'));
+ const final=await command(f,'status',['--session',handle.session_id]);
+ assert.equal(final.receipt.active_request,null);assert.equal(final.receipt.last_runtime_status,'completed');
+});
 test('REAL recovery: progress without RPC final reaches CWR deadline despite cooperative end_turn on cancel',async t=>{
  const f=await setup(t,{timeoutMs:2000});
  await fs.writeFile(f.orderFile,'FIXTURE_PROGRESS_ONLY CANCEL_END_TURN');
@@ -529,9 +574,21 @@ test('REAL acpx: abrupt exit and a detached tool require reconciliation before o
  assert.equal(blocked.code,2);assert.match(blocked.stderr,new RegExp(h.session_id));
  const recordFile=path.join(f.config.stateDir,'acpx',h.session_id,'sessions',encodeURIComponent('cwr:'+h.session_id)+'.json');
  const record=await read(recordFile);
+ const live=await until(async()=>{
+  const view=(await command(f,'status',['--session',h.session_id])).receipt;
+  return view?.active_request?.activity?.event_count>0?view:null;
+ },'active prompt did not retain its progress before abrupt exit');
+ assert.equal(live.phase,'running');assert.equal(live.last_runtime_status,null);
  run.child.kill('SIGKILL');await run.done;
  await until(async()=>!(await defaultProcessEvidence.identity(record.pid)),'adapter did not exit after pipe EOF');
  const oldStore=await fs.readFile(recordFile), oldBinding=await fs.readFile(path.join(bdir,'binding.json'));
+ const activityFile=path.join(bdir,'activity',h.request_id+'.json'),oldActivity=await fs.readFile(activityFile);
+ const abandoned=await command(f,'status',['--session',h.session_id]);
+ assert.equal(abandoned.receipt.phase,'unreconciled');assert.equal(abandoned.receipt.active,'unreconciled');
+ assert.equal(abandoned.receipt.cleanup,'unconfirmed');assert.equal(abandoned.receipt.last_runtime_status,null);
+ assert.ok(abandoned.receipt.active_request.activity.event_count>=live.active_request.activity.event_count);
+ assert.equal(abandoned.receipt.active_request.runtime_status,null);
+ assert.deepEqual(await fs.readFile(activityFile),oldActivity,'post-crash status must retain evidence without repairing it');
  const stillLive=await defaultProcessEvidence.identity(tool.pid);
  assert.equal(identityKey(stillLive),identityKey(tool),'CLI recovery must never kill the detached tool');
  const inspection=await command(f,'recover',['--session',h.session_id]);

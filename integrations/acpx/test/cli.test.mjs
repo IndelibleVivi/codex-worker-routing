@@ -188,9 +188,139 @@ test('a prior completed receipt never becomes the outcome of a newer active requ
  const view=await localStatus(f.config,f.binding);
  assert.equal(view.last_runtime_status,'completed');assert.equal(view.last_receipt,f.receipt.receipt_path);
  assert.equal(view.receipt_evidence.source,'binding');assert.equal(view.receipt_evidence.request_id,f.receipt.request_id);
- assert.deepEqual(view.active_request,{...marker,runtime_status:null,error_code:null,receipt:null});
+ assert.equal(view.active_request.request_id,marker.request_id);assert.equal(view.active_request.started_at,marker.started_at);
+ assert.equal(view.active_request.runtime_status,null);assert.equal(view.active_request.error_code,null);assert.equal(view.active_request.receipt,null);
+ assert.equal(view.active_request.transport_state,'missing');assert.equal(view.active_request.activity_status,'unavailable');
  assert.equal(view.cleanup,'unconfirmed');assert.equal(view.active,'owner_process_present');
  await assert.rejects(fs.stat(path.join(f.p.receipts,`${marker.request_id}.json`)),{code:'ENOENT'});
+});
+async function liveStatusFixture(t,{ended=false}={}) {
+ const gate=deferred();const f=await setup(t,{events:[],firstTurnGate:gate.promise});
+ f.raw.routes.worker.timeoutMs=10000;await fs.writeFile(f.configFile,JSON.stringify(f.raw));
+ if(ended){
+  const create=f.api.createAcpRuntime.bind(f.api);
+  f.api.createAcpRuntime=options=>{
+   const runtime=create(options),start=runtime.startTurn.bind(runtime);
+   runtime.startTurn=input=>({...start(input),events:{async *[Symbol.asyncIterator](){yield {type:'status',text:'PRIVATE_STATUS_PAYLOAD'}}}});
+   return runtime;
+  };
+ }
+ const pending=main(args(f),f.deps);
+ try {
+  const end=Date.now()+3000;let binding,snapshot,activityFile;
+  for(;;){
+   const start=f.api.calls.find(call=>call[0]==='start');
+   if(start){
+    const id=start[1].handle.sessionKey.slice(4);binding=await loadBinding(f.config.stateDir,id);
+    activityFile=path.join(paths(f.config.stateDir,id).activity,`${start[1].requestId}.json`);
+    snapshot=JSON.parse(await fs.readFile(activityFile,'utf8').catch(()=>'null'));
+    if(binding.active_turn?.prompt_started_at&&snapshot?.prompt_started_at&&snapshot.transport_state===(ended?'ended':'awaiting_events'))break;
+   }
+   assert.ok(Date.now()<end,'live status fixture did not acknowledge prompt');await sleep(5);
+  }
+  return {...f,binding,snapshot,activityFile,status:()=>localStatus(f.config,binding,{processEvidence:f.processEvidence}),finish:async()=>{gate.resolve();return pending}};
+ } catch(error){gate.resolve();await pending;throw error;}
+}
+test('a prompt with no events is running with unavailable activity; missing or corrupt telemetry cannot relabel it queued',async t=>{
+ const f=await liveStatusFixture(t);
+ try {
+  const view=await f.status();
+  assert.equal(view.phase,'running');assert.equal(view.active_request.phase,'running');
+  assert.equal(view.active_request.transport_state,'awaiting_events');assert.equal(view.active_request.activity_status,'unavailable');
+  assert.equal(view.active_request.activity.event_count,0);assert.equal(view.active_request.activity.last_event_at,null);
+  assert.equal(view.last_runtime_status,null);assert.equal(view.cleanup,'unconfirmed');
+  const before=await fs.readFile(f.activityFile,'utf8');await sleep(300);
+  assert.equal(await fs.readFile(f.activityFile,'utf8'),before,'idle time must not create a fake heartbeat or advance activity');
+  const later=await f.status();
+  assert.ok(later.active_request.snapshot_age_ms>=view.active_request.snapshot_age_ms+250);
+  await fs.unlink(f.activityFile);
+  const missing=await f.status();
+  assert.equal(missing.active_request.phase,'running');assert.equal(missing.active_request.transport_state,'missing');
+  assert.equal(missing.active_request.activity,null);assert.equal(missing.active_request.runtime_status,null);
+  await assert.rejects(fs.stat(f.activityFile),{code:'ENOENT'});
+  await fs.writeFile(f.activityFile,'{invalid',{mode:0o600});
+  const invalid=await f.status();
+  assert.equal(invalid.active_request.phase,'running');assert.equal(invalid.active_request.transport_state,'invalid');
+  assert.equal(invalid.active_request.activity_status,'unavailable');assert.equal(invalid.active_request.activity,null);
+  assert.equal(await fs.readFile(f.activityFile,'utf8'),'{invalid','status must not repair telemetry');
+ } finally {assert.equal(await f.finish(),0);}
+});
+test('an ended observation stream stays distinct from no events and never completes an active prompt',async t=>{
+ const f=await liveStatusFixture(t,{ended:true});
+ try {
+  const view=await f.status();
+  assert.equal(view.active_request.phase,'running');assert.equal(view.active_request.transport_state,'ended');
+  assert.equal(view.active_request.activity_status,'unavailable');assert.equal(view.active_request.activity.event_count,1);
+  assert.equal(view.active_request.activity.last_event_type,'status');assert.equal(view.active_request.runtime_status,null);
+  assert.equal(view.last_runtime_status,null);assert.equal(view.cleanup,'unconfirmed');
+  assert.ok(!JSON.stringify(view).includes('PRIVATE_STATUS_PAYLOAD'));
+ } finally {assert.equal(await f.finish(),0);}
+});
+test('live status requires exact request, session, execution, handle and start identity and only exposes allowlisted metadata',async t=>{
+ const f=await liveStatusFixture(t);
+ try {
+  const invalid=[
+   {request_id:'00000000-0000-0000-0000-000000000000'},
+   {session_id:'00000000-0000-0000-0000-000000000000'},
+   {route:'other'}, {execution_fingerprint:'another-execution'}, {acpx_record_id:'other'}, {acp_session_id:'other'},
+   {started_at:new Date(Date.parse(f.snapshot.started_at)-1).toISOString()},
+   {prompt_started_at:new Date(Date.parse(f.snapshot.prompt_started_at)+1).toISOString()},
+   {schema:'foreign/1'}, {frozen:'true'}, {transport_state:'producer-supplied-private-state'},
+   {activity:{...f.snapshot.activity,event_count:1,last_event_type:'PRIVATE_EVENT_NAME'}},
+  ];
+  for(const fields of invalid){
+   await atomicJSON(f.activityFile,{...f.snapshot,...fields});
+   const view=await f.status();
+   assert.equal(view.active_request.transport_state,'invalid',JSON.stringify(fields));
+   assert.equal(view.active_request.activity,null);assert.equal(view.active_request.phase,'running');assert.equal(view.last_runtime_status,null);
+  }
+  await atomicJSON(f.activityFile,{...f.snapshot,payload:'PRIVATE_PAYLOAD',activity:{...f.snapshot.activity,payload:'PRIVATE_PAYLOAD'}});
+  const clean=await f.status();
+  assert.equal(clean.active_request.transport_state,'awaiting_events');assert.ok(!JSON.stringify(clean).includes('PRIVATE_PAYLOAD'));
+  await fs.unlink(f.activityFile);
+  const foreign=path.join(f.root,'foreign-activity.json');await atomicJSON(foreign,f.snapshot);
+  await fs.symlink(foreign,f.activityFile);
+  assert.equal((await f.status()).active_request.transport_state,'invalid');
+  await fs.unlink(f.activityFile);await atomicJSON(f.activityFile,f.snapshot);
+  // A stopped/mismatched owner never becomes live merely because old activity
+  // exists. The independent lock/lifecycle recovery requirements are unchanged.
+  const ownerFile=path.join(paths(f.config.stateDir,f.binding.id).lock,'owner.json');
+  const originalOwner=JSON.parse(await fs.readFile(ownerFile,'utf8'));
+  await atomicJSON(ownerFile,{
+   ...originalOwner,
+   request_id:'00000000-0000-0000-0000-000000000000',
+  });
+  assert.equal((await f.status()).active_request.phase,'unreconciled');
+  await atomicJSON(ownerFile,originalOwner);
+ } finally {assert.equal(await f.finish(),0);}
+});
+test('live phase distinguishes verified ownership, unavailable observation, PID reuse and changed host or boot',async t=>{
+ const f=await liveStatusFixture(t);
+ const state=f.processEvidence.state,oldBoot=state.boot,oldHost=state.host,oldProcess=structuredClone(state.rows.get(process.pid));
+ try {
+  const verified=await f.status();assert.equal(verified.owner_identity,'verified');assert.equal(verified.phase,'running');
+  state.unavailable=true;
+  const unavailable=await f.status();
+  assert.equal(unavailable.owner_identity,'unavailable');assert.equal(unavailable.phase,'running_unverified');
+  assert.equal(unavailable.active_request.prompt_started_at,verified.active_request.prompt_started_at);
+  assert.equal(unavailable.cleanup,'unconfirmed');assert.equal(unavailable.active_request.runtime_status,null);
+  state.unavailable=false;
+  for(const change of [
+   ()=>{state.boot='synthetic-other-boot';},
+   ()=>{state.host='0'.repeat(64);},
+   ()=>{state.rows.set(process.pid,{...oldProcess,start:'synthetic-reused-pid'});},
+   ()=>{state.rows.delete(process.pid);},
+  ]){
+   change();const mismatched=await f.status();
+   assert.equal(mismatched.active,'owner_process_present','legacy PID-presence hint is kept separate');
+   assert.equal(mismatched.owner_identity,'mismatch');assert.equal(mismatched.phase,'unreconciled');
+   assert.equal(mismatched.active_request.runtime_status,null);assert.equal(mismatched.cleanup,'unconfirmed');
+   state.boot=oldBoot;state.host=oldHost;state.rows.set(process.pid,oldProcess);
+  }
+ } finally {
+  state.unavailable=false;state.boot=oldBoot;state.host=oldHost;state.rows.set(process.pid,oldProcess);
+  assert.equal(await f.finish(),0);
+ }
 });
 test('unconfirmed adapter cleanup preserves locks and returns a precise recovery-required failure',async t=>{
  const f=await setup(t,{cleanupError:true});assert.equal(await main(args(f),f.deps),1);const r=f.results.at(-1);

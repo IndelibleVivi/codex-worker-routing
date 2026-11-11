@@ -16,7 +16,7 @@ import { inventoryStorage, planStorage, applyStoragePlan, createScratch, loadScr
   newScratchLocation, scratchRenderEnvironment } from './storage.mjs';
 import { createAdmissionOwner, initializeLifecycleJournal, createLifecycleJournal,
   acquireOperationLocks, inspectLockRecovery, recoverExactLockPair, discoverWorkspaceLockOwner } from './lock-recovery.mjs';
-import { defaultProcessEvidence } from './process-evidence.mjs';
+import { defaultProcessEvidence, identityKey } from './process-evidence.mjs';
 
 
 // Property tables for the argument parser. `flags` take no value; `values` take
@@ -291,6 +291,15 @@ export async function loadAcpx() {
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const isoTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const nonnegative = value => Number.isSafeInteger(value) && value >= 0;
+function activityEvidence(a) {
+  return a && isoTime(a.observed_at) && nonnegative(a.event_count) ? {
+    observed_at: a.observed_at, event_count: a.event_count,
+    first_event_at: isoTime(a.first_event_at) ? a.first_event_at : null,
+    last_event_at: isoTime(a.last_event_at) ? a.last_event_at : null,
+    last_event_type: ['text_delta','status','tool_call','done','error','other'].includes(a.last_event_type) ? a.last_event_type : null,
+    last_event_age_ms: nonnegative(a.last_event_age_ms) ? a.last_event_age_ms : null,
+  } : null;
+}
 function receiptTiming(receipt) {
   const b = receipt.budget, a = receipt.activity;
   const budget = b && nonnegative(b.setup_ms) && nonnegative(b.task_ms) ? {
@@ -299,13 +308,7 @@ function receiptTiming(receipt) {
     task_deadline_at: isoTime(b.task_deadline_at) ? b.task_deadline_at : null,
     task_elapsed_ms: nonnegative(b.task_elapsed_ms) ? b.task_elapsed_ms : null,
   } : null;
-  const activity = a && isoTime(a.observed_at) && nonnegative(a.event_count) ? {
-    observed_at: a.observed_at, event_count: a.event_count,
-    first_event_at: isoTime(a.first_event_at) ? a.first_event_at : null,
-    last_event_at: isoTime(a.last_event_at) ? a.last_event_at : null,
-    last_event_type: ['text_delta','status','tool_call','done','error','other'].includes(a.last_event_type) ? a.last_event_type : null,
-    last_event_age_ms: nonnegative(a.last_event_age_ms) ? a.last_event_age_ms : null,
-  } : null;
+  const activity = activityEvidence(a);
   return { budget, activity };
 }
 async function statusReceipt(p, binding) {
@@ -337,7 +340,57 @@ async function statusReceipt(p, binding) {
   }
   return null;
 }
-export async function localStatus(config, binding) {
+async function statusActivity(p, binding, marker) {
+  let saved;
+  try {
+    await privateDir(p.activity, { create: false });
+    saved = await readJSON(path.join(p.activity, `${marker.request_id}.json`), { privateFile: true, maxBytes: 8192 });
+  } catch (error) {
+    return { activity: null, transport_state: ['ENOENT','STATE_MISSING'].includes(error.code) ? 'missing' : 'invalid', frozen: false };
+  }
+  const activity = activityEvidence(saved?.activity);
+  const count = activity?.event_count;
+  const validEvents = count === 0
+    ? ['first_event_at','last_event_at','last_event_type','last_event_age_ms'].every(key => saved.activity[key] === null)
+    : count > 0 && activity.first_event_at && activity.last_event_at && activity.last_event_type && activity.last_event_age_ms !== null &&
+      Date.parse(activity.first_event_at) <= Date.parse(activity.last_event_at);
+  if (!saved || saved.schema !== 'cwr.acp.activity/1' || saved.session_id !== binding.id ||
+      saved.request_id !== marker.request_id || saved.route !== binding.route || saved.started_at !== marker.started_at ||
+      saved.execution_fingerprint !== (binding.executionIdentity?.fingerprint ?? binding.routeFingerprint ?? null) ||
+      !binding.handle?.acpxRecordId || saved.acpx_record_id !== binding.handle.acpxRecordId ||
+      !binding.handle?.backendSessionId || saved.acp_session_id !== binding.handle.backendSessionId ||
+      (saved.prompt_started_at !== null && saved.prompt_started_at !== marker.prompt_started_at) ||
+      !['pending','awaiting_events','observed','ended','failed','absent'].includes(saved.transport_state) ||
+      typeof saved.frozen !== 'boolean' || !activity || !validEvents ||
+      (saved.transport_state === 'observed' && count === 0))
+    return { activity: null, transport_state: 'invalid', frozen: false };
+  // Fixed enums and counters only. No sidecar field can repair bindings,
+  // establish a terminal outcome, authorize a writer, or confirm cleanup.
+  return { activity, transport_state: saved.transport_state, frozen: saved.frozen };
+}
+async function statusOwnerIdentity(owner, processEvidence) {
+  if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 ||
+      typeof processEvidence?.boot !== 'function' || typeof processEvidence?.identity !== 'function') return 'unavailable';
+  // One read-only process observation; retain partial evidence so a known
+  // boot/host/start mismatch is not hidden by another unavailable capability.
+  const [boot, identity, host] = await Promise.allSettled([
+    processEvidence.boot(), processEvidence.identity(owner.pid),
+    typeof processEvidence.host === 'function' ? processEvidence.host() : Promise.resolve(null),
+  ]);
+  const verifiedIdentity = value => typeof value?.start === 'string' && value.start && !value.start.startsWith('unverified:') ? identityKey(value) : null;
+  const expectedBoot = typeof owner.boot === 'string' && !owner.boot.startsWith('unavailable:') ? owner.boot : null;
+  const expectedIdentity = owner.process?.pid === owner.pid ? verifiedIdentity(owner.process) : null;
+  const expectedHost = owner.host?.schema === 'cwr.acp.host-identity/1' && typeof owner.host.digest === 'string' && /^[a-f0-9]{64}$/.test(owner.host.digest) ? owner.host.digest : null;
+  const actualBoot = boot.status === 'fulfilled' && typeof boot.value === 'string' ? boot.value : null;
+  const actualIdentity = identity.status === 'fulfilled' ? verifiedIdentity(identity.value) : null;
+  const actualHost = host.status === 'fulfilled' && typeof host.value === 'string' && /^[a-f0-9]{64}$/.test(host.value) ? host.value : null;
+  if ((expectedBoot && actualBoot && expectedBoot !== actualBoot) ||
+      (expectedIdentity && actualIdentity && expectedIdentity !== actualIdentity) ||
+      (expectedHost && actualHost && expectedHost !== actualHost) ||
+      (actualBoot && identity.status === 'fulfilled' && identity.value === null)) return 'mismatch';
+  return expectedBoot && actualBoot && expectedIdentity && actualIdentity && expectedHost && actualHost ? 'verified' : 'unavailable';
+}
+export async function localStatus(config, binding, { processEvidence = defaultProcessEvidence } = {}) {
   const p = paths(config.stateDir, binding.id);
   let lockPresent = false;
   try { await privateDir(p.lock, { create: false }); lockPresent = true; }
@@ -353,16 +406,38 @@ export async function localStatus(config, binding) {
     try { process.kill(owner.pid, 0); active = 'owner_process_present'; }
     catch { /* PID is a hint only. Never auto-reclaim. */ }
   }
+  const ownerIdentity = await statusOwnerIdentity(owner, processEvidence);
   const saved = await statusReceipt(p, binding);
   const errorCode = typeof saved?.receipt.error_code === 'string' && /^[A-Z0-9_]{1,80}$/.test(saved.receipt.error_code) ? saved.receipt.error_code : null;
   const marker = binding.active_turn;
   const current = saved?.evidence.source === 'active_turn' ? saved.receipt : null;
-  const activeRequest = typeof marker?.request_id === 'string' && UUID.test(marker.request_id) && isoTime(marker.started_at) ? {
+  const validMarker = typeof marker?.request_id === 'string' && UUID.test(marker.request_id) && isoTime(marker.started_at);
+  const live = validMarker ? await statusActivity(p, binding, marker) : null;
+  const promptStarted = validMarker && isoTime(marker.prompt_started_at) && Date.parse(marker.prompt_started_at) >= Date.parse(marker.started_at) ? marker.prompt_started_at : null;
+  const matchingOwner = active === 'owner_process_present' && owner?.session === binding.id && owner?.request_id === marker?.request_id && ownerIdentity !== 'mismatch';
+  let phase = binding.closed ? 'closed' : 'idle';
+  if (lockPresent) phase = active === 'owner_process_present' && ownerIdentity !== 'mismatch' ? 'starting' : 'unreconciled';
+  if (validMarker) {
+    if (current) phase = current.runtime_status;
+    else if (!matchingOwner) phase = 'unreconciled';
+    else if (live.frozen) phase = 'finalizing';
+    else if (promptStarted) phase = ownerIdentity === 'verified' ? 'running' : 'running_unverified';
+    else phase = 'submitting';
+  }
+  const queriedAt = Date.now();
+  const activeRequest = validMarker ? {
     request_id: marker.request_id, started_at: marker.started_at,
+    phase, prompt_started_at: promptStarted,
+    transport_state: live.transport_state,
+    activity_status: live.transport_state === 'observed' ? 'available' : 'unavailable',
+    activity: live.activity,
+    // Receipt/activity ages remain frozen at their snapshot. This separate
+    // query-time wall-clock age makes stale persisted observations visible.
+    snapshot_age_ms: live.activity && queriedAt >= Date.parse(live.activity.observed_at) ? queriedAt - Date.parse(live.activity.observed_at) : null,
     runtime_status: current?.runtime_status ?? null, error_code: current ? errorCode : null,
     receipt: current?.receipt_path ?? null,
   } : null;
-  return { schema:'cwr.acp.status/1', session_id:binding.id, active,
+  return { schema:'cwr.acp.status/1', session_id:binding.id, active, owner_identity:ownerIdentity, phase,
     closed:binding.closed === true, last_runtime_status:saved?.receipt.runtime_status ?? null,
     last_error_code:errorCode, active_request:activeRequest,
     cleanup:binding.active_turn ? 'unconfirmed' : binding.cleanup ?? 'unknown',
@@ -511,7 +586,7 @@ export async function main(args, deps = {}) {
   }
   let binding;
   if (opt.command !== 'run') binding = await loadBinding(config.stateDir, opt.session);
-  if (opt.command === 'status') { output(await localStatus(config,binding)); return 0; }
+  if (opt.command === 'status') { output(await localStatus(config,binding,{processEvidence:deps.processEvidence})); return 0; }
   if (opt.command === 'cancel') { output(await requestCancel(config,binding)); return 0; }
   if (opt.command === 'recover') {
     const processEvidence = deps.processEvidence ?? defaultProcessEvidence;
