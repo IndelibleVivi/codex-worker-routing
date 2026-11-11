@@ -104,8 +104,8 @@ test('unregistered worktree-shaped cwd has no new state, runtime or receipt',asy
 
 // Exercise the independent promises exposed by the public runtime contract.
 // No process is spawned: the base double provides lifecycle admission/exit.
-async function controlled(t,kind) {
- const f=await fixture({timeoutMs:100});f.processEvidence=lifecycleEvidence(f.syntheticPid);t.after(f.cleanup);const api=fakeAcpx(),create=api.createAcpRuntime.bind(api);
+async function controlled(t,kind,{timeoutMs=100}={}) {
+ const f=await fixture({timeoutMs});f.processEvidence=lifecycleEvidence(f.syntheticPid);t.after(f.cleanup);const api=fakeAcpx(),create=api.createAcpRuntime.bind(api);
  const began=deferred(),release=deferred();let cancels=0;let optionsSeen;
  api.createAcpRuntime=options=>{
   const runtime=create(options),close=runtime.close.bind(runtime),result=deferred(),stream=deferred(),sent=deferred();
@@ -198,7 +198,10 @@ test('task budget begins at promptStarted instead of consuming submission time',
  assert.equal(r.runtime_status,'completed');assert.equal(r.error_code,null);assert.ok(r.budget.prompt_started_at);
 });
 test('a stream failure wins even if a canonical success has already arrived',async t=>{
- const f=await controlled(t,'stream-error');const r=await engineRun(f);
+ // This tests event/result precedence, not the short deadline contract. Allow
+ // ordinary setup time so disk-backed admission can reach the intended stream.
+ const f=await controlled(t,'stream-error',{timeoutMs:2000});const r=await engineRun(f);
+ assert.ok(f.input(),'the case must reach startTurn');assert.equal(r.activity.event_count,1);
  assert.equal(r.runtime_status,'failed');assert.equal(r.error_code,'STREAM_ERROR');assert.equal(r.cleanup,'confirmed');
 });
 test('unsettled timed-out turn never claims confirmed cleanup',async t=>{
