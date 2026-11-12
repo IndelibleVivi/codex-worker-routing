@@ -49,6 +49,15 @@ sidecar；cursor 只按 shape/编码/batch/range/revision 严格校验，不是�
 需单独验证；不能为激活 swarm 复制凭据或改变默认。完整接口与边界见
 [Worker 交付](worker-delivery.md)。
 
+## ACP 实时状态升级
+
+更新规范源 `integrations/acpx/`，在该目录运行 `npm ci --ignore-scripts`。新启动的
+turn 会在执行中保存不含正文的活动快照；已经运行的进程继续使用其载入的代码。
+宿主集成应读取 `status.phase` 与 `active_request` 判断当前执行阶段和活动可用性，
+继续用终态回执确认结果。已固定 runtime 的 `last_seq` 与 `event_log` 不属于 CWR
+实时状态输入。历史 binding 仍可读取，活动不可用会明确标示。状态契约与 Windows/
+OpenCode 验收范围见 [ACP 活动说明](acp-integration.md)。
+
 ## Recovery 升级兼容事项
 
 同时更新 canonical ACP source、插件和 operator 自己维护的命令模板。每次 `run` / `continue`
@@ -89,6 +98,9 @@ Dispatch 随可选 ACP source 提供，不新增 frontend dependency 或系统�
 完整命令、私有数据边界、导出与退出行为见[派工台](dispatch.md)。
 
 ## 主 session 自动加载
+
+当前 hook 在 `startup`、`resume`、`clear`、`compact` 上重新加载；尚未覆盖 root
+线程的 `fork` 事件。分叉对话中是否刷新私人上下文，见[输入边界](context.md)。
 
 1. 在 Git 目录外准备 `main-session.md`，放入只属于主协调者的私人说明。保留原文
    与恢复副本，此时先保留旧 AGENTS。文件必须是非空 UTF-8，最多 65536 bytes。

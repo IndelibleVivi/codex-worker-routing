@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { executeTurn, closeBinding, validateResume, workOrder, runtimeOptions } from '../src/engine.mjs';
 import { readJSON, paths } from '../src/state.mjs';
-import { fixture, fakeAcpx, lifecycleEvidence } from './helpers.mjs';
+import { fixture, fakeAcpx, lifecycleEvidence, deferred, sleep } from './helpers.mjs';
 import { createAdmissionOwner, initializeLifecycleJournal, createLifecycleJournal } from '../src/lock-recovery.mjs';
 import { digest } from '../src/state.mjs';
 async function setup(t,behavior={}){const f=await fixture();t.after(f.cleanup);f.processEvidence=lifecycleEvidence(f.syntheticPid);return {...f,api:fakeAcpx(behavior)}}
@@ -67,8 +69,21 @@ test('stream failure cannot be masked by an eventual successful result',async t=
  const f=await setup(t,{streamError:true});const r=await run(f);assert.equal(r.runtime_status,'failed');assert.equal(r.error_code,'STREAM_ERROR');assert.ok(f.api.calls.some(c=>c[0]==='cancel'));
 });
 test('cancellation returns a cancelled terminal, not successful acceptance',async t=>{
- const f=await setup(t,{delay:200});const c=new AbortController();setTimeout(()=>c.abort(),25);
- const r=await run(f,{signal:c.signal});assert.equal(r.runtime_status,'cancelled');assert.equal(r.task_acceptance,'unverified');assert.equal(r.cleanup,'confirmed');
+ const gate=deferred(),f=await setup(t,{firstTurnGate:gate.promise}),c=new AbortController();
+ const pending=run(f,{signal:c.signal});let settled=false,r;
+ pending.then(()=>{settled=true;},()=>{settled=true;});
+ try {
+  // Hold the result and cancel an acknowledged prompt. A fixed 25ms delay can
+  // instead interrupt initialization on slower filesystems, whose cleanup is
+  // correctly unconfirmed while the initialization promise remains unsettled.
+  const end=Date.now()+5000;
+  while(!f.binding.active_turn?.prompt_started_at){
+   assert.equal(settled,false,'the turn ended before prompt acknowledgement');
+   assert.ok(Date.now()<end,'prompt acknowledgement was not observed');await sleep(5);
+  }
+ } finally {c.abort();gate.resolve();r=await pending;}
+ assert.ok(r.budget.prompt_started_at);
+ assert.equal(r.runtime_status,'cancelled');assert.equal(r.task_acceptance,'unverified');assert.equal(r.cleanup,'confirmed');
 });
 test('pre-aborted request does not initialize or prompt',async t=>{
  const f=await setup(t);const c=new AbortController();c.abort();const r=await run(f,{signal:c.signal});
@@ -81,6 +96,86 @@ test('activity categorizes unknown event types without retaining producer-contro
  const f=await setup(t,{events:[{type:'PRIVATE_EVENT_TYPE',payload:'PRIVATE_EVENT_PAYLOAD'}]});const r=await run(f);
  assert.equal(r.activity.event_count,1);assert.equal(r.activity.last_event_type,'other');
  assert.ok(!JSON.stringify(r).includes('PRIVATE_EVENT_'));
+});
+test('activity persistence failure is additive, retains prompt acknowledgement and does not retry or cancel work',async t=>{
+ const gate=deferred(),started=deferred();
+ const f=await setup(t,{firstTurnGate:gate.promise,onStart:input=>started.resolve(input.requestId)});
+ const p=paths(f.config.stateDir,f.binding.id);
+ // An unsafe telemetry-directory target deterministically rejects the optional
+ // write while all canonical binding/receipt paths remain writable.
+ await fs.writeFile(p.activity,'synthetic obstruction',{mode:0o600});
+ const pending=run(f);let receipt,requestId;
+ try {
+  requestId=await started.promise;
+  const end=Date.now()+2000;
+  while(!(await readJSON(p.binding,{privateFile:true})).active_turn?.prompt_started_at){
+   assert.ok(Date.now()<end,'prompt acknowledgement was not retained');await sleep(5);
+  }
+  await fs.unlink(p.activity);
+  await sleep(300);
+  await assert.rejects(fs.stat(p.activity),{code:'ENOENT'});
+ } finally {gate.resolve();receipt=await pending;}
+ assert.equal(receipt.request_id,requestId);assert.equal(receipt.runtime_status,'completed');
+ assert.equal(receipt.activity_warning,'ACTIVITY_PERSISTENCE_FAILED');assert.equal(receipt.error_code,null);
+ assert.equal(receipt.cleanup,'confirmed');assert.ok(receipt.activity.event_count>0);
+ assert.equal(f.api.calls.filter(call=>call[0]==='cancel').length,0);
+ await assert.rejects(fs.stat(p.activity),{code:'ENOENT'});
+});
+test('an absent runtime event interface is explicit and cannot fabricate a normal stream',async t=>{
+ const f=await setup(t,{delay:100});const create=f.api.createAcpRuntime.bind(f.api);
+ f.api.createAcpRuntime=options=>{
+  const runtime=create(options),start=runtime.startTurn.bind(runtime);
+  runtime.startTurn=input=>({...start(input),events:undefined});return runtime;
+ };
+ const receipt=await run(f);
+ assert.equal(receipt.runtime_status,'failed');assert.equal(receipt.error_code,'EVENT_STREAM_UNAVAILABLE');
+ assert.equal(receipt.activity.event_count,0);
+ const saved=await readJSON(path.join(paths(f.config.stateDir,f.binding.id).activity,`${receipt.request_id}.json`),{privateFile:true});
+ assert.equal(saved.transport_state,'absent');assert.equal(saved.frozen,true);
+});
+test('a held prompt acknowledgement write cannot delay deadline cancellation or overwrite a finalized binding',async t=>{
+ const f=await setup(t);const create=f.api.createAcpRuntime.bind(f.api),cancelled=deferred(),writeGate=deferred(),writeDone=deferred();
+ const turnResult=deferred(),eventsDone=deferred();
+ f.api.createAcpRuntime=options=>{
+  const runtime=create(options);
+  runtime.startTurn=()=>({promptStarted:Promise.resolve(),result:turnResult.promise,
+   events:{async *[Symbol.asyncIterator](){await eventsDone.promise;}},
+   cancel:async()=>{cancelled.resolve();turnResult.resolve({status:'cancelled'});eventsDone.resolve();},
+   closeStream:async()=>eventsDone.resolve(),
+  });
+  return runtime;
+ };
+ const p=paths(f.config.stateDir,f.binding.id),rename=fs.rename;
+ let held=false,receipt;
+ fs.rename=async(from,to)=>{
+  if(to===p.binding&&!held&&JSON.parse(await fs.readFile(from,'utf8')).active_turn?.prompt_started_at){
+   held=true;await writeGate.promise;
+   try{return await rename(from,to);}finally{writeDone.resolve();}
+  }
+  return rename(from,to);
+ };
+ const pending=run(f,{selection:{...f.selection,route:{...f.selection.route,timeoutMs:100}},cleanupMs:50});
+ let cancelWait;
+ try {
+  await Promise.race([cancelled.promise,new Promise((_,reject)=>{cancelWait=setTimeout(()=>reject(new Error('task deadline did not cancel while acknowledgement persistence was held')),750);})]);
+  assert.equal(held,true);
+  receipt=await pending;
+  assert.equal(receipt.error_code,'TURN_TIMEOUT');assert.equal(receipt.runtime_status,'failed');assert.equal(receipt.cleanup,'unconfirmed');
+  const before=await readJSON(p.binding,{privateFile:true});
+  assert.equal(before.active_turn.request_id,receipt.request_id);assert.equal(before.active_turn.prompt_started_at,undefined);
+  assert.equal(before.lastReceipt,undefined,'an unsettled earlier binding writer must retain the marker and never race final binding publication');
+ } finally {
+  clearTimeout(cancelWait);
+  writeGate.resolve();if(held)await writeDone.promise;
+  fs.rename=rename;await pending;
+ }
+ const after=await readJSON(p.binding,{privateFile:true});
+ assert.equal(after.active_turn.request_id,receipt.request_id);assert.ok(after.active_turn.prompt_started_at);
+ assert.equal(after.lastReceipt,undefined);
+ const {localStatus}=await import('../src/cli.mjs');
+ const recovered=await localStatus(f.config,after);
+ assert.equal(recovered.last_runtime_status,'failed');assert.equal(recovered.last_error_code,'TURN_TIMEOUT');
+ assert.equal(recovered.receipt_evidence.source,'active_turn');assert.equal(recovered.cleanup,'unconfirmed');
 });
 test('cleanup failure is explicit and cannot be claimed complete',async t=>{
  const f=await setup(t,{cleanupError:true});const r=await run(f);assert.equal(r.cleanup,'unconfirmed');assert.ok(r.error_code);

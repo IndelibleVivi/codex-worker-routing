@@ -63,6 +63,17 @@ shared-HOME concurrency is serialized within a batch; an actual route capability
 its own scoped validation. Do not copy credentials or change defaults to activate swarm.
 See [worker delivery](worker-delivery.en.md) for the optional interfaces and boundaries.
 
+## Live ACP status upgrade
+
+Update the canonical `integrations/acpx/` source and run `npm ci --ignore-scripts`
+there. New turns publish payload-free activity during execution; an already-running
+process keeps its loaded code. Host integrations should read `status.phase` and
+`active_request` for current execution and activity availability, leaving terminal
+receipts as outcome evidence. The pinned runtime's `last_seq` and `event_log` are not
+CWR live-status inputs. Historical bindings remain readable, with unavailable
+activity reported explicitly. See [live activity](acp-integration.en.md#live-activity-and-host-status)
+for the status contract and the Windows/OpenCode acceptance scope.
+
 ## Recovery upgrade compatibility
 
 Update canonical ACP source, plugin instructions and operator-maintained command templates
@@ -116,6 +127,10 @@ can save explicit plans and, after confirmation, clean eligible managed scratch;
 [Dispatch guide](dispatch.en.md) for commands, data boundaries, exports and shutdown.
 
 ## Automatic main-session loading
+
+The current hook reloads on `startup`, `resume`, `clear` and `compact`; root-thread
+`fork` events are not covered. See [input boundaries](context.en.md) before relying
+on private-context refresh in a forked conversation.
 
 1. Prepare `main-session.md` outside Git with private instructions belonging only
    to the main coordinator. Preserve the original and a recovery copy; keep the

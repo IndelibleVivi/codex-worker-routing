@@ -33,6 +33,7 @@ from component wiring to a worker that carries one whole responsibility end to e
 | Finite batches | `prepare` turns one coordinator-authored spec into per-item orders and a manifest; `batch` runs a finite dependency graph in separate CLI processes with exact predecessor report/artifact bindings, `--start-handle` publishes the batch identity before launch and `--compact` gives a bounded paged terminal; `collect --job` expands one full record and `--impacts` one job's decision impacts. No global scheduler or job database. |
 | Evidence boundaries | A worker declaration is a candidate, not acceptance; verification executes only task-confirmed checks, and never executes commands taken from a report. |
 | Durable ACP authority | Every run/continue re-checks explicit per-turn permissions; recovery binds the exact session and receipt; configured fallback is pre-launch only. |
+| Live ACP status | `status` exposes the current phase and a durable, payload-free activity snapshot while the worker is running. Missing activity stays explicit; host consumers use CWR's phase instead of inferring a queue from acpx `last_seq`. |
 
 ## How a task flows
 

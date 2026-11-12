@@ -323,6 +323,71 @@ worktree；worktree 本身也不隔离上述非文件资源。
 达到保留时长并通过当前安全检查的受管 scratch 才可计划清理。旧 tmp/cache、日志、数据库、
 工单与回执保持只读。CLI/JSON 与 dashboard 复用一个后端，见[存储管理](storage-management.md)。
 
+## 实时活动与宿主状态
+
+prompt 尚未结束时，`status --session UUID` 也能读取不含 payload 的活动证据。
+CWR 消费公开 `startTurn(...).events` iterator 中归一化后的 reasoning、tool、status 等事件，
+每个 request 只在 `stateDir/bindings/SESSION/activity/REQUEST.json` 保留一个有界快照。
+其中只有 exact session/request、execution 与 saved-handle 身份、prompt 确认、固定的 transport
+状态枚举，以及与 receipt `activity` 相同的最小计数、时间和类别。不保存 prompt、thought
+正文、tool 输入输出、tool 名称、路径或 producer 自由文本；原有私人 acpx conversation store
+仍遵循其独立的保留约定。
+
+事件更新按 250ms 节奏合并；prompt 确认和最终冻结快照也会请求写入。最多只有一个写入在途和
+一个待保存快照。空闲事件流不会制造 heartbeat 或虚构事件。binding 独立记录
+`active_turn.prompt_started_at`，可选 telemetry 文件丢失不能抹掉已观察到的 prompt 提交。
+activity I/O 失败后，本轮不再尝试 telemetry 写入，最终回执增加
+`activity_warning: "ACTIVITY_PERSISTENCE_FAILED"`，不会因此取消正常工作；必需的 binding/receipt
+持久化和真实事件流错误仍遵循原有失败规则。activity 在取消/清理之前冻结，最终写入的有界等待
+与清理并行，不阻塞取消请求，也不刷新任务 deadline。
+必需的 prompt 确认写入与该 deadline 并行：写入失败会使本轮失败，写入停滞不能推迟 deadline
+取消。如果它在清理时限内仍未结算，CWR 保留 active marker 与锁，报告 cleanup unconfirmed，
+并保存 exact terminal receipt，不让最终 binding 更新与较早的未决写入竞争；status 可经
+marker 恢复该回执。
+
+宿主应先用顶层 `phase` 显示 request 生命周期，再用 `active_request.activity_status` 与
+`transport_state` 显示可见性：
+
+| `phase` | 宿主应理解的含义 |
+| --- | --- |
+| `starting` | operation lock 下存在 owner 进程，尚未写入 prompt marker。 |
+| `submitting` | 已记录本轮 request，尚未观察到 prompt 确认。 |
+| `running` | prompt 确认已持久化，owner 匹配本轮 request 及 host/boot/process-start 身份，尚无已记录的终态决定。 |
+| `running_unverified` | 已有 prompt 确认及匹配的 lock/PID 提示，但当前 owner 身份不可核验；显示“prompt 已开始 · owner 身份未核验”。 |
+| `finalizing` | activity 已按终态决定冻结，canonical receipt 尚不可用。 |
+| `unreconciled` | owner 不存在、lock/host/boot/process-start 身份不匹配或 owner 证据缺失，旧活动不能证明 writer 仍活跃。 |
+| `completed` / `failed` / `cancelled` | 有效回执匹配仍保留的 active request，也覆盖最终 binding 更新中断的情况。 |
+| `idle` / `closed` | 不再有 operation lock 或 active request；`last_*` 结果只表示历史回执。 |
+
+当 `phase: "running"` 且 `activity_status: "unavailable"` 时，显示 **运行中 · 活动不可用**，
+`running_unverified` 则保留明确的 owner 未核验说明；两者都不应退回 queued。顶层
+`owner_identity` 为 `verified`、`mismatch` 或 `unavailable`，与原有
+`active: "owner_process_present"` 的 PID 提示独立。现有 Windows inspector 不能核验
+host/boot/process-start 身份，因此正常 Windows prompt 使用 `running_unverified`，同时仍可
+显示递增的活动；这里没有新增 process inspector 或恢复权限。`transport_state` 区分
+`pending` / `awaiting_events`（未观察到事件）、
+`observed`（已收到事件）、`ended`（iterator 已结束）、`failed`（iterator 报错）、`absent`
+（runtime 没有提供事件接口），以及 `missing` / `invalid`（没有可用 sidecar）。事件流结束后
+可以保留早先事件元数据，同时明确当前可见性不可用；它不能让 prompt 被判定完成。
+没有 exact 快照时，`active_request.activity` 为 null。独立的 `snapshot_age_ms` 是本次 status
+查询时该持久化快照的 wall-clock age；未知或时钟回退到快照之前时为 null。快照自身的
+`last_event_age_ms` 仍固定在观察时刻。要同时看快照新鲜度与事件时间，之前成功写入一次不等于
+持续 heartbeat。
+
+`last_runtime_status` 和 `active_request.runtime_status` 仍然**只表示终态**；null 不是 queued，
+较早的 completed receipt 也不能完成新 request。phase 与已有活动不证明模型健康或有效进展，
+transport 状态描述保存的观察，不是一次新的连接探测。独立的 `active`、`owner_identity`、
+`cleanup`、取消与恢复规则继续各自约束其证据；
+activity 不回收锁、不确认 writer 停止。status 只读本轮 exact 快照，核对 session、route、
+execution fingerprint、saved handle 与开始时间，不扫描猜测较新文件，也不修复丢失或损坏的状态。
+
+固定的 **acpx 0.15.1** 中，public runtime 的事件 iterator 与 acpx CLI 的 `SessionEventWriter`
+是两条路径。runtime 事件正常到达时，保存记录仍可能是 `last_seq: 0`，而 `event_log.active_path`
+所指 stream 文件不存在；两者都不是 CWR queued/liveness 证据。真实包 regression 使用合成
+ACP 进程持续发送 reasoning/tool 更新、暂不返回 assistant final，并由第二个 CLI 进程验证
+递增的持久化活动。这项验证不使用模型或账号，也不代表外部宿主 UI、Windows/OpenCode 安装或
+真实 provider route 已验收；这些界面需要消费新 status 字段，并在实际安装版本上分别检查。
+
 ## 崩溃与失败
 
 初始化和 prompt 提交各有 `min(route.timeoutMs, 30000)` 毫秒 setup deadline；分别报告
@@ -365,9 +430,9 @@ handle 身份及回执自身路径；foreign/stale/malformed 或不安全文件�
 没有有效指针时保持 null，不扫描并猜测最新回执。`receipt_evidence.source` 标记
 `active_turn` 或 `binding`，并提供 request id、`reported_cleanup` 及筛选后的 `budget` /
 `activity`；旧回执没有的新字段保持 null，历史回执不改写。
-`active_request` 单独显示 binding 中的当前 request id、开始时间及匹配的 runtime status、
-error code、receipt；没有本轮回执时后三项为 null。较早的 completed 回执仍可作为
-`last_*` 的历史证据，不能成为较新 active request 的完成结果。
+`active_request` 单独显示 binding 中的当前 request id、开始时间、prompt 确认、phase 和上述
+实时活动元数据，以及匹配的 runtime status、error code、receipt；没有本轮回执时后三项仍为
+null。较早的 completed 回执仍可作为 `last_*` 的历史证据，不能成为较新 active request 的完成结果。
 
 这条显示恢复路径不修复 binding、不回收锁，也不确认 writer 停止。顶层 `cleanup` 独立取自
 binding；`active_turn` 仍存在时保持 `unconfirmed`，即使回执曾报告 confirmed。

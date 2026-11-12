@@ -149,10 +149,35 @@ configured endpoint.
 | Errors mention `/responses` is unrecognized | The upstream only has Chat Completions; add a translator or change endpoints |
 | The model is in the picker but not in the worker | The worker's own `CODEX_HOME`/`config.toml` and its catalog |
 | The adapter lists a different model than expected | Where the adapter's model list comes from; it does not prove upstream identity |
-| `401` or missing key | Which hop is authenticating: whether the worker inherited the variable named by `env_key`, and whether the router's own provider secret is in place |
+| `401` or missing key | Identify the failing hop first. For inference, check the worker's `env_key` and the router's provider secret; for tool approval, inspect the reviewer path below |
 | `404` or unknown model | Model-id mapping; whether the translator forwards the slug upstream |
-| Chat works but editing or tools are unreliable | Translator function/tool and streaming translation, plus catalog capability claims |
+| Chat works but editing or tools are unreliable | Effective adapter mode, approval reviewer and sandbox, then translator function/tool and streaming translation plus catalog capability claims |
 | Everything looks right but output seems synthetic | Upstream entitlement/quota, and whether a cache or placeholder answered |
+
+## Text succeeds but tool approval fails
+
+[Issue #5](https://github.com/IndelibleVivi/codex-worker-routing/issues/5) reports a
+Windows run with `codex-acp 1.13.1` where model text returned but automatic approval
+review failed with HTTP `401`, so the requested file was not created. A controlled
+adapter-mode change then passed an independently checked write and same-session
+continuation. This is operator-reported evidence for that setup. The original `401`
+source remains unknown; the report does not establish a general authentication fix.
+
+Keep these controls separate when diagnosing that symptom:
+
+| Control | What to inspect |
+| --- | --- |
+| Worker `config.toml` | The isolated worker's defaults; adapter-supplied turn settings may override them |
+| Adapter/session mode | The exact adapter version and effective `approval_policy`, `approvals_reviewer` and `sandbox_policy` for the turn |
+| CWR `--permissions read\|full` and route `maxPermissions` | How CWR answers ACP permission requests that reach it; these do not select the adapter mode or reviewer |
+| OS sandbox | The actual filesystem and network restrictions; neither a mode label nor CWR `full` proves unrestricted access |
+
+The [tagged 1.13.1 mode definitions](https://github.com/agentclientprotocol/codex-acp/blob/v1.13.1/src/AgentMode.ts)
+explain why its `read-only` label was misleading: that mode selected a user reviewer
+with a workspace-write sandbox. Do not carry that label's behavior or the report's
+mode change into another adapter/version as a default. Locate the failed approval
+request before changing credentials or policy, preserve the task's authorized access,
+and verify actual tool results and continuation separately from successful text output.
 
 ## Related documents
 

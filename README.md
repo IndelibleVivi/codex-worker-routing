@@ -29,6 +29,7 @@
 | 有限批次 | `prepare` 把一份主协调者撰写的 spec 机械生成逐条 order 与 manifest；`batch` 以单独的 CLI 进程执行有限依赖图，将确切前项报告/artifact 绑定到后续输入，`--start-handle` 在启动前给出本批 identity，`--compact` 给出有界分页终态；`collect --job` 展开单条完整记录，`--impacts` 展开该 job 的决策影响。没有全局 scheduler 或 job database。 |
 | 证据边界 | worker 声明只是候选，不是验收；只有任务确认的检查会执行，绝不执行来自报告的指令。 |
 | ACP 持久授权 | 每次 run/continue 都重查显式每轮权限；恢复绑定确切的 session 与回执；已配置的备用只在启动前触发。 |
+| ACP 实时状态 | worker 运行中，`status` 提供当前阶段与不含正文的持久活动快照。活动缺失会明确标示；宿主使用 CWR 的 phase，避免从 acpx `last_seq` 推断排队状态。 |
 
 ## 一次任务怎样流动
 

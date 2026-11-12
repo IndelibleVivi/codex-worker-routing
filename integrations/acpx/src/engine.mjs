@@ -181,31 +181,81 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   let messageText = '', messageTruncated = false, messageBytes = 0;
   let cleanup = 'unconfirmed', touchedRuntime = false, acceptingEvents = true;
   let stream, promptStartedAt = null, taskStartedClock = null, taskElapsedMs = null, activity = null;
+  let acknowledgementWrite = null, acknowledgementSettled = true, acknowledgementDrain = null;
   let firstEventAt = null, lastEventAt = null, lastEventClock = null, lastEventType = null;
+  let transportState = 'pending', activityEnabled = false, activityDirty = false, activityTimer = null, activityWrite = null, activityWarning = null, finalActivityWrite = null;
   const setupMs = Math.min(selection.route.timeoutMs, 30000);
   const startedAt = now();
   // Freeze the evidence at the terminal decision, before cancellation/cleanup
   // can emit late events. This is observed transport activity, never proof of
   // useful progress, writer liveness or a provider failure classification.
-  const snapshotActivity = () => {
-    if (activity) return;
+  const currentActivity = () => {
     const clock = performance.now();
-    if (taskStartedClock !== null && taskElapsedMs === null) taskElapsedMs = Math.max(0, Math.round(clock - taskStartedClock));
-    activity = { observed_at: now(), event_count: eventCount, first_event_at: firstEventAt,
+    return { observed_at: now(), event_count: eventCount, first_event_at: firstEventAt,
       last_event_at: lastEventAt, last_event_type: lastEventType,
       last_event_age_ms: lastEventClock === null ? null : Math.max(0, Math.round(clock - lastEventClock)) };
   };
+  const snapshotActivity = () => {
+    if (activity) return;
+    if (taskStartedClock !== null && taskElapsedMs === null) taskElapsedMs = Math.max(0, Math.round(performance.now() - taskStartedClock));
+    activity = currentActivity();
+  };
+  // CWR consumes the public runtime's events, not the acpx CLI's event log.
+  // One bounded snapshot per request, coalesced at 250ms, survives a killed
+  // host without retaining thought/tool payloads. No timer invents activity.
+  // Telemetry I/O is optional: one failure stops retries and is reported in the
+  // terminal receipt; required binding/receipt writes retain their own gates.
+  const scheduleActivity = () => {
+    if (!activityEnabled || activity || activityWarning) return;
+    activityDirty = true;
+    if (activityTimer || activityWrite) return;
+    activityTimer = setTimeout(() => { activityTimer = null; void publishActivity(); }, 250);
+  };
+  const publishActivity = async () => {
+    if (!activityEnabled || activityWarning) return;
+    while (activityWrite) await activityWrite;
+    if (activityWarning) return;
+    clearTimeout(activityTimer); activityTimer = null; activityDirty = false;
+    const value = {
+      schema: 'cwr.acp.activity/1', session_id: binding.id, request_id: requestId,
+      route: binding.route, started_at: startedAt,
+      execution_fingerprint: binding.executionIdentity?.fingerprint ?? binding.routeFingerprint ?? null,
+      acpx_record_id: handle?.acpxRecordId ?? null, acp_session_id: handle?.backendSessionId ?? null,
+      prompt_started_at: promptStartedAt, transport_state: transportState, frozen: activity !== null,
+      activity: activity ?? currentActivity(),
+    };
+    activityWrite = atomicJSON(path.join(p.activity, `${requestId}.json`), value)
+      .catch(() => { activityWarning = 'ACTIVITY_PERSISTENCE_FAILED'; })
+      .finally(() => { activityWrite = null; if (activityDirty) scheduleActivity(); });
+    await activityWrite;
+  };
+  const freezeActivity = () => {
+    snapshotActivity();
+    clearTimeout(activityTimer); activityTimer = null;
+    // Freeze synchronously, then publish alongside cancellation/cleanup. Slow
+    // optional I/O cannot delay either control action or reset the task clock.
+    finalActivityWrite ??= deadline(publishActivity(), cleanupMs, 'ACTIVITY_PERSISTENCE_TIMEOUT')
+      .catch(() => { activityWarning = 'ACTIVITY_PERSISTENCE_FAILED'; });
+  };
+  const settleAcknowledgement = () => acknowledgementDrain ??= deadline(
+    acknowledgementWrite ?? Promise.resolve(), cleanupMs, 'ACK_PERSISTENCE_TIMEOUT');
   // A bounded, nonthrowing observation collector for THIS turn. It mirrors only
   // verified structured runtime fields and never changes the terminal result.
   const observations = createObservationCollector({ requestId, now });
   const observe = async () => {
-    for await (const event of turn.events) {
+    if (!turn.events || typeof turn.events[Symbol.asyncIterator] !== 'function') {
+      transportState = 'absent'; scheduleActivity();
+      throw new Fault('EVENT_STREAM_UNAVAILABLE', 'The runtime did not provide its event stream.');
+    }
+    transportState = 'awaiting_events'; scheduleActivity();
+    try { for await (const event of turn.events) {
       if (!acceptingEvents) return;
       eventCount++;
       lastEventAt = now(); firstEventAt ??= lastEventAt; lastEventClock = performance.now();
       // Copy only a fixed event category; producer-controlled tags, names,
       // messages, tool data and paths never enter the activity evidence.
       lastEventType = EVENT_TYPES.has(event.type) ? event.type : 'other';
+      if (!activity) { transportState = 'observed'; scheduleActivity(); }
       // Never dump thought/tool payloads into the coordinating model's context.
       if (event.type === 'text_delta' && event.stream !== 'thought' && event.tag !== 'agent_thought_chunk' && typeof event.text === 'string') {
         excerpt += event.text;
@@ -218,6 +268,11 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
         }
       }
       if (observer) await observer(event, turn);
+    } } catch (error) {
+      if (!activity) { transportState = 'failed'; scheduleActivity(); }
+      throw error;
+    } finally {
+      if (!activity && transportState !== 'failed') { transportState = 'ended'; scheduleActivity(); }
     }
   };
   try {
@@ -255,6 +310,8 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     // terminal outcome below.
     binding.active_turn = { request_id: requestId, started_at: startedAt };
     await atomicJSON(p.binding, binding);
+    activityEnabled = true;
+    void publishActivity();
     // Re-check after the durable marker write: a cancellation that arrived while we
     // persisted the marker must still prevent the prompt (the abort listener inside
     // startTurn is registered too late to observe an already-aborted signal).
@@ -282,9 +339,22 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     // The budget starts only after the public prompt-written acknowledgement
     // and includes canonical result finalization. Stream drain has a separate
     // bounded allowance; no losing Promise callback can overwrite terminal.
-    const resultValue = await deadline(Promise.race([result, streamFailure]), selection.route.timeoutMs, 'TURN_TIMEOUT', signal);
+    // The canonical binding records prompt acknowledgement even when optional
+    // activity storage is unavailable. Persist a stable snapshot concurrently:
+    // a held write cannot delay deadline cancellation, and its failure cannot
+    // leave an abandoned task timer. Later binding writes must await settlement.
+    binding.active_turn.prompt_started_at = promptStartedAt;
+    acknowledgementSettled = false;
+    acknowledgementWrite = atomicJSON(p.binding, structuredClone(binding));
+    acknowledgementWrite.then(() => { acknowledgementSettled = true; }, () => { acknowledgementSettled = true; });
+    const acknowledgementFailure = new Promise((_, reject) => { acknowledgementWrite.catch(reject); });
+    acknowledgementFailure.catch(() => {});
+    void publishActivity();
+    const remainingTaskMs = Math.max(0, Math.ceil(selection.route.timeoutMs - (performance.now() - taskStartedClock)));
+    const resultValue = await deadline(Promise.race([result, streamFailure, acknowledgementFailure]), remainingTaskMs, 'TURN_TIMEOUT', signal);
     taskElapsedMs = Math.max(0, Math.round(performance.now() - taskStartedClock));
     await deadline(stream, cleanupMs, 'STREAM_TIMEOUT', signal);
+    await settleAcknowledgement();
     terminal = resultValue;
     if (!terminal || !['completed','cancelled','failed'].includes(terminal.status))
       throw new Fault('BAD_TERMINAL_RESULT', 'Missing canonical runtime result.');
@@ -300,7 +370,8 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     // Decide BEFORE asynchronous cancellation/cleanup. A later abort or late
     // runtime success must never rewrite a deadline/error that already won.
     terminal = { status: ['CANCEL_REQUESTED', 'CANCELLED_BEFORE_START'].includes(e.code) ? 'cancelled' : 'failed', error: { code: safeCode(e) } };
-    snapshotActivity();
+    freezeActivity();
+    settleAcknowledgement().catch(() => {});
     if (turn) {
       await deadline(Promise.resolve().then(() => turn.cancel({ reason: 'integration interrupted or failed' })), cleanupMs, 'CANCEL_TIMEOUT').catch(() => {});
       // cancel() acknowledges a request; wait separately for the turn to settle.
@@ -308,7 +379,8 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
       await deadline(Promise.resolve().then(() => turn.closeStream()), cleanupMs, 'STREAM_CLOSE_TIMEOUT').catch(() => {});
     }
   } finally {
-    snapshotActivity();
+    freezeActivity();
+    settleAcknowledgement().catch(() => {});
     hooks.stopAdmission();
     acceptingEvents = false;
     // The turn has settled (any terminal outcome). Clear the active-turn marker so
@@ -322,6 +394,12 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
       cleanup = hooks.liveSize() === 0 && hooks.admittedSize() === 0 && initSettled && turnSettled ? 'confirmed' : 'unconfirmed';
     } catch (e) { caught ??= e; cleanup = 'unconfirmed'; }
   }
+  await Promise.all([finalActivityWrite, settleAcknowledgement().catch(() => {})]);
+  // An unsettled earlier binding write must never race a final binding update
+  // or allow the CLI to release ownership. The exact terminal receipt remains
+  // recoverable through the original active marker even if this write lands late.
+  const canFinalizeBinding = acknowledgementSettled;
+  if (!canFinalizeBinding) cleanup = 'unconfirmed';
   // A completion signal is runtime evidence, not engineering acceptance.
   // Capture ONLY verified structured runtime fields for the terminal outcome. The
   // collector never parses prose and never fabricates an HTTP status; this cannot
@@ -344,7 +422,7 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
     budget: { setup_ms: setupMs, task_ms: selection.route.timeoutMs, prompt_started_at: promptStartedAt,
       task_deadline_at: promptStartedAt === null ? null : new Date(Date.parse(promptStartedAt) + selection.route.timeoutMs).toISOString(),
       task_elapsed_ms: taskElapsedMs },
-    activity,
+    activity, activity_warning: activityWarning,
     acpx_record_id: handle?.acpxRecordId ?? null,
     acp_session_id: handle?.backendSessionId ?? null,
     agent_session_id: binding.handle?.agentSessionId ?? null,
@@ -374,8 +452,9 @@ export async function executeTurn({ config, selection, binding, text, isNew, acp
   binding.lastReceipt = receipt.receipt_path;
   binding.lastStatus = receipt.runtime_status;
   binding.cleanup = cleanup;
-  // Persist the marker cleared during terminal cleanup.
-  await atomicJSON(p.binding, binding);
+  // Persist the marker cleared during terminal cleanup only after every prior
+  // binding write has settled. Otherwise retain it and the unconfirmed locks.
+  if (canFinalizeBinding) await atomicJSON(p.binding, binding);
   // OPTIONAL delivery collection for this turn. It is written to its own
   // per-request sidecar, never into the receipt: a missing/oversized/malformed
   // block is recorded as an explicit worker status and can never change

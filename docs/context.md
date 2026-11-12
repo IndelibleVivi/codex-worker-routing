@@ -9,6 +9,13 @@ AGENTS 的优先级也不意味着旧文本从 provider 请求里消失。
 注入 root。临时 child 的新工单不继承父对话，因此不复制这份 root 上下文。
 主 agent 保护工单，worker 遵守允许读写的工程范围。
 
+当前安装的 matcher 与 loader 接受 `startup`、`resume`、`clear`、`compact`。
+[Codex Hooks 官方文档](https://learn.chatgpt.com/docs/hooks#sessionstart) 还定义了
+分叉线程使用的 `source: "fork"`。本集成不会在该事件上重新加载私人文件；分叉中
+已经复制的历史由宿主另行决定。原生检查尚未覆盖 root 线程分叉，加入此事件前需
+同时验证分叉 root 的首次请求与 child 隐私边界。它与控制历史的 `fork_turns` 选项
+属于不同接口。
+
 原生合成检查使用真实 Codex 进程和本机模型协议替身，验证长文本进入首次 root
 请求；工程规则进入 child；root 私人和模拟 recall 标记不进入 child；同一 child
 的 followup 保持边界；两个完成信号都得到 interrupt。

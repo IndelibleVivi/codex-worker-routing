@@ -12,6 +12,14 @@ child work order does not inherit the parent conversation, so it does not copy
 that root context. The main agent protects the work order; workers stay within
 the engineering scope they are allowed to read and change.
 
+The installed matcher and loader currently accept `startup`, `resume`, `clear`
+and `compact`. Current [Codex Hooks documentation](https://learn.chatgpt.com/docs/hooks#sessionstart)
+also defines `source: "fork"` for a forked thread. This integration does not reload
+the private file on that event; any history already copied into the fork is a
+separate host behavior. The native probe does not cover root-thread forks yet.
+Adding that event requires checking the first forked-root request and the child
+privacy boundary together. It is distinct from the `fork_turns` history option.
+
 The native synthetic probe uses a real Codex process and a local model-protocol
 fixture. It checks that long text reaches the first root request, engineering
 rules reach the child, private root and simulated-recall markers do not reach
